@@ -91,7 +91,7 @@ export const AddCompose = ({ environmentId, projectName }: Props) => {
 		defaultValues: {
 			name: "",
 			description: "",
-			composeType: "docker-compose",
+			composeType: "nomad",
 			appName: `${slug}-`,
 		},
 		resolver: zodResolver(AddComposeSchema),

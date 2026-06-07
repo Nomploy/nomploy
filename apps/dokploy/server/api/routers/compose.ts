@@ -648,6 +648,7 @@ export const composeRouter = createTRPCRouter({
 				name: input.id,
 				sourceType: "raw",
 				appName: appName,
+				composeType: "nomad",
 				isolatedDeployment: template.config.config?.isolated !== false,
 			});
 

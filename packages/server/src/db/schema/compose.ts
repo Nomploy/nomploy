@@ -47,7 +47,7 @@ export const compose = pgTable("compose", {
 	composeFile: text("composeFile").notNull().default(""),
 	refreshToken: text("refreshToken").$defaultFn(() => nanoid()),
 	sourceType: sourceTypeCompose("sourceType").notNull().default("github"),
-	composeType: composeType("composeType").notNull().default("docker-compose"),
+	composeType: composeType("composeType").notNull().default("nomad"),
 	// Github
 	repository: text("repository"),
 	owner: text("owner"),
