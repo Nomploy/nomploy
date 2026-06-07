@@ -10,12 +10,16 @@ interface Props {
 	id: string;
 	containerId?: string;
 	serverId?: string;
+	wsPath?: string;
+	taskName?: string;
 }
 
 export const DockerTerminal: React.FC<Props> = ({
 	id,
 	containerId,
 	serverId,
+	wsPath,
+	taskName,
 }) => {
 	const termRef = useRef(null);
 	const [activeWay, setActiveWay] = React.useState<string | undefined>("bash");
@@ -38,17 +42,23 @@ export const DockerTerminal: React.FC<Props> = ({
 		const addonFit = new FitAddon();
 		const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 
-		const wsUrl = `${protocol}//${window.location.host}/docker-container-terminal?containerId=${containerId}&activeWay=${activeWay}${serverId ? `&serverId=${serverId}` : ""}`;
+		const wsUrl = wsPath === "/nomad-terminal"
+			? `${protocol}//${window.location.host}/nomad-terminal?allocId=${containerId}&taskName=${taskName}&activeWay=${activeWay}`
+			: `${protocol}//${window.location.host}/docker-container-terminal?containerId=${containerId}&activeWay=${activeWay}${serverId ? `&serverId=${serverId}` : ""}`;
 
 		const ws = new WebSocket(wsUrl);
 
-		const addonAttach = new AttachAddon(ws);
 		// @ts-ignore
 		term.open(termRef.current);
 		// @ts-ignore
 		term.loadAddon(addonFit);
-		term.loadAddon(addonAttach);
 		addonFit.fit();
+
+		ws.onopen = () => {
+			const addonAttach = new AttachAddon(ws);
+			term.loadAddon(addonAttach);
+		};
+
 		return () => {
 			ws.readyState === WebSocket.OPEN && ws.close();
 		};

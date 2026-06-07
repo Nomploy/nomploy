@@ -18,6 +18,7 @@ import next from "next";
 import packageInfo from "../package.json";
 import { setupDockerContainerLogsWebSocketServer } from "./wss/docker-container-logs";
 import { setupDockerContainerTerminalWebSocketServer } from "./wss/docker-container-terminal";
+import { setupNomadTerminalWebSocketServer } from "./wss/nomad-terminal";
 import { setupDockerStatsMonitoringSocketServer } from "./wss/docker-stats";
 import { setupDrawerLogsWebSocketServer } from "./wss/drawer-logs";
 import { setupDeploymentLogsWebSocketServer } from "./wss/listen-deployment";
@@ -51,6 +52,7 @@ void app.prepare().then(async () => {
 		setupDeploymentLogsWebSocketServer(server);
 		setupDockerContainerLogsWebSocketServer(server);
 		setupDockerContainerTerminalWebSocketServer(server);
+		setupNomadTerminalWebSocketServer(server);
 		setupTerminalWebSocketServer(server);
 		if (!IS_CLOUD) {
 			setupDockerStatsMonitoringSocketServer(server);

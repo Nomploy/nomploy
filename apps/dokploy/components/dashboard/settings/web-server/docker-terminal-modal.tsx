@@ -39,7 +39,7 @@ interface Props {
 	appName: string;
 	children?: React.ReactNode;
 	serverId?: string;
-	appType?: "stack" | "docker-compose";
+	appType?: "stack" | "docker-compose" | "nomad";
 }
 
 export const DockerTerminalModal = ({
@@ -48,6 +48,8 @@ export const DockerTerminalModal = ({
 	serverId,
 	appType,
 }: Props) => {
+	const isNomad = appType === "nomad";
+
 	const { data, isPending } = api.docker.getContainersByAppNameMatch.useQuery(
 		{
 			appName,
@@ -55,11 +57,18 @@ export const DockerTerminalModal = ({
 			serverId,
 		},
 		{
-			enabled: !!appName,
+			enabled: !!appName && !isNomad,
 		},
 	);
 
+	const { data: nomadAllocs, isPending: nomadPending } = api.nomad.getJobAllocations.useQuery(
+		{ jobId: appName },
+		{ enabled: !!appName && isNomad },
+	);
+
 	const [containerId, setContainerId] = useState<string | undefined>();
+	const [nomadAllocId, setNomadAllocId] = useState<string | undefined>();
+	const [nomadTaskName, setNomadTaskName] = useState<string | undefined>();
 	const [mainDialogOpen, setMainDialogOpen] = useState(false);
 	const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
 
@@ -81,10 +90,16 @@ export const DockerTerminalModal = ({
 	};
 
 	useEffect(() => {
-		if (data && data?.length > 0) {
+		if (isNomad && nomadAllocs) {
+			const running = nomadAllocs.filter((a: any) => a.ClientStatus === "running");
+			if (running.length > 0) {
+				setNomadAllocId(running[0].ID);
+				setNomadTaskName(running[0].TaskGroup);
+			}
+		} else if (data && data?.length > 0) {
 			setContainerId(data[0]?.containerId);
 		}
-	}, [data]);
+	}, [data, nomadAllocs, isNomad]);
 
 	return (
 		<Dialog open={mainDialogOpen} onOpenChange={handleMainDialogOpenChange}>
@@ -94,43 +109,76 @@ export const DockerTerminalModal = ({
 				onEscapeKeyDown={(event) => event.preventDefault()}
 			>
 				<DialogHeader>
-					<DialogTitle>Docker Terminal</DialogTitle>
+					<DialogTitle>{isNomad ? "Nomad" : "Docker"} Terminal</DialogTitle>
 					<DialogDescription>
-						Easy way to access to docker container
+						Easy way to access to {isNomad ? "nomad allocation" : "docker container"}
 					</DialogDescription>
 				</DialogHeader>
-				<Select onValueChange={setContainerId} value={containerId}>
-					<SelectTrigger>
-						{isPending ? (
-							<div className="flex flex-row gap-2 items-center justify-center text-sm text-muted-foreground">
-								<span>Loading...</span>
-								<Loader2 className="animate-spin size-4" />
-							</div>
-						) : (
-							<SelectValue placeholder="Select a container" />
-						)}
-					</SelectTrigger>
-					<SelectContent>
-						<SelectGroup>
-							{data?.map((container) => (
-								<SelectItem
-									key={container.containerId}
-									value={container.containerId}
-								>
-									{container.name} ({container.containerId}){" "}
-									<Badge variant={badgeStateColor(container.state)}>
-										{container.state}
-									</Badge>
-								</SelectItem>
-							))}
-							<SelectLabel>Containers ({data?.length})</SelectLabel>
-						</SelectGroup>
-					</SelectContent>
-				</Select>
+				{isNomad ? (
+					<Select
+						onValueChange={(v) => {
+							const alloc = nomadAllocs?.find((a: any) => a.ID === v);
+							setNomadAllocId(v);
+							if (alloc) setNomadTaskName(alloc.TaskGroup);
+						}}
+						value={nomadAllocId}
+					>
+						<SelectTrigger>
+							{nomadPending ? (
+								<div className="flex flex-row gap-2 items-center justify-center text-sm text-muted-foreground">
+									<span>Loading...</span>
+									<Loader2 className="animate-spin size-4" />
+								</div>
+							) : (
+								<SelectValue placeholder="Select an allocation" />
+							)}
+						</SelectTrigger>
+						<SelectContent>
+							<SelectGroup>
+								{nomadAllocs?.filter((a: any) => a.ClientStatus === "running").map((alloc: any) => (
+									<SelectItem key={alloc.ID} value={alloc.ID}>
+										{alloc.TaskGroup} ({alloc.ID.slice(0, 8)})
+										<Badge variant="default">running</Badge>
+									</SelectItem>
+								))}
+							</SelectGroup>
+						</SelectContent>
+					</Select>
+				) : (
+					<Select onValueChange={setContainerId} value={containerId}>
+						<SelectTrigger>
+							{isPending ? (
+								<div className="flex flex-row gap-2 items-center justify-center text-sm text-muted-foreground">
+									<span>Loading...</span>
+									<Loader2 className="animate-spin size-4" />
+								</div>
+							) : (
+								<SelectValue placeholder="Select a container" />
+							)}
+						</SelectTrigger>
+						<SelectContent>
+							<SelectGroup>
+								{data?.map((container) => (
+									<SelectItem
+										key={container.containerId}
+										value={container.containerId}
+									>
+										{container.name} ({container.containerId}){" "}
+										<Badge variant={badgeStateColor(container.state)}>
+											{container.state}
+										</Badge>
+									</SelectItem>
+								))}
+								<SelectLabel>Containers ({data?.length})</SelectLabel>
+							</SelectGroup>
+						</SelectContent>
+					</Select>
+				)}
 				<Terminal
 					serverId={serverId || ""}
 					id="terminal"
-					containerId={containerId || "select-a-container"}
+					containerId={isNomad ? (nomadAllocId || "select-allocation") : (containerId || "select-a-container")}
+					{...(isNomad && { wsPath: "/nomad-terminal", taskName: nomadTaskName })}
 				/>
 				<Dialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
 					<DialogContent onEscapeKeyDown={(event) => event.preventDefault()}>

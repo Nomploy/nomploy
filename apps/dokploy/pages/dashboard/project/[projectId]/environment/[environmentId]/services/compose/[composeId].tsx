@@ -23,6 +23,7 @@ import { ShowVolumeBackups } from "@/components/dashboard/application/volume-bac
 import { AddCommandCompose } from "@/components/dashboard/compose/advanced/add-command";
 import { IsolatedDeploymentTab } from "@/components/dashboard/compose/advanced/add-isolation";
 import { ShowComposeContainers } from "@/components/dashboard/compose/containers/show-compose-containers";
+import { ShowNomadAllocations } from "@/components/dashboard/nomad/allocations/show-nomad-allocations";
 import { DeleteService } from "@/components/dashboard/compose/delete-service";
 import { ShowGeneralCompose } from "@/components/dashboard/compose/general/show";
 import { ShowDockerLogsCompose } from "@/components/dashboard/compose/logs/show";
@@ -308,11 +309,17 @@ const Service = (
 									{permissions?.service.read && (
 										<TabsContent value="containers">
 											<div className="flex flex-col gap-4 pt-2.5">
-												<ShowComposeContainers
-													serverId={data?.serverId || undefined}
-													appName={data?.appName || ""}
-													appType={data?.composeType || "docker-compose"}
-												/>
+												{data?.composeType === "nomad" ? (
+													<ShowNomadAllocations
+														appName={data?.appName || ""}
+													/>
+												) : (
+													<ShowComposeContainers
+														serverId={data?.serverId || undefined}
+														appName={data?.appName || ""}
+														appType={data?.composeType || "docker-compose"}
+													/>
+												)}
 											</div>
 										</TabsContent>
 									)}
@@ -380,6 +387,10 @@ const Service = (
 														serverId={data?.serverId || ""}
 														appName={data?.appName || ""}
 														appType={data?.composeType || "docker-compose"}
+													/>
+												) : data?.composeType === "nomad" ? (
+													<ShowNomadAllocations
+														appName={data?.appName || ""}
 													/>
 												) : (
 													<ShowDockerLogsStack
