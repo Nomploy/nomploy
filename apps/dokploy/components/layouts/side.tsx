@@ -215,6 +215,14 @@ const MENU: Menu = {
 		},
 		{
 			isSingle: true,
+			title: "Nomad",
+			url: "/dashboard/nomad",
+			icon: PieChart,
+			isEnabled: ({ permissions, isCloud }) =>
+				!!(permissions?.docker.read && !isCloud),
+		},
+		{
+			isSingle: true,
 			title: "Requests",
 			url: "/dashboard/requests",
 			icon: Forward,
