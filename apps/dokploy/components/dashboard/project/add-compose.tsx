@@ -46,7 +46,7 @@ import { api } from "@/utils/api";
 import { APP_NAME_MESSAGE, APP_NAME_REGEX } from "@/utils/schema";
 
 const AddComposeSchema = z.object({
-	composeType: z.enum(["docker-compose", "stack"]).optional(),
+	composeType: z.enum(["docker-compose", "stack", "nomad"]).optional(),
 	name: z.string().min(1, {
 		message: "Name is required",
 	}),
@@ -286,6 +286,7 @@ export const AddCompose = ({ environmentId, projectName }: Props) => {
 												Docker Compose
 											</SelectItem>
 											<SelectItem value="stack">Stack</SelectItem>
+											<SelectItem value="nomad">Nomad</SelectItem>
 										</SelectContent>
 									</Select>
 									<FormMessage />

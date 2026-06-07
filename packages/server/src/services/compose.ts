@@ -8,6 +8,7 @@ import {
 	compose,
 } from "@dokploy/server/db/schema";
 import { getBuildComposeCommand } from "@dokploy/server/utils/builders/compose";
+import { getBuildNomadCommand } from "@dokploy/server/utils/builders/nomad";
 import { randomizeSpecificationFile } from "@dokploy/server/utils/docker/compose";
 import {
 	cloneCompose,
@@ -267,7 +268,11 @@ export const deployCompose = async ({
 		}
 
 		command = "set -e;";
-		command += await getBuildComposeCommand(entity);
+		if (compose.composeType === "nomad") {
+			command += await getBuildNomadCommand(entity);
+		} else {
+			command += await getBuildComposeCommand(entity);
+		}
 		commandWithLog = `(${command}) >> ${deployment.logPath} 2>&1`;
 		if (compose.serverId) {
 			await execAsyncRemote(compose.serverId, commandWithLog);
@@ -381,7 +386,11 @@ export const rebuildCompose = async ({
 		}
 
 		command = "set -e;";
-		command += await getBuildComposeCommand(compose);
+		if (compose.composeType === "nomad") {
+			command += await getBuildNomadCommand(compose);
+		} else {
+			command += await getBuildComposeCommand(compose);
+		}
 		commandWithLog = `(${command}) >> ${deployment.logPath} 2>&1`;
 		if (compose.serverId) {
 			await execAsyncRemote(compose.serverId, commandWithLog);
@@ -427,10 +436,13 @@ export const removeCompose = async (
 		const { COMPOSE_PATH } = paths(!!compose.serverId);
 		const projectPath = join(COMPOSE_PATH, compose.appName);
 
-		if (compose.composeType === "stack") {
+		if (compose.composeType === "stack" || compose.composeType === "nomad") {
+			const stopCmd = compose.composeType === "nomad"
+				? `nomad job stop -purge ${compose.appName}`
+				: `docker network disconnect ${compose.appName} dokploy-traefik;
+			docker stack rm ${compose.appName}`;
 			const command = `
-			docker network disconnect ${compose.appName} dokploy-traefik;
-			docker stack rm ${compose.appName};
+			${stopCmd};
 			rm -rf ${projectPath}`;
 
 			if (compose.serverId) {
@@ -481,6 +493,16 @@ export const startCompose = async (composeId: string) => {
 			}
 		}
 
+		if (compose.composeType === "nomad") {
+			const jobFile = join(projectPath, `${compose.appName}.nomad.hcl`);
+			const cmd = `nomad job run "${jobFile}"`;
+			if (compose.serverId) {
+				await execAsyncRemote(compose.serverId, cmd);
+			} else {
+				await execAsync(cmd);
+			}
+		}
+
 		await updateCompose(composeId, {
 			composeStatus: "done",
 		});
@@ -516,14 +538,14 @@ export const stopCompose = async (composeId: string) => {
 			}
 		}
 
-		if (compose.composeType === "stack") {
+		if (compose.composeType === "stack" || compose.composeType === "nomad") {
+			const stopCmd = compose.composeType === "nomad"
+				? `nomad job stop ${compose.appName}`
+				: `docker stack rm ${compose.appName}`;
 			if (compose.serverId) {
-				await execAsyncRemote(
-					compose.serverId,
-					`docker stack rm ${compose.appName}`,
-				);
+				await execAsyncRemote(compose.serverId, stopCmd);
 			} else {
-				await execAsync(`docker stack rm ${compose.appName}`);
+				await execAsync(stopCmd);
 			}
 		}
 

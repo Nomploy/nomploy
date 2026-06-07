@@ -54,7 +54,8 @@ Compose Type: ${composeType} ✅`;
 		cd "${projectPath}";
 
 		${compose.isolatedDeployment ? `docker network inspect ${compose.appName} >/dev/null 2>&1 || docker network create ${compose.composeType === "stack" ? "--driver overlay" : ""} --attachable ${compose.appName}` : ""}
-		env -i PATH="$PATH" HOME="$HOME" ${exportEnvCommand} docker ${command.split(" ").join(" ")} 2>&1 || { echo "Error: ❌ Docker command failed"; exit 1; }
+		${exportEnvCommand}
+		docker ${command.split(" ").join(" ")} 2>&1 || { echo "Error: ❌ Docker command failed"; exit 1; }
 		${compose.isolatedDeployment ? `docker network connect ${compose.appName} $(docker ps --filter "name=dokploy-traefik" -q) >/dev/null 2>&1` : ""}
 
 		echo "Docker Compose Deployed: ✅";
@@ -130,16 +131,18 @@ echo "${encodedContent}" | base64 -d > "${envFilePath}";
 };
 
 const getExportEnvCommand = (compose: ComposeNested) => {
-	if (compose.composeType !== "stack") return "";
+	const needsExport =
+		compose.composeType === "stack" ||
+		(!!compose.command && /\bstack\b/.test(compose.command));
+	if (!needsExport) return "";
 
 	const envVars = getEnvironmentVariablesObject(
 		compose.env,
 		compose.environment.project.env,
 		compose.environment.env,
 	);
-	const exports = Object.entries(envVars)
-		.map(([key, value]) => `${key}=${quote([value])}`)
-		.join(" ");
+	const lines = Object.entries(envVars)
+		.map(([key, value]) => `export ${key}=${quote([value])}`);
 
-	return exports ? `${exports}` : "";
+	return lines.length ? lines.join("\n") : "";
 };

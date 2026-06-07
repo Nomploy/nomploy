@@ -54,7 +54,7 @@ const DockerLogsId = dynamic(
 interface Props {
 	appName: string;
 	serverId?: string;
-	appType: "stack" | "docker-compose";
+	appType: "stack" | "docker-compose" | "nomad";
 }
 
 export const ShowComposeContainers = ({

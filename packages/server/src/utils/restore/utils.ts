@@ -35,7 +35,7 @@ export const getMongoRestoreCommand = (
 
 export const getComposeSearchCommand = (
 	appName: string,
-	type: "stack" | "docker-compose" | "database",
+	type: "stack" | "docker-compose" | "nomad" | "database",
 	serviceName?: string,
 ) => {
 	if (type === "database") {
@@ -97,7 +97,7 @@ rm -rf ${tempDir}
 interface RestoreOptions {
 	appName: string;
 	type: "postgres" | "mariadb" | "mysql" | "mongo";
-	restoreType: "stack" | "docker-compose" | "database";
+	restoreType: "stack" | "docker-compose" | "nomad" | "database";
 	credentials: DatabaseCredentials;
 	serviceName?: string;
 	rcloneCommand: string;

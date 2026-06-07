@@ -27,7 +27,11 @@ export const sourceTypeCompose = pgEnum("sourceTypeCompose", [
 	"raw",
 ]);
 
-export const composeType = pgEnum("composeType", ["docker-compose", "stack"]);
+export const composeType = pgEnum("composeType", [
+	"docker-compose",
+	"stack",
+	"nomad",
+]);
 
 export const compose = pgTable("compose", {
 	composeId: text("composeId")
@@ -162,7 +166,7 @@ const createSchema = createInsertSchema(compose, {
 	customGitSSHKeyId: z.string().optional(),
 	command: z.string().optional(),
 	composePath: z.string().min(1),
-	composeType: z.enum(["docker-compose", "stack"]).optional(),
+	composeType: z.enum(["docker-compose", "stack", "nomad"]).optional(),
 	watchPaths: z.array(z.string()).optional(),
 	sourceType: z
 		.enum(["git", "github", "gitlab", "bitbucket", "gitea", "raw"])

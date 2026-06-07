@@ -97,6 +97,10 @@ export const server = pgTable("server", {
 				},
 			},
 		}),
+	nomadAddress: text("nomadAddress"),
+	nomadToken: text("nomadToken"),
+	nomadNamespace: text("nomadNamespace").default("default"),
+	registryUrl: text("registryUrl"),
 });
 
 export const serverRelations = relations(server, ({ one, many }) => ({
@@ -174,6 +178,10 @@ export const apiUpdateServer = createSchema
 	.required()
 	.extend({
 		command: z.string().optional(),
+		nomadAddress: z.string().optional(),
+		nomadToken: z.string().optional(),
+		nomadNamespace: z.string().optional(),
+		registryUrl: z.string().optional(),
 	});
 
 export const apiUpdateServerMonitoring = createSchema
