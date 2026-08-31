@@ -1,0 +1,10 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+<style>
+  :root { color-scheme: light dark; }
+  path { fill: black; }
+  @media (prefers-color-scheme: dark) {
+    path { fill: white; }
+  }
+</style>
+<path d="M20 100 L20 20 L38 20 L82 74 L82 20 L100 20 L100 100 L82 100 L38 46 L38 100 Z"/>
+</svg>

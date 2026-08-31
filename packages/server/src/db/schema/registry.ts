@@ -1,0 +1,130 @@
+import { relations } from "drizzle-orm";
+import { pgEnum, pgTable, text } from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
+import { nanoid } from "nanoid";
+import { z } from "zod";
+import { organization } from "./account";
+import { applications } from "./application";
+/**
+ * This is an example of how to use the multi-project schema feature of Drizzle ORM. Use the same
+ * database instance for multiple projects.
+ *
+ * @see https://orm.drizzle.team/docs/goodies#multi-project-schema
+ */
+export const registryType = pgEnum("RegistryType", ["selfHosted", "cloud"]);
+
+export const registry = pgTable("registry", {
+	registryId: text("registryId")
+		.notNull()
+		.primaryKey()
+		.$defaultFn(() => nanoid()),
+	registryName: text("registryName").notNull(),
+	imagePrefix: text("imagePrefix"),
+	username: text("username").notNull(),
+	password: text("password").notNull(),
+	registryUrl: text("registryUrl").notNull().default(""),
+	createdAt: text("createdAt")
+		.notNull()
+		.$defaultFn(() => new Date().toISOString()),
+	registryType: registryType("selfHosted").notNull().default("cloud"),
+	organizationId: text("organizationId")
+		.notNull()
+		.references(() => organization.id, { onDelete: "cascade" }),
+});
+
+export const registryRelations = relations(registry, ({ many }) => ({
+	applications: many(applications, {
+		relationName: "applicationRegistry",
+	}),
+	buildApplications: many(applications, {
+		relationName: "applicationBuildRegistry",
+	}),
+	rollbackApplications: many(applications, {
+		relationName: "applicationRollbackRegistry",
+	}),
+}));
+
+// Image references require a lowercase namespace (e.g. Docker Hub username).
+const registryUsernameSchema = z
+	.string()
+	.trim()
+	.min(1)
+	.transform((s) => s.toLowerCase());
+
+// Registry URLs must be hostname[:port] only — no shell metacharacters
+// Empty string is allowed (means default/Docker Hub registry)
+const registryUrlSchema = z
+	.string()
+	.refine(
+		(val) =>
+			val === "" ||
+			/^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?(:\d{1,5})?$/.test(val),
+		"Registry URL must be a valid hostname or hostname:port (e.g. registry.example.com or localhost:5000)",
+	);
+
+const createSchema = createInsertSchema(registry, {
+	registryName: z.string().min(1),
+	username: registryUsernameSchema,
+	password: z.string().min(1),
+	registryUrl: registryUrlSchema,
+	organizationId: z.string().min(1),
+	registryId: z.string().min(1),
+	registryType: z.enum(["cloud"]),
+	imagePrefix: z.string().nullable().optional(),
+});
+
+export const apiCreateRegistry = createSchema
+	.pick({})
+	.extend({
+		registryName: z.string().min(1),
+		username: registryUsernameSchema,
+		password: z.string().min(1),
+		registryUrl: registryUrlSchema,
+		registryType: z.enum(["cloud"]),
+		imagePrefix: z.string().nullable().optional(),
+	})
+	.required()
+	.extend({
+		serverId: z.string().optional(),
+	});
+
+export const apiTestRegistry = createSchema.pick({}).extend({
+	registryName: z.string().optional(),
+	username: registryUsernameSchema,
+	password: z.string().min(1),
+	registryUrl: registryUrlSchema,
+	registryType: z.enum(["cloud"]),
+	imagePrefix: z.string().nullable().optional(),
+	serverId: z.string().optional(),
+});
+
+export const apiTestRegistryById = createSchema
+	.pick({
+		registryId: true,
+	})
+	.extend({
+		serverId: z.string().optional(),
+	});
+
+export const apiRemoveRegistry = createSchema
+	.pick({
+		registryId: true,
+	})
+	.required();
+
+export const apiFindOneRegistry = z.object({
+	registryId: z.string().min(1),
+});
+
+export const apiUpdateRegistry = createSchema.partial().extend({
+	registryId: z.string().min(1),
+	serverId: z.string().optional(),
+});
+
+export const apiEnableSelfHostedRegistry = createSchema
+	.pick({
+		registryUrl: true,
+		username: true,
+		password: true,
+	})
+	.required();

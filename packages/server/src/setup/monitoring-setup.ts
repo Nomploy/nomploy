@@ -1,0 +1,154 @@
+import { findServerById } from "@nomploy/server/services/server";
+import { getWebServerSettings } from "@nomploy/server/services/web-server-settings";
+import type { ContainerCreateOptions } from "dockerode";
+import { IS_CLOUD } from "../constants";
+import { getNomployImageTag } from "../services/settings";
+import { pullImage, pullRemoteImage } from "../utils/docker/utils";
+import { execAsync, execAsyncRemote } from "../utils/process/execAsync";
+import { getRemoteDocker } from "../utils/servers/remote-docker";
+
+export const setupMonitoring = async (serverId: string) => {
+	const server = await findServerById(serverId);
+
+	const containerName = "nomploy-monitoring";
+	let imageName = "nomploy/monitoring:latest";
+
+	if (
+		(getNomployImageTag() !== "latest" ||
+			process.env.NODE_ENV === "development") &&
+		!IS_CLOUD
+	) {
+		imageName = "nomploy/monitoring:canary";
+	}
+
+	const settings: ContainerCreateOptions = {
+		name: containerName,
+		Env: [`METRICS_CONFIG=${JSON.stringify(server?.metricsConfig)}`],
+		Image: imageName,
+		HostConfig: {
+			// Memory: 100 * 1024 * 1024, // 100MB en bytes
+			// PidMode: "host",
+			// CapAdd: ["NET_ADMIN", "SYS_ADMIN"],
+			// Privileged: true,
+			RestartPolicy: {
+				Name: "always",
+			},
+			PortBindings: {
+				[`${server.metricsConfig.server.port}/tcp`]: [
+					{
+						HostPort: server.metricsConfig.server.port.toString(),
+					},
+				],
+			},
+			Binds: [
+				"/var/run/docker.sock:/var/run/docker.sock:ro",
+				"/sys:/host/sys:ro",
+				"/etc/os-release:/etc/os-release:ro",
+				"/proc:/host/proc:ro",
+				"/etc/nomploy/monitoring/monitoring.db:/app/monitoring.db",
+			],
+			NetworkMode: "host",
+		},
+		ExposedPorts: {
+			[`${server.metricsConfig.server.port}/tcp`]: {},
+		},
+	};
+	const docker = await getRemoteDocker(serverId);
+	try {
+		await execAsyncRemote(
+			serverId,
+			"mkdir -p /etc/nomploy/monitoring && touch /etc/nomploy/monitoring/monitoring.db",
+		);
+		if (serverId) {
+			await pullRemoteImage(imageName, serverId);
+		}
+
+		// Check if container exists
+		const container = docker.getContainer(containerName);
+		try {
+			await container.inspect();
+			await container.remove({ force: true });
+			console.log("Removed existing container");
+		} catch {
+			// Container doesn't exist, continue
+		}
+
+		await docker.createContainer(settings);
+		const newContainer = docker.getContainer(containerName);
+		await newContainer.start();
+
+		console.log("Monitoring Started ");
+	} catch (error) {
+		console.log("Monitoring Not Found: Starting ", error);
+	}
+};
+
+export const setupWebMonitoring = async () => {
+	const webServerSettings = await getWebServerSettings();
+
+	const containerName = "nomploy-monitoring";
+	let imageName = "nomploy/monitoring:latest";
+
+	if (
+		(getNomployImageTag() !== "latest" ||
+			process.env.NODE_ENV === "development") &&
+		!IS_CLOUD
+	) {
+		imageName = "nomploy/monitoring:canary";
+	}
+
+	const settings: ContainerCreateOptions = {
+		name: containerName,
+		Env: [`METRICS_CONFIG=${JSON.stringify(webServerSettings?.metricsConfig)}`],
+		Image: imageName,
+		HostConfig: {
+			// Memory: 100 * 1024 * 1024, // 100MB en bytes
+			// PidMode: "host",
+			// CapAdd: ["NET_ADMIN", "SYS_ADMIN"],
+			// Privileged: true,
+			RestartPolicy: {
+				Name: "always",
+			},
+			PortBindings: {
+				[`${webServerSettings?.metricsConfig?.server?.port}/tcp`]: [
+					{
+						HostPort: webServerSettings?.metricsConfig?.server?.port.toString(),
+					},
+				],
+			},
+			Binds: [
+				"/var/run/docker.sock:/var/run/docker.sock:ro",
+				"/sys:/host/sys:ro",
+				"/etc/os-release:/etc/os-release:ro",
+				"/proc:/host/proc:ro",
+				"/etc/nomploy/monitoring/monitoring.db:/app/monitoring.db",
+			],
+			// NetworkMode: "host",
+		},
+		ExposedPorts: {
+			[`${webServerSettings?.metricsConfig?.server?.port}/tcp`]: {},
+		},
+	};
+	const docker = await getRemoteDocker();
+	try {
+		await execAsync(
+			"mkdir -p /etc/nomploy/monitoring && touch /etc/nomploy/monitoring/monitoring.db",
+		);
+		await pullImage(imageName);
+
+		const container = docker.getContainer(containerName);
+		try {
+			await container.inspect();
+			await container.remove({ force: true });
+			console.log("Removed existing container");
+		} catch {}
+
+		await docker.createContainer(settings);
+		const newContainer = docker.getContainer(containerName);
+		await newContainer.start();
+
+		console.log("Monitoring Started ");
+	} catch (error) {
+		console.log("Monitoring Not Found: Starting ", error);
+	}
+};

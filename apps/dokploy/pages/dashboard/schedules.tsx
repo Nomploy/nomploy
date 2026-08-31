@@ -1,0 +1,50 @@
+import { IS_CLOUD } from "@nomploy/server/constants";
+import { validateRequest } from "@nomploy/server/lib/auth";
+import type { GetServerSidePropsContext } from "next";
+import type { ReactElement } from "react";
+import { ShowSchedules } from "@/components/dashboard/application/schedules/show-schedules";
+import { DashboardLayout } from "@/components/layouts/dashboard-layout";
+import { Card } from "@/components/ui/card";
+
+function SchedulesPage() {
+	return (
+		<div className="w-full">
+			<Card className="h-full bg-sidebar  p-2.5 rounded-xl  max-w-8xl mx-auto min-h-[45vh]">
+				<div className="rounded-xl bg-background shadow-md h-full">
+					<ShowSchedules scheduleType="dokploy-server" id="dokploy-server" />
+				</div>
+			</Card>
+		</div>
+	);
+}
+export default SchedulesPage;
+
+SchedulesPage.getLayout = (page: ReactElement) => {
+	return <DashboardLayout>{page}</DashboardLayout>;
+};
+
+export async function getServerSideProps(
+	ctx: GetServerSidePropsContext<{ serviceId: string }>,
+) {
+	if (IS_CLOUD) {
+		return {
+			redirect: {
+				permanent: false,
+				destination: "/dashboard/home",
+			},
+		};
+	}
+	const { user } = await validateRequest(ctx.req);
+	if (!user || (user.role !== "owner" && user.role !== "admin")) {
+		return {
+			redirect: {
+				permanent: false,
+				destination: "/",
+			},
+		};
+	}
+
+	return {
+		props: {},
+	};
+}

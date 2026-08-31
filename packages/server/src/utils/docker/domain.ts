@@ -1,0 +1,396 @@
+import fs, { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { paths } from "@nomploy/server/constants";
+import type { Compose } from "@nomploy/server/services/compose";
+import type { Domain } from "@nomploy/server/services/domain";
+import { parse, stringify } from "yaml";
+import { execAsyncRemote } from "../process/execAsync";
+import { cloneBitbucketRepository } from "../providers/bitbucket";
+import { cloneGitRepository } from "../providers/git";
+import { cloneGiteaRepository } from "../providers/gitea";
+import { cloneGithubRepository } from "../providers/github";
+import { cloneGitlabRepository } from "../providers/gitlab";
+import { getCreateComposeFileCommand } from "../providers/raw";
+import { randomizeDeployableSpecificationFile } from "./collision";
+import { randomizeSpecificationFile } from "./compose";
+import type {
+	ComposeSpecification,
+	DefinitionsService,
+	PropertiesNetworks,
+} from "./types";
+import { encodeBase64 } from "./utils";
+
+export const cloneCompose = async (compose: Compose) => {
+	let command = "set -e;";
+	const entity = {
+		...compose,
+		type: "compose" as const,
+	};
+	if (compose.sourceType === "github") {
+		command += await cloneGithubRepository(entity);
+	} else if (compose.sourceType === "gitlab") {
+		command += await cloneGitlabRepository(entity);
+	} else if (compose.sourceType === "bitbucket") {
+		command += await cloneBitbucketRepository(entity);
+	} else if (compose.sourceType === "git") {
+		command += await cloneGitRepository(entity);
+	} else if (compose.sourceType === "gitea") {
+		command += await cloneGiteaRepository(entity);
+	} else if (compose.sourceType === "raw") {
+		command += getCreateComposeFileCommand(compose);
+	}
+	return command;
+};
+
+export const getComposePath = (compose: Compose) => {
+	const { COMPOSE_PATH } = paths(!!compose.serverId);
+	const { appName, sourceType, composePath } = compose;
+	let path = "";
+
+	if (sourceType === "raw") {
+		path = "docker-compose.yml";
+	} else {
+		path = composePath;
+	}
+
+	return join(COMPOSE_PATH, appName, "code", path);
+};
+
+export const loadDockerCompose = async (
+	compose: Compose,
+): Promise<ComposeSpecification | null> => {
+	const path = getComposePath(compose);
+
+	if (existsSync(path)) {
+		const yamlStr = readFileSync(path, "utf8");
+		const parsedConfig = parse(yamlStr, {
+			maxAliasCount: 10000,
+		}) as ComposeSpecification;
+		return parsedConfig;
+	}
+	return null;
+};
+
+export const loadDockerComposeRemote = async (
+	compose: Compose,
+): Promise<ComposeSpecification | null> => {
+	const path = getComposePath(compose);
+	try {
+		if (!compose.serverId) {
+			return null;
+		}
+		const { stdout, stderr } = await execAsyncRemote(
+			compose.serverId,
+			`cat ${path}`,
+		);
+
+		if (stderr) {
+			return null;
+		}
+		if (!stdout) return null;
+		const parsedConfig = parse(stdout, {
+			maxAliasCount: 10000,
+		}) as ComposeSpecification;
+		return parsedConfig;
+	} catch {
+		return null;
+	}
+};
+
+export const readComposeFile = async (compose: Compose) => {
+	const path = getComposePath(compose);
+	if (existsSync(path)) {
+		const yamlStr = readFileSync(path, "utf8");
+		return yamlStr;
+	}
+	return null;
+};
+
+export const writeDomainsToCompose = async (
+	compose: Compose,
+	domains: Domain[],
+) => {
+	try {
+		const composeConverted = await addDomainToCompose(compose, domains);
+		const path = getComposePath(compose);
+
+		if (!composeConverted) {
+			return `
+echo "❌ Error: Compose file not found";
+exit 1;
+			`;
+		}
+
+		const composeString = stringify(composeConverted, { lineWidth: 1000 });
+		const encodedContent = encodeBase64(composeString);
+		return `echo "${encodedContent}" | base64 -d > "${path}";`;
+	} catch (error) {
+		// @ts-ignore
+		return `echo "❌ Has occurred an error: ${error?.message || error}";
+exit 1;
+		`;
+	}
+};
+export const addDomainToCompose = async (
+	compose: Compose,
+	domains: Domain[],
+) => {
+	const { appName } = compose;
+
+	let result: ComposeSpecification | null;
+
+	if (compose.serverId) {
+		result = await loadDockerComposeRemote(compose);
+	} else {
+		result = await loadDockerCompose(compose);
+	}
+
+	if (!result) {
+		return null;
+	}
+
+	if (compose.isolatedDeployment) {
+		const randomized = randomizeDeployableSpecificationFile(
+			result,
+			compose.isolatedDeploymentsVolume,
+			compose.suffix || compose.appName,
+		);
+		result = randomized;
+	} else if (compose.randomize) {
+		const randomized = randomizeSpecificationFile(result, compose.suffix);
+		result = randomized;
+	}
+
+	for (const domain of domains) {
+		const { serviceName, https } = domain;
+		if (!serviceName) {
+			throw new Error(`Domain "${domain.host}" is missing a service name`);
+		}
+		if (!result?.services?.[serviceName]) {
+			throw new Error(
+				`Domain "${domain.host}" is attached to service "${serviceName}" which does not exist in the compose`,
+			);
+		}
+
+		const httpLabels = createDomainLabels(
+			appName,
+			domain,
+			domain.customEntrypoint || "web",
+		);
+		if (!domain.customEntrypoint && https) {
+			const httpsLabels = createDomainLabels(appName, domain, "websecure");
+			httpLabels.push(...httpsLabels);
+		}
+
+		let labels: DefinitionsService["labels"] = [];
+		if (compose.composeType === "docker-compose") {
+			if (!result.services[serviceName].labels) {
+				result.services[serviceName].labels = [];
+			}
+
+			labels = result.services[serviceName].labels;
+		} else {
+			// Stack Case
+			if (!result.services[serviceName].deploy) {
+				result.services[serviceName].deploy = {};
+			}
+			if (!result.services[serviceName].deploy.labels) {
+				result.services[serviceName].deploy.labels = [];
+			}
+
+			labels = result.services[serviceName].deploy.labels;
+		}
+
+		if (Array.isArray(labels)) {
+			if (!labels.includes("traefik.enable=true")) {
+				labels.unshift("traefik.enable=true");
+			}
+			labels.unshift(...httpLabels);
+			if (!compose.isolatedDeployment) {
+				if (compose.composeType === "docker-compose") {
+					if (!labels.includes("traefik.docker.network=nomploy-network")) {
+						labels.unshift("traefik.docker.network=nomploy-network");
+					}
+				} else {
+					// Stack Case
+					if (!labels.includes("traefik.swarm.network=nomploy-network")) {
+						labels.unshift("traefik.swarm.network=nomploy-network");
+					}
+				}
+			}
+		}
+
+		if (!compose.isolatedDeployment) {
+			// Add the nomploy-network to the service
+			result.services[serviceName].networks = addNomployNetworkToService(
+				result.services[serviceName].networks,
+			);
+		}
+	}
+
+	// Add nomploy-network to the root of the compose file
+	if (!compose.isolatedDeployment) {
+		result.networks = addNomployNetworkToRoot(result.networks);
+	}
+
+	return result;
+};
+
+export const writeComposeFile = async (
+	compose: Compose,
+	composeSpec: ComposeSpecification,
+) => {
+	const path = getComposePath(compose);
+
+	try {
+		const composeFile = stringify(composeSpec, {
+			lineWidth: 1000,
+		});
+		fs.writeFileSync(path, composeFile, "utf8");
+	} catch (e) {
+		console.error("Error saving the YAML config file:", e);
+	}
+};
+
+export const createDomainLabels = (
+	appName: string,
+	domain: Domain,
+	entrypoint: string,
+) => {
+	const {
+		host,
+		port,
+		customEntrypoint,
+		https,
+		uniqueConfigKey,
+		certificateType,
+		path,
+		customCertResolver,
+		stripPath,
+		internalPath,
+	} = domain;
+	const routerName = `${appName}-${uniqueConfigKey}-${entrypoint}`;
+	const labels = [
+		`traefik.http.routers.${routerName}.rule=Host(\`${host}\`)${path && path !== "/" ? ` && PathPrefix(\`${path}\`)` : ""}`,
+		`traefik.http.routers.${routerName}.entrypoints=${entrypoint}`,
+		`traefik.http.services.${routerName}.loadbalancer.server.port=${port}`,
+		`traefik.http.routers.${routerName}.service=${routerName}`,
+	];
+
+	// Collect middlewares for this router
+	const middlewares: string[] = [];
+	const isRedirectRouter = entrypoint === "web" && https && !customEntrypoint;
+
+	// Web router with HTTPS only needs redirect — all other middlewares
+	// run on the websecure router where the request actually lands.
+	if (isRedirectRouter) {
+		middlewares.push("redirect-to-https@file");
+	}
+
+	// Add stripPath middleware if needed
+	if (stripPath && path && path !== "/") {
+		const middlewareName = `stripprefix-${appName}-${uniqueConfigKey}`;
+		// Define middleware on web (or custom) entrypoint so Traefik registers it
+		if (entrypoint === "web" || customEntrypoint) {
+			labels.push(
+				`traefik.http.middlewares.${middlewareName}.stripprefix.prefixes=${path}`,
+			);
+		}
+		if (!isRedirectRouter) {
+			middlewares.push(middlewareName);
+		}
+	}
+
+	// Add internalPath middleware if needed
+	if (internalPath && internalPath !== "/" && internalPath.startsWith("/")) {
+		const middlewareName = `addprefix-${appName}-${uniqueConfigKey}`;
+		// Define middleware on web (or custom) entrypoint so Traefik registers it
+		if (entrypoint === "web" || customEntrypoint) {
+			labels.push(
+				`traefik.http.middlewares.${middlewareName}.addprefix.prefix=${internalPath}`,
+			);
+		}
+		if (!isRedirectRouter) {
+			middlewares.push(middlewareName);
+		}
+	}
+
+	// Add custom middlewares (skip for redirect-only router)
+	if (!isRedirectRouter && domain.middlewares?.length) {
+		middlewares.push(...domain.middlewares);
+	}
+
+	// Apply middlewares to router if any exist
+	if (middlewares.length > 0) {
+		labels.push(
+			`traefik.http.routers.${routerName}.middlewares=${middlewares.join(",")}`,
+		);
+	}
+
+	// Add TLS configuration for websecure
+	if (entrypoint === "websecure" || (customEntrypoint && https)) {
+		if (certificateType === "letsencrypt") {
+			labels.push(
+				`traefik.http.routers.${routerName}.tls.certresolver=letsencrypt`,
+			);
+		} else if (certificateType === "custom" && customCertResolver) {
+			labels.push(
+				`traefik.http.routers.${routerName}.tls.certresolver=${customCertResolver}`,
+			);
+		} else if (certificateType === "none" && https) {
+			// No cert resolver, but HTTPS is enabled (default/custom certificate):
+			// explicitly enable TLS so Traefik serves the router over HTTPS.
+			labels.push(`traefik.http.routers.${routerName}.tls=true`);
+		}
+	}
+
+	return labels;
+};
+
+export const addNomployNetworkToService = (
+	networkService: DefinitionsService["networks"],
+) => {
+	let networks = networkService;
+	const network = "nomploy-network";
+	const defaultNetwork = "default";
+	if (!networks) {
+		networks = [];
+	}
+
+	if (Array.isArray(networks)) {
+		if (!networks.includes(network)) {
+			networks.push(network);
+		}
+		if (!networks.includes(defaultNetwork)) {
+			networks.push(defaultNetwork);
+		}
+	} else if (networks && typeof networks === "object") {
+		if (!(network in networks)) {
+			networks[network] = {};
+		}
+		if (!(defaultNetwork in networks)) {
+			networks[defaultNetwork] = {};
+		}
+	}
+
+	return networks;
+};
+
+export const addNomployNetworkToRoot = (
+	networkRoot: PropertiesNetworks | undefined,
+) => {
+	let networks = networkRoot;
+	const network = "nomploy-network";
+
+	if (!networks) {
+		networks = {};
+	}
+
+	if (networks[network] || !networks[network]) {
+		networks[network] = {
+			external: true,
+		};
+	}
+
+	return networks;
+};

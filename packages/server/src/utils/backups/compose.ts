@@ -1,0 +1,96 @@
+import type { BackupSchedule } from "@nomploy/server/services/backup";
+import type { Compose } from "@nomploy/server/services/compose";
+import {
+	createDeploymentBackup,
+	updateDeploymentStatus,
+} from "@nomploy/server/services/deployment";
+import { findEnvironmentById } from "@nomploy/server/services/environment";
+import { findProjectById } from "@nomploy/server/services/project";
+import { sendDatabaseBackupNotifications } from "../notifications/database-backup";
+import { execAsync, execAsyncRemote } from "../process/execAsync";
+import {
+	getBackupCommand,
+	getBackupTimestamp,
+	getS3Credentials,
+	normalizeS3Path,
+} from "./utils";
+
+export const runComposeBackup = async (
+	compose: Compose,
+	backup: BackupSchedule,
+) => {
+	const { environmentId, name, appName } = compose;
+	const environment = await findEnvironmentById(environmentId);
+	const project = await findProjectById(environment.projectId);
+	const { prefix, databaseType, serviceName } = backup;
+	const destination = backup.destination;
+	const backupFileName = `${getBackupTimestamp()}.${databaseType === "mongo" ? "bson" : "sql"}.gz`;
+	const s3AppName = serviceName ? `${appName}_${serviceName}` : appName;
+	const bucketDestination = `${s3AppName}/${normalizeS3Path(prefix)}${backupFileName}`;
+	const deployment = await createDeploymentBackup({
+		backupId: backup.backupId,
+		title: "Compose Backup",
+		description: "Compose Backup",
+	});
+
+	try {
+		const rcloneFlags = getS3Credentials(destination);
+		const rcloneDestination = `:s3:${destination.bucket}/${bucketDestination}`;
+		const rcloneCommand = `rclone rcat ${rcloneFlags.join(" ")} "${rcloneDestination}"`;
+
+		const backupCommand = getBackupCommand(
+			backup,
+			rcloneCommand,
+			deployment.logPath,
+		);
+		if (compose.serverId) {
+			await execAsyncRemote(compose.serverId, backupCommand);
+		} else {
+			await execAsync(backupCommand, {
+				shell: "/bin/bash",
+			});
+		}
+
+		await sendDatabaseBackupNotifications({
+			applicationName: name,
+			projectName: project.name,
+			databaseType: getDatabaseType(databaseType),
+			type: "success",
+			organizationId: project.organizationId,
+			databaseName: backup.database,
+		});
+
+		await updateDeploymentStatus(deployment.deploymentId, "done");
+	} catch (error) {
+		console.log(error);
+		await sendDatabaseBackupNotifications({
+			applicationName: name,
+			projectName: project.name,
+			databaseType: getDatabaseType(databaseType),
+			type: "error",
+			// @ts-ignore
+			errorMessage: error?.message || "Error message not provided",
+			organizationId: project.organizationId,
+			databaseName: backup.database,
+		});
+
+		await updateDeploymentStatus(deployment.deploymentId, "error");
+		throw error;
+	}
+};
+
+const getDatabaseType = (databaseType: BackupSchedule["databaseType"]) => {
+	if (databaseType === "mongo") {
+		return "mongodb";
+	}
+	if (databaseType === "postgres") {
+		return "postgres";
+	}
+	if (databaseType === "mariadb") {
+		return "mariadb";
+	}
+	if (databaseType === "mysql") {
+		return "mysql";
+	}
+	return "mongodb";
+};

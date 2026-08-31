@@ -1,0 +1,52 @@
+nomploy
+Copyright 2026-present the nomploy contributors
+
+This product is a fork of Dokploy.
+Dokploy — Copyright 2026-present Dokploy Technology, Inc.
+Original project: https://github.com/dokploy/dokploy
+
+nomploy adapts Dokploy to use HashiCorp Nomad as the orchestrator instead of
+Docker Swarm.
+
+--------------------------------------------------------------------------------
+Licensing changes relative to upstream Dokploy
+--------------------------------------------------------------------------------
+
+Upstream Dokploy was dual-licensed:
+  * Most of the code under the Apache License 2.0.
+  * A set of enterprise modules, located in "/proprietary" directories, under
+    the separate "Dokploy Source Available License" (DSAL). That license only
+    permits development/testing use and forbids production use, publishing,
+    distribution, or sale without a commercial agreement.
+
+nomploy does not ship any DSAL-licensed code. The enterprise modules were
+removed and replaced with original, Apache-2.0-licensed implementations that
+either provide a free equivalent or cleanly disable the paid feature. The
+affected areas are:
+
+  * License gating            -> no commercial licensing; the instance always
+                                 runs as the free tier.
+  * Custom RBAC roles         -> only the static roles (owner/admin/member).
+  * Per-member resource scope -> all members can access all servers and git
+                                 providers.
+  * SSO (OIDC / SAML)         -> not shipped; email/password auth is used.
+  * Social login (GitHub/Google) -> not shipped.
+  * Audit logs                -> not shipped (writes are no-ops, reads empty).
+  * White-labeling / branding -> available as a free feature.
+
+The replaced files still live under directories named "proprietary" for now to
+minimize churn; their contents are original nomploy code under Apache-2.0, not
+Dokploy's proprietary code. These directories may be renamed in a later change.
+
+--------------------------------------------------------------------------------
+Modifications
+--------------------------------------------------------------------------------
+
+In addition to the licensing changes above, nomploy adds first-class support
+for deploying to HashiCorp Nomad (compose-to-HCL translation, a Nomad cluster
+dashboard, per-server Nomad configuration, and related setup), and rebrands the
+project as "nomploy".
+
+For all third-party components incorporated into this software, those
+components are licensed under the original license provided by the owner of the
+applicable component.
