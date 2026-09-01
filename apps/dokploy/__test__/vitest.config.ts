@@ -5,7 +5,14 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
 	test: {
 		include: ["__test__/**/*.test.ts"], // Incluir solo los archivos de test en el directorio __test__
-		exclude: ["**/node_modules/**", "**/dist/**", "**/.docker/**"],
+		exclude: [
+			"**/node_modules/**",
+			"**/dist/**",
+			"**/.docker/**",
+			// Real-integration test: clones an examples repo + builds with Docker.
+			// Not run in CI (no examples repo on the fork); run it manually.
+			"**/deploy/application.real.test.ts",
+		],
 		pool: "forks",
 		setupFiles: [path.resolve(__dirname, "setup.ts")],
 	},

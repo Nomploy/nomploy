@@ -1,8 +1,7 @@
 name: Build Docker images
 
 on:
-  push:
-    branches: [main, canary]
+  # Disabled automatic runs on the fork (needs registry secrets). Run manually.
   workflow_dispatch:
 
 jobs:

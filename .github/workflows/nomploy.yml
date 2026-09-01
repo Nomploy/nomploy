@@ -1,8 +1,7 @@
 name: Nomploy Docker Build
 
 on:
-  push:
-    branches: [main, canary, "fix/re-apply-database-migration-fix"]
+  # Disabled automatic runs on the fork (needs registry secrets). Run manually.
   workflow_dispatch:
 
 env:

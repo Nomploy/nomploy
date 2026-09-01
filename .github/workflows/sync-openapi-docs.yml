@@ -1,15 +1,7 @@
 name: Generate and Sync OpenAPI
 
 on:
-  push:
-    branches:
-      - canary
-      - main
-    paths:
-      - 'apps/dokploy/server/api/routers/**'
-      - 'packages/server/src/services/**'
-      - 'packages/server/src/db/schema/**'
-
+  # Disabled automatic runs on the fork (syncs to external docs; needs secrets). Run manually.
   workflow_dispatch:
 
 jobs:
