@@ -1,8 +1,8 @@
 name: Nomploy Monitoring Build
 
 on:
-  push:
-    branches: [main, canary]
+  # Disabled on the fork (needs Docker Hub secrets). Run manually.
+  workflow_dispatch:
 
 env:
   IMAGE_NAME: nomploy/monitoring

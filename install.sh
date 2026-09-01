@@ -169,6 +169,51 @@ run_container nomploy-postgres \
 run_container nomploy-redis \
   -v nomploy-redis:/data -p 127.0.0.1:6379:6379 redis:7
 
+# ── Traefik (ingress via Consul Catalog) ─────────────────────────────────────
+# Discovers deployed Nomad services from Consul (each carries traefik.* tags) and
+# routes HTTP/HTTPS to them. Mirrors the app's initializeTraefikNomad().
+TRAEFIK_DIR="/etc/nomploy/traefik"
+$SUDO mkdir -p "$TRAEFIK_DIR/dynamic"
+$SUDO tee "$TRAEFIK_DIR/traefik.yml" >/dev/null <<'TRAEFIKYML'
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+
+providers:
+  consulCatalog:
+    endpoint:
+      address: "http://127.0.0.1:8500"
+    exposedByDefault: false
+    prefix: traefik
+
+api:
+  insecure: true
+  dashboard: true
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: admin@localhost
+      storage: /etc/traefik/acme.json
+      httpChallenge:
+        entryPoint: web
+TRAEFIKYML
+
+if [ ! -f "$TRAEFIK_DIR/acme.json" ]; then
+  $SUDO touch "$TRAEFIK_DIR/acme.json"
+  $SUDO chmod 600 "$TRAEFIK_DIR/acme.json"
+fi
+
+echo "==> Starting Traefik"
+run_container nomploy-traefik \
+  --network host \
+  -v "$TRAEFIK_DIR/traefik.yml:/etc/traefik/traefik.yml:ro" \
+  -v "$TRAEFIK_DIR/acme.json:/etc/traefik/acme.json" \
+  -v "$TRAEFIK_DIR/dynamic:/etc/nomploy/traefik/dynamic" \
+  traefik:v3.0
+
 # ── nomploy app ───────────────────────────────────────────────────────────────
 echo "==> Starting nomploy ($NOMPLOY_IMAGE)"
 $SUDO docker pull "$NOMPLOY_IMAGE"
@@ -189,7 +234,8 @@ IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo ""
 echo "=============================================="
 echo " nomploy is starting."
-echo " Open:  http://${IP:-<server-ip>}:${NOMPLOY_PORT}"
-echo " Nomad: http://${IP:-<server-ip>}:4646"
-echo " Consul: http://${IP:-<server-ip>}:8500"
+echo " Open:    http://${IP:-<server-ip>}:${NOMPLOY_PORT}"
+echo " Ingress: Traefik on :80 / :443 (dashboard :8080)"
+echo " Nomad:   http://${IP:-<server-ip>}:4646"
+echo " Consul:  http://${IP:-<server-ip>}:8500"
 echo "=============================================="
