@@ -14,17 +14,19 @@ import {
 } from "@/components/ui/table";
 import { api } from "@/utils/api";
 
-export const ShowNomadNodes = () => {
+export const ShowNomadNodes = ({ serverId }: { serverId?: string }) => {
 	const {
 		data: nodes,
 		isLoading,
 		isError,
 		refetch,
-	} = api.nomad.getNodes.useQuery();
+	} = api.nomad.getNodes.useQuery({ serverId });
 
-	const { data: resources } = api.nomad.getClusterResources.useQuery();
+	const { data: resources } = api.nomad.getClusterResources.useQuery({
+		serverId,
+	});
 
-	const { data: allocs } = api.nomad.getAllocations.useQuery();
+	const { data: allocs } = api.nomad.getAllocations.useQuery({ serverId });
 
 	if (isLoading) {
 		return (
@@ -67,18 +69,26 @@ export const ShowNomadNodes = () => {
 					</TableHeader>
 					<TableBody>
 						{nodes?.map((node: any) => {
-							const nodeAllocs = allocs?.filter(
-								(a: any) => a.NodeID === node.ID && a.ClientStatus === "running",
-							) || [];
+							const nodeAllocs =
+								allocs?.filter(
+									(a: any) =>
+										a.NodeID === node.ID && a.ClientStatus === "running",
+								) || [];
 
 							const cpuTotal = resources?.cpu.total || 1;
 							const memTotal = resources?.memory.total || 1;
-							const cpuPercent = cpuTotal > 0
-								? Math.round((resources?.cpu.allocated || 0) / cpuTotal * 100)
-								: 0;
-							const memPercent = memTotal > 0
-								? Math.round((resources?.memory.allocated || 0) / memTotal * 100)
-								: 0;
+							const cpuPercent =
+								cpuTotal > 0
+									? Math.round(
+											((resources?.cpu.allocated || 0) / cpuTotal) * 100,
+										)
+									: 0;
+							const memPercent =
+								memTotal > 0
+									? Math.round(
+											((resources?.memory.allocated || 0) / memTotal) * 100,
+										)
+									: 0;
 
 							return (
 								<TableRow key={node.ID}>
@@ -89,7 +99,11 @@ export const ShowNomadNodes = () => {
 										</div>
 									</TableCell>
 									<TableCell>
-										<Badge variant={node.Status === "ready" ? "default" : "destructive"}>
+										<Badge
+											variant={
+												node.Status === "ready" ? "default" : "destructive"
+											}
+										>
 											{node.Status}
 										</Badge>
 									</TableCell>
@@ -98,13 +112,17 @@ export const ShowNomadNodes = () => {
 									<TableCell>
 										<div className="flex items-center gap-2 min-w-[120px]">
 											<Progress value={cpuPercent} className="h-2 flex-1" />
-											<span className="text-xs text-muted-foreground w-8">{cpuPercent}%</span>
+											<span className="text-xs text-muted-foreground w-8">
+												{cpuPercent}%
+											</span>
 										</div>
 									</TableCell>
 									<TableCell>
 										<div className="flex items-center gap-2 min-w-[120px]">
 											<Progress value={memPercent} className="h-2 flex-1" />
-											<span className="text-xs text-muted-foreground w-8">{memPercent}%</span>
+											<span className="text-xs text-muted-foreground w-8">
+												{memPercent}%
+											</span>
 										</div>
 									</TableCell>
 								</TableRow>
@@ -112,7 +130,10 @@ export const ShowNomadNodes = () => {
 						})}
 						{(!nodes || nodes.length === 0) && (
 							<TableRow>
-								<TableCell colSpan={6} className="text-center text-muted-foreground">
+								<TableCell
+									colSpan={6}
+									className="text-center text-muted-foreground"
+								>
 									No nodes found
 								</TableCell>
 							</TableRow>

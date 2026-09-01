@@ -1,4 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Loader2, Terminal } from "lucide-react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -43,6 +45,34 @@ export const NomadSettings = ({ serverId }: Props) => {
 
 	const { mutateAsync, isPending } = api.server.update.useMutation();
 
+	const [isBootstrapping, setIsBootstrapping] = useState(false);
+	const [bootstrapLogs, setBootstrapLogs] = useState<string>("");
+
+	api.nomad.bootstrapServer.useSubscription(
+		{ serverId },
+		{
+			enabled: isBootstrapping,
+			onData(log) {
+				if (log === "BOOTSTRAP_DONE") {
+					setIsBootstrapping(false);
+					toast.success("Nomad bootstrapped on this server");
+					refetch();
+					return;
+				}
+				setBootstrapLogs((prev) => prev + log);
+			},
+			onError(error) {
+				setIsBootstrapping(false);
+				toast.error(error.message || "Bootstrap failed");
+			},
+		},
+	);
+
+	const startBootstrap = () => {
+		setBootstrapLogs("");
+		setIsBootstrapping(true);
+	};
+
 	const form = useForm<NomadFormValues>({
 		resolver: zodResolver(nomadSchema),
 		values: {
@@ -70,11 +100,27 @@ export const NomadSettings = ({ serverId }: Props) => {
 
 	return (
 		<Card className="bg-background">
-			<CardHeader>
-				<CardTitle className="text-xl">Nomad Configuration</CardTitle>
-				<CardDescription>
-					Configure Nomad cluster connection for deploying services.
-				</CardDescription>
+			<CardHeader className="flex flex-row items-start justify-between gap-4">
+				<div className="space-y-1.5">
+					<CardTitle className="text-xl">Nomad Configuration</CardTitle>
+					<CardDescription>
+						Configure Nomad cluster connection for deploying services.
+					</CardDescription>
+				</div>
+				<Button
+					type="button"
+					variant="secondary"
+					onClick={startBootstrap}
+					disabled={isBootstrapping}
+					title="Install Docker + Consul + Nomad + CNI on this server over SSH"
+				>
+					{isBootstrapping ? (
+						<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+					) : (
+						<Terminal className="mr-2 h-4 w-4" />
+					)}
+					{isBootstrapping ? "Bootstrapping…" : "Bootstrap Nomad"}
+				</Button>
 			</CardHeader>
 			<CardContent>
 				<Form {...form}>
@@ -156,6 +202,12 @@ export const NomadSettings = ({ serverId }: Props) => {
 						</Button>
 					</form>
 				</Form>
+
+				{(isBootstrapping || bootstrapLogs) && (
+					<pre className="mt-4 max-h-[400px] overflow-auto whitespace-pre-wrap rounded-lg bg-black p-4 font-mono text-xs text-green-400">
+						{bootstrapLogs || "Starting bootstrap…"}
+					</pre>
+				)}
 			</CardContent>
 		</Card>
 	);

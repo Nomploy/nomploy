@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/select";
 import { api } from "@/utils/api";
 
-export const ShowNomadLogs = () => {
+export const ShowNomadLogs = ({ serverId }: { serverId?: string }) => {
 	const [selectedAlloc, setSelectedAlloc] = useState<string | null>(null);
 	const [selectedTask, setSelectedTask] = useState<string>("");
 	const [logType, setLogType] = useState<"stdout" | "stderr">("stdout");
@@ -22,9 +22,10 @@ export const ShowNomadLogs = () => {
 		isLoading,
 		isError,
 		refetch,
-	} = api.nomad.getAllocations.useQuery();
+	} = api.nomad.getAllocations.useQuery({ serverId });
 
-	const runningAllocs = allocs?.filter((a: any) => a.ClientStatus === "running") || [];
+	const runningAllocs =
+		allocs?.filter((a: any) => a.ClientStatus === "running") || [];
 
 	const currentAlloc = runningAllocs.find((a: any) => a.ID === selectedAlloc);
 
@@ -92,6 +93,7 @@ export const ShowNomadLogs = () => {
 								allocId={selectedAlloc}
 								taskName={selectedTask}
 								logType={logType}
+								serverId={serverId}
 							/>
 						)}
 					</>
@@ -105,13 +107,19 @@ const LogViewer = ({
 	allocId,
 	taskName,
 	logType,
+	serverId,
 }: {
 	allocId: string;
 	taskName: string;
 	logType: "stdout" | "stderr";
+	serverId?: string;
 }) => {
-	const { data: logs, isLoading, refetch } = api.nomad.getAllocationLogs.useQuery(
-		{ allocId, taskName, logType },
+	const {
+		data: logs,
+		isLoading,
+		refetch,
+	} = api.nomad.getAllocationLogs.useQuery(
+		{ allocId, taskName, logType, serverId },
 		{ refetchInterval: 5000 },
 	);
 

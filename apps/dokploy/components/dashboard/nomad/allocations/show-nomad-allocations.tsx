@@ -20,16 +20,17 @@ import { api } from "@/utils/api";
 
 interface Props {
 	appName: string;
+	serverId?: string;
 }
 
-export const ShowNomadAllocations = ({ appName }: Props) => {
+export const ShowNomadAllocations = ({ appName, serverId }: Props) => {
 	const {
 		data: allocs,
 		isLoading,
 		isError,
 		refetch,
 	} = api.nomad.getJobAllocations.useQuery(
-		{ jobId: appName },
+		{ jobId: appName, serverId },
 		{ enabled: !!appName, refetchInterval: 10000 },
 	);
 
@@ -69,14 +70,20 @@ export const ShowNomadAllocations = ({ appName }: Props) => {
 					</p>
 				)}
 				{allocs?.map((alloc: any) => (
-					<AllocationRow key={alloc.ID} alloc={alloc} />
+					<AllocationRow key={alloc.ID} alloc={alloc} serverId={serverId} />
 				))}
 			</CardContent>
 		</Card>
 	);
 };
 
-const AllocationRow = ({ alloc }: { alloc: any }) => {
+const AllocationRow = ({
+	alloc,
+	serverId,
+}: {
+	alloc: any;
+	serverId?: string;
+}) => {
 	const [open, setOpen] = useState(false);
 	const [logType, setLogType] = useState<"stdout" | "stderr">("stdout");
 
@@ -122,6 +129,7 @@ const AllocationRow = ({ alloc }: { alloc: any }) => {
 								allocId={alloc.ID}
 								taskName={taskName}
 								logType={logType}
+								serverId={serverId}
 							/>
 						</div>
 					)}
@@ -135,16 +143,21 @@ const AllocLogViewer = ({
 	allocId,
 	taskName,
 	logType,
+	serverId,
 }: {
 	allocId: string;
 	taskName: string;
 	logType: "stdout" | "stderr";
+	serverId?: string;
 }) => {
-	const { data: logs, isLoading, refetch } =
-		api.nomad.getAllocationLogs.useQuery(
-			{ allocId, taskName, logType },
-			{ refetchInterval: 5000 },
-		);
+	const {
+		data: logs,
+		isLoading,
+		refetch,
+	} = api.nomad.getAllocationLogs.useQuery(
+		{ allocId, taskName, logType, serverId },
+		{ refetchInterval: 5000 },
+	);
 
 	return (
 		<div className="relative">

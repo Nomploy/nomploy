@@ -1,4 +1,11 @@
-import { AlertTriangle, Loader2, Play, RefreshCw, Square, Trash2 } from "lucide-react";
+import {
+	AlertTriangle,
+	Loader2,
+	Play,
+	RefreshCw,
+	Square,
+	Trash2,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -26,13 +33,13 @@ import {
 } from "@/components/ui/table";
 import { api } from "@/utils/api";
 
-export const ShowNomadJobs = () => {
+export const ShowNomadJobs = ({ serverId }: { serverId?: string }) => {
 	const {
 		data: jobs,
 		isLoading,
 		isError,
 		refetch,
-	} = api.nomad.getJobs.useQuery();
+	} = api.nomad.getJobs.useQuery({ serverId });
 
 	const stopJob = api.nomad.stopJob.useMutation({
 		onSuccess: () => {
@@ -95,7 +102,9 @@ export const ShowNomadJobs = () => {
 										Object.entries(job.JobSummary.Summary).map(
 											([group, summary]: [string, any]) => (
 												<div key={group} className="text-sm">
-													{group}: {summary.Running}/{summary.Running + summary.Starting + summary.Queued} running
+													{group}: {summary.Running}/
+													{summary.Running + summary.Starting + summary.Queued}{" "}
+													running
 												</div>
 											),
 										)}
@@ -110,15 +119,24 @@ export const ShowNomadJobs = () => {
 											</AlertDialogTrigger>
 											<AlertDialogContent>
 												<AlertDialogHeader>
-													<AlertDialogTitle>Stop job "{job.Name}"?</AlertDialogTitle>
+													<AlertDialogTitle>
+														Stop job "{job.Name}"?
+													</AlertDialogTitle>
 													<AlertDialogDescription>
-														This will stop all allocations for this job. You can restart it later.
+														This will stop all allocations for this job. You can
+														restart it later.
 													</AlertDialogDescription>
 												</AlertDialogHeader>
 												<AlertDialogFooter>
 													<AlertDialogCancel>Cancel</AlertDialogCancel>
 													<AlertDialogAction
-														onClick={() => stopJob.mutate({ jobId: job.ID, purge: false })}
+														onClick={() =>
+															stopJob.mutate({
+																jobId: job.ID,
+																purge: false,
+																serverId,
+															})
+														}
 													>
 														Stop
 													</AlertDialogAction>
@@ -134,16 +152,25 @@ export const ShowNomadJobs = () => {
 											</AlertDialogTrigger>
 											<AlertDialogContent>
 												<AlertDialogHeader>
-													<AlertDialogTitle>Purge job "{job.Name}"?</AlertDialogTitle>
+													<AlertDialogTitle>
+														Purge job "{job.Name}"?
+													</AlertDialogTitle>
 													<AlertDialogDescription>
-														This will permanently remove the job and all its history. This cannot be undone.
+														This will permanently remove the job and all its
+														history. This cannot be undone.
 													</AlertDialogDescription>
 												</AlertDialogHeader>
 												<AlertDialogFooter>
 													<AlertDialogCancel>Cancel</AlertDialogCancel>
 													<AlertDialogAction
 														className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-														onClick={() => stopJob.mutate({ jobId: job.ID, purge: true })}
+														onClick={() =>
+															stopJob.mutate({
+																jobId: job.ID,
+																purge: true,
+																serverId,
+															})
+														}
 													>
 														Purge
 													</AlertDialogAction>
@@ -156,7 +183,10 @@ export const ShowNomadJobs = () => {
 						))}
 						{(!jobs || jobs.length === 0) && (
 							<TableRow>
-								<TableCell colSpan={5} className="text-center text-muted-foreground">
+								<TableCell
+									colSpan={5}
+									className="text-center text-muted-foreground"
+								>
 									No jobs running
 								</TableCell>
 							</TableRow>
