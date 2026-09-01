@@ -11,7 +11,7 @@
 
 set -e
 
-NOMPLOY_IMAGE="${NOMPLOY_IMAGE:-nomploy/nomploy:latest}"
+NOMPLOY_IMAGE="${NOMPLOY_IMAGE:-ghcr.io/nomploy/nomploy:latest}"
 NOMPLOY_PORT="${NOMPLOY_PORT:-3000}"
 CNI_VERSION="${CNI_VERSION:-v1.5.1}"
 

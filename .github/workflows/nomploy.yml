@@ -1,15 +1,27 @@
-name: Nomploy Docker Build
+name: Docker Publish (GHCR)
+
+# Builds the nomploy app image and pushes it to the GitHub Container Registry.
+# Uses the built-in GITHUB_TOKEN — no external registry secrets required.
+#
+# NOTE: the published package (ghcr.io/<owner>/nomploy) inherits the repo's
+# visibility. For `install.sh` to `docker pull` without auth on a fresh server,
+# set the package to Public in its GitHub package settings (or `docker login
+# ghcr.io` on the server).
 
 on:
-  # Disabled automatic runs on the fork (needs registry secrets). Run manually.
+  push:
+    branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
 
-env:
-  IMAGE_NAME: nomploy/nomploy
+permissions:
+  contents: read
+  packages: write
 
 jobs:
-  docker-amd:
-    runs-on: ubuntu-22.04
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,24 +29,28 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set tag and version
-        id: meta
+      - name: Compute lowercase image name
+        id: img
         run: |
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            TAG="latest"
-            VERSION=$(node -p "require('./apps/dokploy/package.json').version")
-          elif [ "${{ github.ref }}" = "refs/heads/canary" ]; then
-            TAG="canary"
-          else
-            TAG="feature"
-          fi
-          echo "tags=${IMAGE_NAME}:${TAG}-amd64" >> $GITHUB_OUTPUT
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "name=ghcr.io/${owner}/nomploy" >> "$GITHUB_OUTPUT"
+
+      - name: Docker metadata (tags + labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.img.outputs.name }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
+            type=sha,format=short
 
       - name: Prepare env file
         run: |
@@ -42,199 +58,14 @@ jobs:
           cp apps/dokploy/.env.production.example apps/dokploy/.env.production
 
       - name: Build and push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
+          # arm64 can be added here (needs QEMU or an arm runner; slower build):
+          #   platforms: linux/amd64,linux/arm64
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-  docker-arm:
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Set tag and version
-        id: meta
-        run: |
-          VERSION=$(node -p "require('./apps/dokploy/package.json').version")
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            TAG="latest"
-            VERSION=$(node -p "require('./apps/dokploy/package.json').version")
-          elif [ "${{ github.ref }}" = "refs/heads/canary" ]; then
-            TAG="canary"
-          else
-            TAG="feature"
-          fi
-          echo "tags=${IMAGE_NAME}:${TAG}-arm64" >> $GITHUB_OUTPUT
-
-      - name: Prepare env file
-        run: |
-          cp apps/dokploy/.env.production.example .env.production
-          cp apps/dokploy/.env.production.example apps/dokploy/.env.production
-
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-
-  combine-manifests:
-    needs: [docker-amd, docker-arm]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Create and push manifests
-        run: |
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            VERSION=$(node -p "require('./apps/dokploy/package.json').version")
-            TAG="latest"
-
-            docker buildx imagetools create -t ${IMAGE_NAME}:${TAG} \
-              ${IMAGE_NAME}:${TAG}-amd64 \
-              ${IMAGE_NAME}:${TAG}-arm64
-
-            docker buildx imagetools create -t ${IMAGE_NAME}:${VERSION} \
-              ${IMAGE_NAME}:${TAG}-amd64 \
-              ${IMAGE_NAME}:${TAG}-arm64
-
-          elif [ "${{ github.ref }}" = "refs/heads/canary" ]; then
-            TAG="canary"
-            docker buildx imagetools create -t ${IMAGE_NAME}:${TAG} \
-              ${IMAGE_NAME}:${TAG}-amd64 \
-              ${IMAGE_NAME}:${TAG}-arm64
-
-          else
-            TAG="feature"
-            docker buildx imagetools create -t ${IMAGE_NAME}:${TAG} \
-              ${IMAGE_NAME}:${TAG}-amd64 \
-              ${IMAGE_NAME}:${TAG}-arm64
-          fi
-
-  generate-release:
-    needs: [combine-manifests]
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.get_version.outputs.version }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Get version
-        id: get_version
-        run: |
-          VERSION=$(node -p "require('./apps/dokploy/package.json').version")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.get_version.outputs.version }}
-          name: ${{ steps.get_version.outputs.version }}
-          generate_release_notes: true
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  sync-version:
-    needs: [generate-release]
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Sync version to MCP repository
-        run: |
-          git clone https://x-access-token:${{ secrets.DOCS_SYNC_TOKEN }}@github.com/nomploy/mcp.git /tmp/mcp-repo
-          cd /tmp/mcp-repo
-
-          jq --arg v "${{ needs.generate-release.outputs.version }}" '.version = $v' package.json > package.json.tmp
-          mv package.json.tmp package.json
-
-          npm install -g pnpm
-          pnpm install
-          pnpm run fetch-openapi
-          pnpm run generate
-
-          git config user.name "Nomploy Bot"
-          git config user.email "bot@nomploy.com"
-          git add -A
-          git commit -m "chore: bump version to ${{ needs.generate-release.outputs.version }}" \
-            -m "Source: ${{ github.repository }}@${{ github.sha }}" \
-            --allow-empty
-          git push
-
-          echo "✅ MCP repo synced to version ${{ needs.generate-release.outputs.version }}"
-
-      - name: Sync version to CLI repository
-        run: |
-          git clone https://x-access-token:${{ secrets.DOCS_SYNC_TOKEN }}@github.com/nomploy/cli.git /tmp/cli-repo
-          cd /tmp/cli-repo
-
-          jq --arg v "${{ needs.generate-release.outputs.version }}" '.version = $v' package.json > package.json.tmp
-          mv package.json.tmp package.json
-
-          cp ${{ github.workspace }}/openapi.json ./openapi.json
-          npm install -g pnpm
-          pnpm install
-          pnpm run generate
-
-          git config user.name "Nomploy Bot"
-          git config user.email "bot@nomploy.com"
-          git add -A
-          git commit -m "chore: bump version to ${{ needs.generate-release.outputs.version }}" \
-            -m "Source: ${{ github.repository }}@${{ github.sha }}" \
-            --allow-empty
-          git push
-
-          echo "✅ CLI repo synced to version ${{ needs.generate-release.outputs.version }}"
-
-      - name: Sync version to SDK repository
-        run: |
-          git clone https://x-access-token:${{ secrets.DOCS_SYNC_TOKEN }}@github.com/nomploy/sdk.git /tmp/sdk-repo
-          cd /tmp/sdk-repo
-
-          jq --arg v "${{ needs.generate-release.outputs.version }}" '.version = $v' package.json > package.json.tmp
-          mv package.json.tmp package.json
-
-          cp ${{ github.workspace }}/openapi.json ./openapi.json
-          npm install -g pnpm
-          pnpm install
-          pnpm run generate
-
-          git config user.name "Nomploy Bot"
-          git config user.email "bot@nomploy.com"
-          git add -A
-          git commit -m "chore: bump version to ${{ needs.generate-release.outputs.version }}" \
-            -m "Source: ${{ github.repository }}@${{ github.sha }}" \
-            --allow-empty
-          git push
-
-          echo "✅ SDK repo synced to version ${{ needs.generate-release.outputs.version }}"
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
