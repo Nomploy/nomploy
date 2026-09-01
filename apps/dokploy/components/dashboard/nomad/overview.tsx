@@ -1,11 +1,18 @@
-import { Cpu, HardDrive, Loader2, MemoryStick, Server, Container } from "lucide-react";
+import {
+	Container,
+	Cpu,
+	HardDrive,
+	Loader2,
+	MemoryStick,
+	Server,
+} from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { api } from "@/utils/api";
 
-export const NomadOverview = () => {
+export const NomadOverview = ({ serverId }: { serverId?: string }) => {
 	const { data, isLoading } = api.nomad.getClusterResources.useQuery(
-		undefined,
+		{ serverId },
 		{ refetchInterval: 10000 },
 	);
 
@@ -17,12 +24,14 @@ export const NomadOverview = () => {
 		);
 	}
 
-	const cpuPercent = data.cpu.total > 0
-		? Math.round((data.cpu.allocated / data.cpu.total) * 100)
-		: 0;
-	const memPercent = data.memory.total > 0
-		? Math.round((data.memory.allocated / data.memory.total) * 100)
-		: 0;
+	const cpuPercent =
+		data.cpu.total > 0
+			? Math.round((data.cpu.allocated / data.cpu.total) * 100)
+			: 0;
+	const memPercent =
+		data.memory.total > 0
+			? Math.round((data.memory.allocated / data.memory.total) * 100)
+			: 0;
 
 	return (
 		<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -49,7 +58,8 @@ export const NomadOverview = () => {
 					<div className="text-2xl font-bold">{memPercent}%</div>
 					<Progress value={memPercent} className="mt-2" />
 					<p className="text-xs text-muted-foreground mt-1">
-						{formatMB(data.memory.allocated)} / {formatMB(data.memory.total)} allocated
+						{formatMB(data.memory.allocated)} / {formatMB(data.memory.total)}{" "}
+						allocated
 					</p>
 				</CardContent>
 			</Card>

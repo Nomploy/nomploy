@@ -41,6 +41,7 @@ import { api } from "@/utils/api";
 import { ShowNodesModal } from "../cluster/nodes/show-nodes-modal";
 import { TerminalModal } from "../web-server/terminal-modal";
 import { ShowServerActions } from "./actions/show-server-actions";
+import { NomadSettingsModal } from "./nomad-settings-modal";
 import { HandleServers } from "./handle-servers";
 import { SetupServer } from "./setup-server";
 import { ShowDockerContainersModal } from "./show-docker-containers-modal";
@@ -179,6 +180,9 @@ export const ShowServers = () => {
 																							serverId={server.serverId}
 																						/>
 																						<ShowSchedulesModal
+																							serverId={server.serverId}
+																						/>
+																						<NomadSettingsModal
 																							serverId={server.serverId}
 																						/>
 																					</DropdownMenuContent>
