@@ -115,7 +115,7 @@ export const resolveNomadEnvVars = (
 /**
  * Generate a complete Nomad job HCL file
  */
-const generateNomadJobSpec = (
+export const generateNomadJobSpec = (
 	appName: string,
 	services: NomadServiceSpec[],
 	domains: Domain[],
