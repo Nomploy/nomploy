@@ -22,6 +22,7 @@ on:
       - "NOTICE"
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/FUNDING.yml"
+      - "signatures/**"
   workflow_dispatch:
 
 permissions:
