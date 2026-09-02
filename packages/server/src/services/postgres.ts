@@ -6,9 +6,34 @@ import {
 	postgres,
 } from "@nomploy/server/db/schema";
 import { generatePassword } from "@nomploy/server/templates";
-import { buildPostgres } from "@nomploy/server/utils/databases/postgres";
+import {
+	getBuildNomadDatabaseCommand,
+	type NomadDatabaseInput,
+} from "@nomploy/server/utils/builders/nomad-database";
 import { pullImage } from "@nomploy/server/utils/docker/utils";
-import { execAsyncRemote } from "@nomploy/server/utils/process/execAsync";
+import {
+	execAsync,
+	execAsyncRemote,
+} from "@nomploy/server/utils/process/execAsync";
+
+// Resolve the Nomad client node name a database must be pinned to (its data lives
+// in a node-local volume). Control-plane databases pin to the hub's node; a
+// server-scoped database pins to that server's node.
+const resolveNomadNodeName = async (
+	serverId?: string | null,
+): Promise<string> => {
+	if (serverId) {
+		const { stdout } = await execAsyncRemote(
+			serverId,
+			"curl -s http://127.0.0.1:4646/v1/agent/self",
+		);
+		return JSON.parse(stdout).member.Name;
+	}
+	const addr = process.env.NOMAD_ADDRESS || "http://127.0.0.1:4646";
+	const res = await fetch(`${addr}/v1/agent/self`);
+	return ((await res.json()) as { member: { Name: string } }).member.Name;
+};
+
 import { TRPCError } from "@trpc/server";
 import { eq, getTableColumns } from "drizzle-orm";
 import type { z } from "zod";
@@ -157,7 +182,33 @@ export const deployPostgres = async (
 			await pullImage(postgres.dockerImage, onData);
 		}
 
-		await buildPostgres(postgres);
+		// Deploy to Nomad instead of a Docker Swarm service.
+		const targetNodeName = await resolveNomadNodeName(postgres.serverId);
+		const input: NomadDatabaseInput = {
+			appName: postgres.appName,
+			image: postgres.dockerImage,
+			containerPort: 5432,
+			externalPort: postgres.externalPort,
+			dataPath: getMountPath(postgres.dockerImage),
+			env: `POSTGRES_DB="${postgres.databaseName}"\nPOSTGRES_USER="${postgres.databaseUser}"\nPOSTGRES_PASSWORD="${postgres.databasePassword}"${
+				postgres.env ? `\n${postgres.env}` : ""
+			}`,
+			projectEnv: postgres.environment.project.env,
+			environmentEnv: postgres.environment.env,
+			cpuLimit: postgres.cpuLimit,
+			memoryLimit: postgres.memoryLimit,
+			command: postgres.command,
+			args: postgres.args,
+			targetNodeName,
+			mounts: postgres.mounts,
+		};
+		const command = getBuildNomadDatabaseCommand(input);
+		if (postgres.serverId) {
+			await execAsyncRemote(postgres.serverId, command, onData);
+		} else {
+			const { stdout } = await execAsync(command);
+			onData?.(stdout);
+		}
 
 		await updatePostgresById(postgresId, {
 			applicationStatus: "done",
