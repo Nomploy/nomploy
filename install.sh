@@ -206,6 +206,11 @@ providers:
       address: "http://127.0.0.1:8500"
     exposedByDefault: false
     prefix: traefik
+  # File provider: nomploy writes dynamic routes here (e.g. the panel's own
+  # domain). Without this, setting a domain in the UI has no effect.
+  file:
+    directory: "/etc/nomploy/traefik/dynamic"
+    watch: true
 
 api:
   insecure: true
@@ -228,6 +233,7 @@ fi
 echo "==> Starting Traefik"
 run_container nomploy-traefik \
   --network host \
+  --add-host nomploy:127.0.0.1 \
   -v "$TRAEFIK_DIR/traefik.yml:/etc/traefik/traefik.yml:ro" \
   -v "$TRAEFIK_DIR/acme.json:/etc/traefik/acme.json" \
   -v "$TRAEFIK_DIR/dynamic:/etc/nomploy/traefik/dynamic" \
