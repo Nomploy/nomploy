@@ -2,7 +2,7 @@
 	"name": "nomploy",
 	"version": "v0.29.7",
 	"private": true,
-	"license": "Apache-2.0",
+	"license": "AGPL-3.0-only",
 	"type": "module",
 	"scripts": {
 		"build": "npm run build-server && npm run build-next",

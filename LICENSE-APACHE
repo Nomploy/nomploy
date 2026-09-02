@@ -1,20 +1,15 @@
-nomploy — a Nomad-orchestrated fork of Dokploy.
+Portions of nomploy are derived from Dokploy and remain licensed under the
+Apache License, Version 2.0, reproduced below.
 
 Copyright 2026-present Dokploy Technology, Inc. (original work)
-Copyright 2026-present the nomploy contributors (modifications)
+Original project: https://github.com/dokploy/dokploy
 
-This entire repository is licensed under the Apache License, Version 2.0.
-
-nomploy is a fork of Dokploy. The upstream project was dual-licensed: most of
-the code under the Apache License 2.0, and a set of enterprise modules under a
-separate "Dokploy Source Available License" (DSAL) in "/proprietary"
-directories. nomploy does NOT include Dokploy's DSAL-licensed code: those
-modules were removed and replaced with original, freely-licensed
-implementations (see the NOTICE file). As a result, no part of this repository
-is under the DSAL, and the whole project is available under the Apache License
-2.0 below.
+The nomploy project as a whole is licensed under the GNU AGPL-3.0 (see
+LICENSE). This Apache-2.0 grant applies to the upstream Dokploy code that
+nomploy incorporates and modifies. See LICENSING.md and NOTICE for details.
 
 --------------------------------------------------------------------------------
+
 
                                  Apache License
                            Version 2.0, January 2004
@@ -192,6 +187,19 @@ is under the DSAL, and the whole project is available under the Apache License
       of your accepting any such warranty or additional liability.
 
    END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright [yyyy] [name of copyright owner]
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.

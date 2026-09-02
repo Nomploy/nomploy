@@ -9,6 +9,21 @@ nomploy adapts Dokploy to use HashiCorp Nomad as the orchestrator instead of
 Docker Swarm.
 
 --------------------------------------------------------------------------------
+License
+--------------------------------------------------------------------------------
+
+The nomploy project as a whole, and all nomploy modifications and additions, are
+licensed under the GNU Affero General Public License, version 3.0 (see LICENSE).
+
+Portions of nomploy are derived from Dokploy, which is licensed under the Apache
+License, Version 2.0. That Apache-2.0 grant is preserved for those portions (see
+LICENSE-APACHE); their copyright notices and this NOTICE are retained as required
+by Apache-2.0 section 4. Files derived from Dokploy have been modified by the
+nomploy contributors; the specific changes are recorded in the git history.
+
+See LICENSING.md for how the two licenses fit together.
+
+--------------------------------------------------------------------------------
 Licensing changes relative to upstream Dokploy
 --------------------------------------------------------------------------------
 
@@ -20,9 +35,9 @@ Upstream Dokploy was dual-licensed:
     distribution, or sale without a commercial agreement.
 
 nomploy does not ship any DSAL-licensed code. The enterprise modules were
-removed and replaced with original, Apache-2.0-licensed implementations that
-either provide a free equivalent or cleanly disable the paid feature. The
-affected areas are:
+removed and replaced with original implementations (licensed under AGPL-3.0 as
+part of the project) that either provide a free equivalent or cleanly disable the
+paid feature. The affected areas are:
 
   * License gating            -> no commercial licensing; the instance always
                                  runs as the free tier.
@@ -35,7 +50,7 @@ affected areas are:
   * White-labeling / branding -> available as a free feature.
 
 The replaced files still live under directories named "proprietary" for now to
-minimize churn; their contents are original nomploy code under Apache-2.0, not
+minimize churn; their contents are original nomploy code (AGPL-3.0), not
 Dokploy's proprietary code. These directories may be renamed in a later change.
 
 --------------------------------------------------------------------------------
