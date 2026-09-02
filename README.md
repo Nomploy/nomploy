@@ -6,9 +6,10 @@ cluster.
 
 It is a fork of [Dokploy](https://github.com/dokploy/dokploy) that swaps the
 orchestrator from Docker Swarm to Nomad, while keeping Dokploy's UI, git
-integration, domains/SSL, backups, monitoring and notifications. It is licensed
-under the **Apache License 2.0**; the upstream enterprise (source-available)
-modules are **not** included — see [Attribution & License](#-attribution--license).
+integration, domains/SSL, backups, monitoring and notifications. nomploy as a
+whole is licensed under the **GNU AGPL-3.0**; the upstream enterprise
+(source-available) modules are **not** included — see
+[Attribution & License](#-attribution--license).
 
 ## ✨ Features
 
@@ -66,10 +67,18 @@ See the [Contributing Guide](CONTRIBUTING.md).
 nomploy is a fork of **Dokploy** — Copyright © Dokploy Technology, Inc.
 Original project: https://github.com/dokploy/dokploy
 
-The entire repository is licensed under the **Apache License 2.0** (see
-[`LICENSE.MD`](LICENSE.MD)). Upstream Dokploy was dual-licensed: most code under
-Apache-2.0, plus enterprise modules under the separate Dokploy Source Available
-License (DSAL) in `/proprietary` directories. nomploy does **not** ship any
-DSAL-licensed code — those modules were removed and replaced with original,
-Apache-2.0 implementations. Full details and attribution are in the
-[`NOTICE`](NOTICE) file.
+nomploy as a whole is licensed under the **GNU AGPL-3.0** (see [`LICENSE`](LICENSE)).
+Portions derived from Dokploy remain under **Apache-2.0** (see
+[`LICENSE-APACHE`](LICENSE-APACHE)); that grant is preserved and Dokploy's
+notices are retained. Apache-2.0 permits redistributing a modified work under a
+compatible copyleft license such as the AGPL — see [`LICENSING.md`](LICENSING.md)
+for how the two fit together.
+
+Upstream Dokploy was dual-licensed: most code under Apache-2.0, plus enterprise
+modules under the separate Dokploy Source Available License (DSAL) in
+`/proprietary` directories. nomploy does **not** ship any DSAL-licensed code —
+those modules were removed and replaced with original implementations. Full
+details and attribution are in the [`NOTICE`](NOTICE) file.
+
+Contributions are accepted under the [Contributor License Agreement](CLA.md),
+which keeps a commercial-licensing option open alongside the AGPL.
