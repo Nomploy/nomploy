@@ -92,34 +92,67 @@ echo 1 | $SUDO tee /proc/sys/net/bridge/bridge-nf-call-iptables >/dev/null 2>&1 
 # ── Consul + Nomad config (single node: server + client) ─────────────────────
 $SUDO mkdir -p /etc/consul.d /opt/consul /etc/nomad.d /opt/nomad
 
-# Single-node all-in-one: bind everything to 127.0.0.1. This avoids the
-# multiple-private-IP ambiguity ({{ GetPrivateIP }} can pick the docker bridge)
-# and keeps Nomad/Consul internal — only Traefik is exposed publicly.
-$SUDO tee /etc/consul.d/consul.hcl >/dev/null <<'CONSULHCL'
+# ── WireGuard hub (cluster overlay 10.10.0.0/24) ─────────────────────────────
+# The control plane is the WireGuard hub; Consul/Nomad servers bind to the hub's
+# overlay IP so worker nodes can join over an encrypted mesh. Consul/Nomad HTTP
+# APIs still answer on 127.0.0.1 for the local app. Endpoint workers dial defaults
+# to this host's public IP (open UDP 51820); override with NOMPLOY_WG_ENDPOINT.
+$SUDO mkdir -p /etc/nomploy
+if command -v apt-get >/dev/null 2>&1; then
+  $SUDO apt-get install -y wireguard wireguard-tools >/dev/null 2>&1 || true
+else
+  $SUDO yum install -y wireguard-tools >/dev/null 2>&1 || true
+fi
+$SUDO mkdir -p /etc/wireguard && $SUDO chmod 700 /etc/wireguard
+if [ ! -s /etc/wireguard/hub_priv ]; then
+  $SUDO sh -c 'wg genkey > /etc/wireguard/hub_priv && chmod 600 /etc/wireguard/hub_priv && wg pubkey < /etc/wireguard/hub_priv > /etc/wireguard/hub_pub'
+fi
+HUB_PUB="$($SUDO cat /etc/wireguard/hub_pub)"
+if [ ! -f /etc/wireguard/wg0.conf ]; then
+  $SUDO tee /etc/wireguard/wg0.conf >/dev/null <<WGCONF
+[Interface]
+Address = 10.10.0.1/24
+ListenPort = 51820
+PrivateKey = $($SUDO cat /etc/wireguard/hub_priv)
+PostUp = sysctl -w net.ipv4.ip_forward=1; iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o wg0 -j ACCEPT
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o wg0 -j ACCEPT
+WGCONF
+  $SUDO chmod 600 /etc/wireguard/wg0.conf
+fi
+ip link show wg0 >/dev/null 2>&1 || $SUDO wg-quick up wg0 || true
+$SUDO systemctl enable wg-quick@wg0 >/dev/null 2>&1 || true
+
+# Shared gossip encryption key (Consul + Nomad).
+[ -s /etc/nomploy/gossip.key ] || consul keygen | $SUDO tee /etc/nomploy/gossip.key >/dev/null
+GOSSIP="$($SUDO cat /etc/nomploy/gossip.key)"
+WG_ENDPOINT="${NOMPLOY_WG_ENDPOINT:-$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}'):51820}"
+
+$SUDO tee /etc/consul.d/consul.hcl >/dev/null <<CONSULHCL
 data_dir    = "/opt/consul"
-bind_addr   = "127.0.0.1"
-client_addr = "127.0.0.1"
+bind_addr   = "10.10.0.1"
+client_addr = "0.0.0.0"
 datacenter  = "dc1"
 server           = true
 bootstrap_expect = 1
+encrypt = "$GOSSIP"
 ui_config { enabled = true }
 CONSULHCL
 
-$SUDO tee /etc/nomad.d/nomad.hcl >/dev/null <<'NOMADHCL'
+$SUDO tee /etc/nomad.d/nomad.hcl >/dev/null <<NOMADHCL
 data_dir   = "/opt/nomad"
-bind_addr  = "127.0.0.1"
+bind_addr  = "0.0.0.0"
 datacenter = "dc1"
 
-# Explicit advertise: Nomad refuses to default a server's advertise to localhost.
 advertise {
-  http = "127.0.0.1"
-  rpc  = "127.0.0.1"
-  serf = "127.0.0.1"
+  http = "10.10.0.1"
+  rpc  = "10.10.0.1"
+  serf = "10.10.0.1"
 }
 
 server {
   enabled          = true
   bootstrap_expect = 1
+  encrypt          = "$GOSSIP"
 }
 
 client {
@@ -139,6 +172,18 @@ plugin "docker" {
   }
 }
 NOMADHCL
+
+# Cluster descriptor read by the app to add worker nodes (nomad.joinCluster).
+$SUDO tee /etc/nomploy/cluster.json >/dev/null <<CJSON
+{
+  "hubPublicKey": "$HUB_PUB",
+  "gossipKey": "$GOSSIP",
+  "hubWgIp": "10.10.0.1",
+  "hubEndpoint": "$WG_ENDPOINT",
+  "overlayCidr": "10.10.0.0/24",
+  "peers": []
+}
+CJSON
 
 # The Nomad docker plugin above sets auth.config = /root/.docker/config.json.
 # If that file is missing, the docker driver fails to pull EVERY image (even
@@ -272,8 +317,10 @@ $SUDO docker pull "$NOMPLOY_IMAGE"
 $SUDO docker rm -f nomploy >/dev/null 2>&1 || true
 $SUDO docker run -d --name nomploy --restart unless-stopped \
   --network host \
+  --cap-add NET_ADMIN \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /etc/nomploy:/etc/nomploy \
+  -v /etc/wireguard:/etc/wireguard \
   -e NODE_ENV=production \
   -e PORT="$NOMPLOY_PORT" \
   -e DATABASE_URL="postgresql://nomploy:${POSTGRES_PASSWORD}@127.0.0.1:5432/nomploy" \

@@ -66,7 +66,7 @@ describe("nomad builder — compose → HCL (live)", () => {
 		// getBuildNomadCommand embeds the HCL as base64 in the deploy script.
 		const match = cmd.match(/echo "([A-Za-z0-9+/=]+)" \| base64 -d/);
 		expect(match).not.toBeNull();
-		const hcl = Buffer.from(match![1], "base64").toString("utf8");
+		const hcl = Buffer.from(match?.[1] ?? "", "base64").toString("utf8");
 
 		// Print it so the translation is visible when running the test.
 		console.log("\n===== generated Nomad HCL =====\n" + hcl + "\n===============================\n");

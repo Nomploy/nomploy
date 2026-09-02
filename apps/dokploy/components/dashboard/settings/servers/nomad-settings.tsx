@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Loader2, Terminal } from "lucide-react";
+import { Loader2, Network, Terminal } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -73,6 +73,34 @@ export const NomadSettings = ({ serverId }: Props) => {
 		setIsBootstrapping(true);
 	};
 
+	const [isJoining, setIsJoining] = useState(false);
+	const [joinLogs, setJoinLogs] = useState<string>("");
+
+	api.nomad.joinCluster.useSubscription(
+		{ serverId },
+		{
+			enabled: isJoining,
+			onData(log) {
+				if (log === "JOIN_DONE") {
+					setIsJoining(false);
+					toast.success("Server joined the Nomad cluster");
+					refetch();
+					return;
+				}
+				setJoinLogs((prev) => prev + log);
+			},
+			onError(error) {
+				setIsJoining(false);
+				toast.error(error.message || "Cluster join failed");
+			},
+		},
+	);
+
+	const startJoin = () => {
+		setJoinLogs("");
+		setIsJoining(true);
+	};
+
 	const form = useForm<NomadFormValues>({
 		resolver: zodResolver(nomadSchema),
 		values: {
@@ -107,20 +135,35 @@ export const NomadSettings = ({ serverId }: Props) => {
 						Configure Nomad cluster connection for deploying services.
 					</CardDescription>
 				</div>
-				<Button
-					type="button"
-					variant="secondary"
-					onClick={startBootstrap}
-					disabled={isBootstrapping}
-					title="Install Docker + Consul + Nomad + CNI on this server over SSH"
-				>
-					{isBootstrapping ? (
-						<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-					) : (
-						<Terminal className="mr-2 h-4 w-4" />
-					)}
-					{isBootstrapping ? "Bootstrapping…" : "Bootstrap Nomad"}
-				</Button>
+				<div className="flex flex-col gap-2">
+					<Button
+						type="button"
+						variant="secondary"
+						onClick={startBootstrap}
+						disabled={isBootstrapping || isJoining}
+						title="Install a standalone Docker + Consul + Nomad + CNI on this server over SSH"
+					>
+						{isBootstrapping ? (
+							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+						) : (
+							<Terminal className="mr-2 h-4 w-4" />
+						)}
+						{isBootstrapping ? "Bootstrapping…" : "Bootstrap Nomad"}
+					</Button>
+					<Button
+						type="button"
+						onClick={startJoin}
+						disabled={isBootstrapping || isJoining}
+						title="Install Nomad on this server and join it to the control plane's cluster over WireGuard"
+					>
+						{isJoining ? (
+							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+						) : (
+							<Network className="mr-2 h-4 w-4" />
+						)}
+						{isJoining ? "Joining cluster…" : "Join cluster"}
+					</Button>
+				</div>
 			</CardHeader>
 			<CardContent>
 				<Form {...form}>
@@ -206,6 +249,11 @@ export const NomadSettings = ({ serverId }: Props) => {
 				{(isBootstrapping || bootstrapLogs) && (
 					<pre className="mt-4 max-h-[400px] overflow-auto whitespace-pre-wrap rounded-lg bg-black p-4 font-mono text-xs text-green-400">
 						{bootstrapLogs || "Starting bootstrap…"}
+					</pre>
+				)}
+				{(isJoining || joinLogs) && (
+					<pre className="mt-4 max-h-[400px] overflow-auto whitespace-pre-wrap rounded-lg bg-black p-4 font-mono text-xs text-green-400">
+						{joinLogs || "Joining cluster…"}
 					</pre>
 				)}
 			</CardContent>
