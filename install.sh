@@ -246,6 +246,15 @@ run_container nomploy-traefik \
   -v "$TRAEFIK_DIR/dynamic:/etc/nomploy/traefik/dynamic" \
   traefik:v3.0
 
+# ── Nomad Autoscaler ─────────────────────────────────────────────────────────
+# Reads scaling{} policies from Nomad jobs (emitted from compose x-nomad-scaling)
+# and scales task groups via the nomad-apm metrics source.
+echo "==> Starting Nomad Autoscaler"
+run_container nomad-autoscaler \
+  --network host \
+  hashicorp/nomad-autoscaler:latest \
+  agent -nomad-address=http://127.0.0.1:4646 -http-bind-address=127.0.0.1 -http-bind-port=8081
+
 # Stable auth secret: generate once and persist, so sessions survive restarts
 # (and we don't fall back to the insecure hardcoded default).
 $SUDO mkdir -p /etc/nomploy
