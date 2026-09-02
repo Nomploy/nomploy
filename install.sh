@@ -157,6 +157,10 @@ server {
 
 client {
   enabled = true
+  # Bind & register allocation ports on the WireGuard overlay so services are
+  # reachable across the cluster (and never exposed on the public NIC). Keeps
+  # Consul service addresses on 10.10.0.0/24, which Traefik routes to.
+  network_interface = "wg0"
 }
 
 consul {
