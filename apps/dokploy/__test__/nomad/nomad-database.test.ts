@@ -30,14 +30,15 @@ describe("nomad database builder — DB → HCL", () => {
 		expect(hcl).toContain('value     = "nomploy"');
 		// persistent data volume for the engine's data dir
 		expect(hcl).toContain('"myproj-pg-abc123-data:/var/lib/postgresql/data"');
-		// engine image + dynamic internal port mapped to 5432
+		// engine image + static standard port so <appName>:5432 works cluster-wide
 		expect(hcl).toContain('image   = "postgres:16"');
-		expect(hcl).toContain("to = 5432");
+		expect(hcl).toContain("static = 5432");
 		// optional fixed external port
 		expect(hcl).toContain("static = 5433");
-		// discoverable in Consul by its appName
+		// discoverable in Consul by its appName + cluster DNS for the container
 		expect(hcl).toContain('name     = "myproj-pg-abc123"');
 		expect(hcl).toContain('provider = "consul"');
+		expect(hcl).toContain('searches = ["service.consul"]');
 		// env + resources (0.5 core -> 500 MHz, 256 MB)
 		expect(hcl).toContain('POSTGRES_PASSWORD = "secret"');
 		expect(hcl).toContain("cpu    = 500");
@@ -53,7 +54,8 @@ describe("nomad database builder — DB → HCL", () => {
 		});
 		expect(hcl).toContain("cpu    = 500");
 		expect(hcl).toContain("memory = 512");
-		expect(hcl).not.toContain("static =");
+		// primary static engine port is always present; the extra external one is not
+		expect(hcl).toContain("static = 5432");
 		expect(hcl).not.toContain('"external"');
 	});
 });

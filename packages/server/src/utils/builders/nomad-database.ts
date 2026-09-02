@@ -75,8 +75,15 @@ export const generateDatabaseNomadJob = (db: NomadDatabaseInput): string => {
 	}
 	const volumesHcl = volumes.map(hclString).join(", ");
 
-	const ports = [`        port "db" { to = ${db.containerPort} }`];
-	if (db.externalPort)
+	// The engine listens on its standard port as a STATIC host port bound on the
+	// WireGuard overlay, so other services reach it at "<appName>:<containerPort>"
+	// (Consul resolves <appName> to this node). An optional extra external port can
+	// be published too. (Two databases of the same engine pinned to one node would
+	// clash on the static port — Nomad surfaces that as a placement failure.)
+	const ports = [
+		`        port "db" {\n          static = ${db.containerPort}\n        }`,
+	];
+	if (db.externalPort && db.externalPort !== db.containerPort)
 		ports.push(
 			`        port "external" {\n          static = ${db.externalPort}\n          to     = ${db.containerPort}\n        }`,
 		);
@@ -102,6 +109,10 @@ export const generateDatabaseNomadJob = (db: NomadDatabaseInput): string => {
     count = 1
 
     network {
+      dns {
+        servers  = ["10.10.0.1"]
+        searches = ["service.consul"]
+      }
 ${ports.join("\n")}
     }
 
