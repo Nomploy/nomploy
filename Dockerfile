@@ -6,13 +6,20 @@ RUN corepack enable
 RUN corepack prepare pnpm@10.22.0 --activate
 
 FROM base AS build
-COPY . /usr/src/app
 WORKDIR /usr/src/app
 
 RUN apt-get update && apt-get install -y python3 make g++ git python3-pip pkg-config libsecret-1-dev && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+# Dependencies first, keyed ONLY on the lockfile: `pnpm fetch` populates the store
+# from pnpm-lock.yaml alone, so this layer (and the resulting node_modules) is
+# reused across builds whenever the lockfile is unchanged — source edits no longer
+# trigger a full reinstall, and the control plane re-pulls far less on redeploys.
+COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm fetch
+
+# Now bring in the source and install offline from the populated store.
+COPY . .
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --offline
 
 # Deploy only the nomploy app
 
