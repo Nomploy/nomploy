@@ -92,10 +92,13 @@ echo 1 | $SUDO tee /proc/sys/net/bridge/bridge-nf-call-iptables >/dev/null 2>&1 
 # ── Consul + Nomad config (single node: server + client) ─────────────────────
 $SUDO mkdir -p /etc/consul.d /opt/consul /etc/nomad.d /opt/nomad
 
+# Single-node all-in-one: bind everything to 127.0.0.1. This avoids the
+# multiple-private-IP ambiguity ({{ GetPrivateIP }} can pick the docker bridge)
+# and keeps Nomad/Consul internal — only Traefik is exposed publicly.
 $SUDO tee /etc/consul.d/consul.hcl >/dev/null <<'CONSULHCL'
 data_dir    = "/opt/consul"
-bind_addr   = "{{ GetPrivateIP }}"
-client_addr = "0.0.0.0"
+bind_addr   = "127.0.0.1"
+client_addr = "127.0.0.1"
 datacenter  = "dc1"
 server           = true
 bootstrap_expect = 1
@@ -104,8 +107,15 @@ CONSULHCL
 
 $SUDO tee /etc/nomad.d/nomad.hcl >/dev/null <<'NOMADHCL'
 data_dir   = "/opt/nomad"
-bind_addr  = "0.0.0.0"
+bind_addr  = "127.0.0.1"
 datacenter = "dc1"
+
+# Explicit advertise: Nomad refuses to default a server's advertise to localhost.
+advertise {
+  http = "127.0.0.1"
+  rpc  = "127.0.0.1"
+  serf = "127.0.0.1"
+}
 
 server {
   enabled          = true
@@ -130,22 +140,31 @@ plugin "docker" {
 }
 NOMADHCL
 
-echo "==> Starting Consul + Nomad"
-$SUDO systemctl enable consul nomad
-$SUDO systemctl restart consul
-sleep 3
-$SUDO systemctl restart nomad
+# Start via --no-block and poll the HTTP APIs for readiness. The packaged units
+# are Type=notify; if the agent doesn't signal systemd, a blocking `restart`
+# would hang and (under set -e) abort the install even though the agent is up.
+wait_api() {
+  name="$1"; url="$2"
+  echo "==> Waiting for $name API"
+  i=0
+  while [ "$i" -lt 60 ]; do
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      echo "$name is up."
+      return 0
+    fi
+    i=$((i + 1))
+    sleep 2
+  done
+  echo "Error: $name did not become ready in time." >&2
+  return 1
+}
 
-echo "==> Waiting for Nomad API"
-i=0
-while [ "$i" -lt 30 ]; do
-  if curl -fsS http://127.0.0.1:4646/v1/agent/health >/dev/null 2>&1; then
-    echo "Nomad is up."
-    break
-  fi
-  i=$((i + 1))
-  sleep 2
-done
+echo "==> Starting Consul + Nomad"
+$SUDO systemctl enable consul nomad >/dev/null 2>&1 || true
+$SUDO systemctl restart --no-block consul
+wait_api Consul "http://127.0.0.1:8500/v1/status/leader"
+$SUDO systemctl restart --no-block nomad
+wait_api Nomad "http://127.0.0.1:4646/v1/agent/health"
 
 # ── Datastores ────────────────────────────────────────────────────────────────
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-amukds4wi9001583845717ad2}"
@@ -214,6 +233,17 @@ run_container nomploy-traefik \
   -v "$TRAEFIK_DIR/dynamic:/etc/nomploy/traefik/dynamic" \
   traefik:v3.0
 
+# Stable auth secret: generate once and persist, so sessions survive restarts
+# (and we don't fall back to the insecure hardcoded default).
+$SUDO mkdir -p /etc/nomploy
+AUTH_SECRET_FILE=/etc/nomploy/auth-secret
+if [ ! -s "$AUTH_SECRET_FILE" ]; then
+  (openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n') \
+    | $SUDO tee "$AUTH_SECRET_FILE" >/dev/null
+  $SUDO chmod 600 "$AUTH_SECRET_FILE"
+fi
+BETTER_AUTH_SECRET="$($SUDO cat "$AUTH_SECRET_FILE")"
+
 # ── nomploy app ───────────────────────────────────────────────────────────────
 echo "==> Starting nomploy ($NOMPLOY_IMAGE)"
 $SUDO docker pull "$NOMPLOY_IMAGE"
@@ -225,7 +255,8 @@ $SUDO docker run -d --name nomploy --restart unless-stopped \
   -e NODE_ENV=production \
   -e PORT="$NOMPLOY_PORT" \
   -e DATABASE_URL="postgresql://nomploy:${POSTGRES_PASSWORD}@127.0.0.1:5432/nomploy" \
-  -e REDIS_URL="redis://127.0.0.1:6379" \
+  -e REDIS_HOST="127.0.0.1" \
+  -e BETTER_AUTH_SECRET="$BETTER_AUTH_SECRET" \
   -e NOMAD_ADDRESS="http://127.0.0.1:4646" \
   -e CONSUL_ADDRESS="http://127.0.0.1:8500" \
   "$NOMPLOY_IMAGE"

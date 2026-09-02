@@ -23,6 +23,7 @@ on:
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/FUNDING.yml"
       - "signatures/**"
+      - "install.sh"
   workflow_dispatch:
 
 permissions:
