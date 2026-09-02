@@ -31,7 +31,7 @@ WORKDIR /app
 # Set production
 ENV NODE_ENV=production
 
-RUN apt-get update && apt-get install -y curl unzip zip apache2-utils iproute2 rsync git-lfs && git lfs install && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y curl unzip zip apache2-utils iproute2 rsync git-lfs wireguard-tools iptables && git lfs install && rm -rf /var/lib/apt/lists/*
 
 # Nomad CLI — the deploy pipeline runs `nomad job run` to submit jobs to the
 # control plane's own Nomad. (Remote-server deploys use that server's own CLI.)

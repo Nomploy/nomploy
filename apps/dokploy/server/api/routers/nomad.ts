@@ -1,10 +1,26 @@
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { findServerById, updateServerById } from "@nomploy/server";
 import { getNomadBootstrapCommand } from "@nomploy/server/setup/nomad-bootstrap";
-import { execAsyncRemote } from "@nomploy/server/utils/process/execAsync";
+import { getClusterWorkerJoinCommand } from "@nomploy/server/setup/nomad-cluster";
+import {
+	execAsync,
+	execAsyncRemote,
+} from "@nomploy/server/utils/process/execAsync";
 import { TRPCError } from "@trpc/server";
 import { observable } from "@trpc/server/observable";
 import { z } from "zod";
 import { createTRPCRouter, withPermission } from "../trpc";
+
+// Cluster state written by the installer's hub setup and updated as nodes join.
+const CLUSTER_FILE = "/etc/nomploy/cluster.json";
+interface ClusterState {
+	hubPublicKey: string;
+	gossipKey: string;
+	hubWgIp: string;
+	hubEndpoint: string;
+	overlayCidr?: string;
+	peers: { wgIp: string; publicKey: string; serverId: string; name: string }[];
+}
 
 // Control-plane-local Nomad (used when no serverId is given).
 const DEFAULT_ADDRESS = process.env.NOMAD_ADDRESS || "http://127.0.0.1:4646";
@@ -314,6 +330,92 @@ export const nomadRouter = createTRPCRouter({
 						emit.next(`\n❌ ${message}\n`);
 						emit.complete();
 					});
+			});
+		}),
+
+	// Join a server to the Nomad cluster over the WireGuard mesh: install +
+	// configure it as a Consul/Nomad client, then register its WireGuard peer on
+	// the hub (this control plane). Streams progress.
+	joinCluster: withPermission("server", "create")
+		.input(z.object({ serverId: z.string() }))
+		.subscription(async ({ input, ctx }) => {
+			const server = await findServerById(input.serverId);
+			if (server.organizationId !== ctx.session?.activeOrganizationId) {
+				throw new TRPCError({ code: "UNAUTHORIZED" });
+			}
+
+			return observable<string>((emit) => {
+				(async () => {
+					try {
+						if (!existsSync(CLUSTER_FILE)) {
+							emit.next(
+								"❌ Cluster not initialized on the control plane (missing /etc/nomploy/cluster.json).\n",
+							);
+							emit.complete();
+							return;
+						}
+						const cluster: ClusterState = JSON.parse(
+							readFileSync(CLUSTER_FILE, "utf8"),
+						);
+						cluster.peers = cluster.peers || [];
+
+						// Allocate the next free overlay IP (hub keeps .1).
+						const prefix = cluster.hubWgIp.replace(/\.\d+$/, "");
+						const used = new Set([
+							cluster.hubWgIp,
+							...cluster.peers.map((p) => p.wgIp),
+						]);
+						let n = 2;
+						while (used.has(`${prefix}.${n}`)) n++;
+						const wgIp = `${prefix}.${n}`;
+						emit.next(`Assigning overlay IP ${wgIp} to "${server.name}"\n`);
+
+						const script = getClusterWorkerJoinCommand({
+							hubPublicKey: cluster.hubPublicKey,
+							hubEndpoint: cluster.hubEndpoint,
+							gossipKey: cluster.gossipKey,
+							workerWgIp: wgIp,
+							hubWgIp: cluster.hubWgIp,
+							overlayCidr: cluster.overlayCidr,
+						});
+
+						let pubkey = "";
+						await execAsyncRemote(input.serverId, script, (log) => {
+							emit.next(log);
+							const cap = log.match(/WORKER_WG_PUBKEY=(\S+)/)?.[1];
+							if (cap) pubkey = cap.trim();
+						});
+						if (!pubkey) {
+							emit.next("\n❌ Did not receive the worker's WireGuard key\n");
+							emit.complete();
+							return;
+						}
+
+						emit.next(`\nRegistering WireGuard peer on the hub (${wgIp})\n`);
+						await execAsync(
+							`wg set wg0 peer ${pubkey} allowed-ips ${wgIp}/32 && wg-quick save wg0`,
+						);
+
+						cluster.peers.push({
+							wgIp,
+							publicKey: pubkey,
+							serverId: input.serverId,
+							name: server.name,
+						});
+						writeFileSync(CLUSTER_FILE, JSON.stringify(cluster, null, 2));
+						await updateServerById(input.serverId, {
+							nomadAddress: `http://${wgIp}:4646`,
+						});
+
+						emit.next("JOIN_DONE");
+						emit.complete();
+					} catch (err: unknown) {
+						const message =
+							err instanceof Error ? err.message : "Cluster join failed";
+						emit.next(`\n❌ ${message}\n`);
+						emit.complete();
+					}
+				})();
 			});
 		}),
 });
