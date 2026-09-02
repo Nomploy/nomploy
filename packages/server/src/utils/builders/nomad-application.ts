@@ -61,7 +61,9 @@ export const applicationToNomadSpec = (
 	}));
 
 	const entrypoint = [
-		...(application.command ? application.command.split(" ").filter(Boolean) : []),
+		...(application.command
+			? application.command.split(" ").filter(Boolean)
+			: []),
 		...(((application.args as string[] | null) ?? []) as string[]),
 	];
 
