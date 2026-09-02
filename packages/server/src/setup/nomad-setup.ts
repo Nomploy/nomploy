@@ -157,6 +157,9 @@ providers:
       address: "${TRAEFIK_CONSUL_ADDRESS}"
     exposedByDefault: false
     prefix: traefik
+  file:
+    directory: "/etc/nomploy/traefik/dynamic"
+    watch: true
 
 api:
   insecure: true
@@ -192,6 +195,7 @@ certificatesResolvers:
 
 	await execAsync(`docker run -d --name ${name} \
 		${networkFlag} \
+		--add-host nomploy:127.0.0.1 \
 		-v ${configPath}:/etc/traefik/traefik.yml:ro \
 		-v ${acmePath}:/etc/traefik/acme.json \
 		-v ${DYNAMIC_TRAEFIK_PATH}:/etc/nomploy/traefik/dynamic \
