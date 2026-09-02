@@ -65,14 +65,18 @@ export const generateDatabaseNomadJob = (db: NomadDatabaseInput): string => {
 		? Math.round(Number.parseInt(db.memoryLimit) / (1024 * 1024))
 		: 512;
 
-	// Persistent data volume + any user mounts, as docker driver volume strings.
-	const volumes = [`${db.appName}-data:${db.dataPath}`];
+	// Configured mounts as docker driver volume strings. Databases already carry a
+	// volume mount for their data dir, so add a fallback named volume only if no
+	// mount targets the data path (avoids a duplicate mount point).
+	const volumes: string[] = [];
 	for (const m of db.mounts || []) {
 		if (m.type === "volume" && m.volumeName)
 			volumes.push(`${m.volumeName}:${m.mountPath}`);
 		else if (m.type === "bind" && m.hostPath)
 			volumes.push(`${m.hostPath}:${m.mountPath}`);
 	}
+	if (!volumes.some((v) => v.endsWith(`:${db.dataPath}`)))
+		volumes.push(`${db.appName}-data:${db.dataPath}`);
 	const volumesHcl = volumes.map(hclString).join(", ");
 
 	// The engine listens on its standard port as a STATIC host port bound on the
