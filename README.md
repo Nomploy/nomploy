@@ -1,64 +1,75 @@
-<div align="center">
-  <a href="https://nomploy.com">
-    <img src=".github/sponsors/logo.png" alt="Nomploy - Open Source Alternative to Vercel, Heroku and Netlify." width="100%"  />
-  </a>
-  </br>
-  </br>
-  <p>Join us on Discord for help, feedback, and discussions!</p>
-  <a href="https://discord.gg/2tBnJ3jDJc">
-    <img src="https://discordapp.com/api/guilds/1234073262418563112/widget.png?style=banner2" alt="Discord Shield"/>
-  </a>
-</div>
-<br />
+# nomploy
 
+**nomploy** is a free, self-hostable Platform as a Service (PaaS) that deploys and
+manages your applications and databases on a **[HashiCorp Nomad](https://www.nomadproject.io/)**
+cluster.
 
-Nomploy is a free, self-hostable Platform as a Service (PaaS) that simplifies the deployment and management of applications and databases.
+It is a fork of [Dokploy](https://github.com/dokploy/dokploy) that swaps the
+orchestrator from Docker Swarm to Nomad, while keeping Dokploy's UI, git
+integration, domains/SSL, backups, monitoring and notifications. It is licensed
+under the **Apache License 2.0**; the upstream enterprise (source-available)
+modules are **not** included — see [Attribution & License](#-attribution--license).
 
 ## ✨ Features
 
-Nomploy includes multiple features to make your life easier.
-
-- **Applications**: Deploy any type of application (Node.js, PHP, Python, Go, Ruby, etc.).
-- **Databases**: Create and manage databases with support for MySQL, PostgreSQL, MongoDB, MariaDB, libsql, and Redis.
-- **Backups**: Automate backups for databases to an external storage destination.
-- **Docker Compose**: Native support for Docker Compose to manage complex applications.
-- **Multi Node**: Scale applications to multiple nodes using Docker Swarm to manage the cluster.
-- **Templates**: Deploy open-source templates (Plausible, Pocketbase, Calcom, etc.) with a single click.
-- **Traefik Integration**: Automatically integrates with Traefik for routing and load balancing.
-- **Real-time Monitoring**: Monitor CPU, memory, storage, and network usage for every resource.
-- **Docker Management**: Easily deploy and manage Docker containers.
-- **CLI/API**: Manage your applications and databases using the command line or through the API.
-- **Notifications**: Get notified when your deployments succeed or fail (via Slack, Discord, Telegram, Email, etc.).
-- **Multi Server**: Deploy and manage your applications remotely to external servers.
-- **Self-Hosted**: Self-host Nomploy on your VPS.
+- **Nomad orchestration** — deploys run as Nomad jobs; the compose files you
+  already know are translated to Nomad HCL (ports, env, health checks, resources,
+  replicas and autoscaling via `x-nomad-scaling`).
+- **Nomad dashboard** — view jobs, allocations, nodes, logs and cluster
+  resources; scale or stop jobs from the UI. Pick which server's Nomad cluster to
+  view with a per-server selector.
+- **One-click Nomad bootstrap** — install Docker + Consul + Nomad + CNI on a
+  managed server over SSH, straight from the UI.
+- **Applications & databases** — Node.js, PHP, Python, Go, Ruby, …; MySQL,
+  PostgreSQL, MongoDB, MariaDB, libSQL and Redis.
+- **Ingress via Traefik + Consul Catalog** — services register in Consul with
+  Traefik tags and are routed automatically, with Let's Encrypt TLS.
+- **Docker Compose**, **templates**, **backups** (S3), **multi-server**,
+  **real-time monitoring**, **notifications** (Slack/Discord/Telegram/email),
+  and a **tRPC API**.
+- **Self-hosted** — runs on your own VPS.
 
 ## 🚀 Getting Started
 
-To get started, run the following command on a VPS:
-
-Want to skip the installation process? [Try the Nomploy Cloud](https://app.nomploy.com).
+On a fresh Linux VPS (Debian/Ubuntu or RHEL family), run:
 
 ```bash
-curl -sSL https://nomploy.com/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/Nomploy/nomploy/main/install.sh | sh
 ```
 
-For detailed documentation, visit [docs.nomploy.com](https://docs.nomploy.com).
+This installs Docker, Consul, Nomad, the CNI plugins, Traefik, Postgres, Redis
+and the nomploy app, then prints the URL to open.
 
+> The app image is published to `ghcr.io/nomploy/nomploy`. If the container
+> package is private, either make it public in its GitHub package settings or run
+> `docker login ghcr.io` on the server before installing. Override the image with
+> `NOMPLOY_IMAGE=…` if needed.
 
-[Github Sponsors](https://github.com/sponsors/Siumauricio)
+To add Nomad to an **existing** managed server instead, use the **Bootstrap
+Nomad** button in that server's Nomad settings inside the dashboard.
 
-### Contributors 🤝
+## 🧭 How nomploy differs from Dokploy
 
-<a href="https://github.com/nomploy/nomploy/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=nomploy/nomploy" alt="Contributors" />
-</a>
-
-## 📺 Video Tutorial
-
-<a href="https://youtu.be/mznYKPvhcfw">
-  <img src="https://nomploy.com/banner.png" alt="Watch the video" width="400"/>
-</a>
+| | Dokploy | nomploy |
+|---|---|---|
+| Orchestrator | Docker Swarm | HashiCorp Nomad |
+| Service discovery / ingress | Traefik (Docker provider) | Traefik + Consul Catalog |
+| Deploy artifact | Swarm stack / compose | Nomad HCL job (from compose) |
+| Enterprise modules (SSO, audit, custom roles, white-label) | Source-available add-on | Removed; free-tier equivalents |
 
 ## 🤝 Contributing
 
-Check out the [Contributing Guide](CONTRIBUTING.md) for more information.
+See the [Contributing Guide](CONTRIBUTING.md).
+
+## 📝 Attribution & License
+
+nomploy is a fork of **Dokploy** — Copyright © Dokploy Technology, Inc.
+Original project: https://github.com/dokploy/dokploy
+
+The entire repository is licensed under the **Apache License 2.0** (see
+[`LICENSE.MD`](LICENSE.MD)). Upstream Dokploy was dual-licensed: most code under
+Apache-2.0, plus enterprise modules under the separate Dokploy Source Available
+License (DSAL) in `/proprietary` directories. nomploy does **not** ship any
+DSAL-licensed code — those modules were removed and replaced with original,
+Apache-2.0 implementations. Full details and attribution are in the
+[`NOTICE`](NOTICE) file.
