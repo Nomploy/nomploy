@@ -167,6 +167,12 @@ plugin "docker" {
 }
 NOMADHCL
 
+# The docker plugin's auth.config points at /root/.docker/config.json; if it's
+# missing the driver fails to pull ANY image (even public). Create an empty auth
+# config (docker login later fills it for private registries). Before start.
+$SUDO mkdir -p /root/.docker
+[ -s /root/.docker/config.json ] || echo '{"auths":{}}' | $SUDO tee /root/.docker/config.json >/dev/null
+
 # ── Enable + start services ───────────────────────────────────────────────
 echo "==> Starting Consul and Nomad"
 $SUDO systemctl enable consul nomad

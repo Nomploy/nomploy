@@ -33,6 +33,15 @@ ENV NODE_ENV=production
 
 RUN apt-get update && apt-get install -y curl unzip zip apache2-utils iproute2 rsync git-lfs && git lfs install && rm -rf /var/lib/apt/lists/*
 
+# Nomad CLI — the deploy pipeline runs `nomad job run` to submit jobs to the
+# control plane's own Nomad. (Remote-server deploys use that server's own CLI.)
+ARG TARGETARCH
+ARG NOMAD_VERSION=2.0.5
+RUN curl -fsSL "https://releases.hashicorp.com/nomad/${NOMAD_VERSION}/nomad_${NOMAD_VERSION}_linux_${TARGETARCH}.zip" -o /tmp/nomad.zip \
+    && unzip -o /tmp/nomad.zip -d /usr/local/bin/ \
+    && rm /tmp/nomad.zip \
+    && nomad --version
+
 # Copy only the necessary files
 COPY --from=build /prod/nomploy/.next ./.next
 COPY --from=build /prod/nomploy/dist ./dist
