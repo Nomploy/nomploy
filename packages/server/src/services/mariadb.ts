@@ -6,7 +6,7 @@ import {
 	mariadb,
 } from "@nomploy/server/db/schema";
 import { generatePassword } from "@nomploy/server/templates";
-import { buildMariadb } from "@nomploy/server/utils/databases/mariadb";
+import { deployDatabaseToNomad } from "@nomploy/server/utils/databases/nomad-deploy";
 import { pullImage } from "@nomploy/server/utils/docker/utils";
 import { execAsyncRemote } from "@nomploy/server/utils/process/execAsync";
 import { TRPCError } from "@trpc/server";
@@ -147,7 +147,25 @@ export const deployMariadb = async (
 			await pullImage(mariadb.dockerImage, onData);
 		}
 
-		await buildMariadb(mariadb);
+		await deployDatabaseToNomad(
+			{
+				appName: mariadb.appName,
+				image: mariadb.dockerImage,
+				containerPort: 3306,
+				externalPort: mariadb.externalPort,
+				dataPath: "/var/lib/mysql",
+				env: `MARIADB_DATABASE="${mariadb.databaseName}"\nMARIADB_USER="${mariadb.databaseUser}"\nMARIADB_PASSWORD="${mariadb.databasePassword}"\nMARIADB_ROOT_PASSWORD="${mariadb.databaseRootPassword}"${mariadb.env ? `\n${mariadb.env}` : ""}`,
+				projectEnv: mariadb.environment.project.env,
+				environmentEnv: mariadb.environment.env,
+				cpuLimit: mariadb.cpuLimit,
+				memoryLimit: mariadb.memoryLimit,
+				command: mariadb.command,
+				args: mariadb.args,
+				mounts: mariadb.mounts,
+			},
+			mariadb.serverId,
+			onData,
+		);
 		await updateMariadbById(mariadbId, {
 			applicationStatus: "done",
 		});

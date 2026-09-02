@@ -5,7 +5,7 @@ import {
 	redis,
 } from "@nomploy/server/db/schema";
 import { generatePassword } from "@nomploy/server/templates";
-import { buildRedis } from "@nomploy/server/utils/databases/redis";
+import { deployDatabaseToNomad } from "@nomploy/server/utils/databases/nomad-deploy";
 import { pullImage } from "@nomploy/server/utils/docker/utils";
 import { execAsyncRemote } from "@nomploy/server/utils/process/execAsync";
 import { TRPCError } from "@trpc/server";
@@ -117,7 +117,27 @@ export const deployRedis = async (
 			await pullImage(redis.dockerImage, onData);
 		}
 
-		await buildRedis(redis);
+		await deployDatabaseToNomad(
+			{
+				appName: redis.appName,
+				image: redis.dockerImage,
+				containerPort: 6379,
+				externalPort: redis.externalPort,
+				dataPath: "/data",
+				env: `REDIS_PASSWORD="${redis.databasePassword}"${
+					redis.env ? `\n${redis.env}` : ""
+				}`,
+				projectEnv: redis.environment.project.env,
+				environmentEnv: redis.environment.env,
+				cpuLimit: redis.cpuLimit,
+				memoryLimit: redis.memoryLimit,
+				command: redis.command,
+				args: redis.args,
+				mounts: redis.mounts,
+			},
+			redis.serverId,
+			onData,
+		);
 		await updateRedisById(redisId, {
 			applicationStatus: "done",
 		});

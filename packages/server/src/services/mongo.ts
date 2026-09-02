@@ -7,7 +7,7 @@ import {
 	mongo,
 } from "@nomploy/server/db/schema";
 import { generatePassword } from "@nomploy/server/templates";
-import { buildMongo } from "@nomploy/server/utils/databases/mongo";
+import { deployDatabaseToNomad } from "@nomploy/server/utils/databases/nomad-deploy";
 import { pullImage } from "@nomploy/server/utils/docker/utils";
 import { execAsyncRemote } from "@nomploy/server/utils/process/execAsync";
 import { TRPCError } from "@trpc/server";
@@ -162,7 +162,25 @@ export const deployMongo = async (
 			await pullImage(mongo.dockerImage, onData);
 		}
 
-		await buildMongo(mongo);
+		await deployDatabaseToNomad(
+			{
+				appName: mongo.appName,
+				image: mongo.dockerImage,
+				containerPort: 27017,
+				externalPort: mongo.externalPort,
+				dataPath: "/data/db",
+				env: `MONGO_INITDB_ROOT_USERNAME="${mongo.databaseUser}"\nMONGO_INITDB_ROOT_PASSWORD="${mongo.databasePassword}"${mongo.replicaSets ? "\nMONGO_INITDB_DATABASE=admin" : ""}${mongo.env ? `\n${mongo.env}` : ""}`,
+				projectEnv: mongo.environment.project.env,
+				environmentEnv: mongo.environment.env,
+				cpuLimit: mongo.cpuLimit,
+				memoryLimit: mongo.memoryLimit,
+				command: mongo.command,
+				args: mongo.args,
+				mounts: mongo.mounts,
+			},
+			mongo.serverId,
+			onData,
+		);
 		await updateMongoById(mongoId, {
 			applicationStatus: "done",
 		});
