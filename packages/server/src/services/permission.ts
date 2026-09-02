@@ -1,6 +1,6 @@
-import { db } from "@dokploy/server/db";
-import { member, organizationRole } from "@dokploy/server/db/schema";
-import { hasValidLicense } from "@dokploy/server/services/proprietary/license-key";
+import { db } from "@nomploy/server/db";
+import { member, organizationRole } from "@nomploy/server/db/schema";
+import { hasValidLicense } from "@nomploy/server/services/proprietary/license-key";
 import { TRPCError } from "@trpc/server";
 import { and, eq } from "drizzle-orm";
 import {

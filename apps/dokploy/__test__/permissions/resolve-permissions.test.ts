@@ -28,7 +28,7 @@ const mockMemberData = (
 let memberToReturn: ReturnType<typeof mockMemberData> =
 	mockMemberData("member");
 
-vi.mock("@dokploy/server/db", () => ({
+vi.mock("@nomploy/server/db", () => ({
 	db: {
 		query: {
 			member: {
@@ -43,15 +43,15 @@ vi.mock("@dokploy/server/db", () => ({
 	},
 }));
 
-vi.mock("@dokploy/server/services/proprietary/license-key", () => ({
+vi.mock("@nomploy/server/services/proprietary/license-key", () => ({
 	hasValidLicense: vi.fn(() => Promise.resolve(false)),
 }));
 
 const { resolvePermissions } = await import(
-	"@dokploy/server/services/permission"
+	"@nomploy/server/services/permission"
 );
 const { enterpriseOnlyResources, statements } = await import(
-	"@dokploy/server/lib/access-control"
+	"@nomploy/server/lib/access-control"
 );
 
 const ctx = {

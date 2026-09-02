@@ -23,11 +23,11 @@ export type TemplateProps = {
 };
 
 export const BuildFailedEmail = ({
-	projectName = "dokploy",
+	projectName = "nomploy",
 	applicationName = "frontend",
 	applicationType = "application",
 	errorMessage = "Error array.length is not a function",
-	buildLink = "https://dokploy.com/projects/dokploy-test/applications/dokploy-test",
+	buildLink = "https://nomploy.com/projects/nomploy-test/applications/nomploy-test",
 	date = "2023-05-01T00:00:00.000Z",
 }: TemplateProps) => {
 	const previewText = `Build failed for ${applicationName}`;
@@ -51,11 +51,11 @@ export const BuildFailedEmail = ({
 						<Section className="mt-[32px]">
 							<Img
 								src={
-									"https://raw.githubusercontent.com/Dokploy/dokploy/refs/heads/canary/apps/dokploy/logo.png"
+									"https://raw.githubusercontent.com/Nomploy/nomploy/refs/heads/canary/apps/dokploy/logo.png"
 								}
 								width="100"
 								height="50"
-								alt="Dokploy"
+								alt="Nomploy"
 								className="my-0 mx-auto"
 							/>
 						</Section>

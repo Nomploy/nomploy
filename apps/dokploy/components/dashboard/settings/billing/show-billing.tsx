@@ -732,7 +732,7 @@ export const ShowBilling = () => {
 								<Button className="rounded-full bg-[#5965F2] hover:bg-[#4A55E0] w-fit">
 									<Link
 										href="https://discord.gg/2tBnJ3jDJc"
-										aria-label="Dokploy on GitHub"
+										aria-label="Nomploy on GitHub"
 										target="_blank"
 										className="flex flex-row items-center gap-2 text-white"
 									>
@@ -1079,7 +1079,7 @@ export const ShowBilling = () => {
 											</ul>
 											<Button variant="outline" className="mt-6 w-full" asChild>
 												<Link
-													href="https://dokploy.com/contact"
+													href="https://nomploy.com/contact"
 													target="_blank"
 													rel="noopener noreferrer"
 												>
@@ -1170,11 +1170,11 @@ export const ShowBilling = () => {
 														)}
 													>
 														{[
-															"All the features of Dokploy",
+															"All the features of Nomploy",
 															"Unlimited deployments",
 															"Self-hosted on your own infrastructure",
 															"Full access to all deployment features",
-															"Dokploy integration",
+															"Nomploy integration",
 															"Backups",
 															"All Incoming features",
 														].map((feature) => (

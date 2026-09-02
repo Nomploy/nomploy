@@ -1,11 +1,11 @@
-import type { BackupSchedule } from "@dokploy/server/services/backup";
+import type { BackupSchedule } from "@nomploy/server/services/backup";
 import {
 	createDeploymentBackup,
 	updateDeploymentStatus,
-} from "@dokploy/server/services/deployment";
-import { findEnvironmentById } from "@dokploy/server/services/environment";
-import type { Mariadb } from "@dokploy/server/services/mariadb";
-import { findProjectById } from "@dokploy/server/services/project";
+} from "@nomploy/server/services/deployment";
+import { findEnvironmentById } from "@nomploy/server/services/environment";
+import type { Mariadb } from "@nomploy/server/services/mariadb";
+import { findProjectById } from "@nomploy/server/services/project";
 import { sendDatabaseBackupNotifications } from "../notifications/database-backup";
 import { execAsync, execAsyncRemote } from "../process/execAsync";
 import {

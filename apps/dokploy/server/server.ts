@@ -10,9 +10,9 @@ import {
 	initializeNetwork,
 	initSchedules,
 	initVolumeBackupsCronJobs,
-	sendDokployRestartNotifications,
+	sendNomployRestartNotifications,
 	setupDirectories,
-} from "@dokploy/server";
+} from "@nomploy/server";
 import { config } from "dotenv";
 import next from "next";
 import packageInfo from "../package.json";
@@ -42,7 +42,7 @@ const app = next({ dev, turbopack: process.env.TURBOPACK === "1" });
 const handle = app.getRequestHandler();
 void app.prepare().then(async () => {
 	try {
-		console.log("Running DokployVersion: ", packageInfo.version);
+		console.log("Running NomployVersion: ", packageInfo.version);
 		const server = http.createServer((req, res) => {
 			handle(req, res);
 		});
@@ -67,7 +67,7 @@ void app.prepare().then(async () => {
 			await initSchedules();
 			await initCancelDeployments();
 			await initVolumeBackupsCronJobs();
-			await sendDokployRestartNotifications();
+			await sendNomployRestartNotifications();
 		}
 		await initEnterpriseBackupCronJobs();
 

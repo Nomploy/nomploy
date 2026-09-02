@@ -11,7 +11,7 @@ interface Props {
 }
 export const OnboardingLayout = ({ children }: Props) => {
 	const { config: whitelabeling } = useWhitelabelingPublic();
-	const appName = whitelabeling?.appName || "Dokploy";
+	const appName = whitelabeling?.appName || "Nomploy";
 	const appDescription =
 		whitelabeling?.appDescription ||
 		"\u201CThe Open Source alternative to Netlify, Vercel, Heroku.\u201D";
@@ -41,12 +41,12 @@ export const OnboardingLayout = ({ children }: Props) => {
 				</div>
 				<div className="flex items-center gap-4 justify-center absolute bottom-4 right-4 text-muted-foreground">
 					<Button variant="ghost" size="icon">
-						<Link href="https://github.com/dokploy/dokploy">
+						<Link href="https://github.com/nomploy/nomploy">
 							<GithubIcon />
 						</Link>
 					</Button>
 					<Button variant="ghost" size="icon">
-						<Link href="https://x.com/getdokploy">
+						<Link href="https://x.com/getnomploy">
 							<svg
 								stroke="currentColor"
 								fill="currentColor"

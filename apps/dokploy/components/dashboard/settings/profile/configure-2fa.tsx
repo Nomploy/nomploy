@@ -186,7 +186,7 @@ export const Configure2FA = () => {
 		const year = date.getFullYear();
 		const month = String(date.getMonth() + 1).padStart(2, "0");
 		const day = String(date.getDate()).padStart(2, "0");
-		const filename = `dokploy-2fa-backup-codes-${year}${month}${day}.txt`;
+		const filename = `nomploy-2fa-backup-codes-${year}${month}${day}.txt`;
 
 		const backupCodesText = backupCodeTemplate
 			.replace(USERNAME_PLACEHOLDER, currentUser?.user?.email || "unknown")

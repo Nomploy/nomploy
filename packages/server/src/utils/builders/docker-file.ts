@@ -1,7 +1,7 @@
 import {
 	getEnvironmentVariablesObject,
 	prepareEnvironmentVariablesForShell,
-} from "@dokploy/server/utils/docker/utils";
+} from "@nomploy/server/utils/docker/utils";
 import { quote } from "shell-quote";
 import {
 	getBuildAppDirectory,

@@ -3,7 +3,7 @@ import {
 	findUserById,
 	IS_CLOUD,
 	updateUser,
-} from "@dokploy/server";
+} from "@nomploy/server";
 import { TRPCError } from "@trpc/server";
 import Stripe from "stripe";
 import { z } from "zod";
@@ -343,7 +343,7 @@ export const stripeRouter = createTRPCRouter({
 			if (!IS_CLOUD) {
 				throw new TRPCError({
 					code: "BAD_REQUEST",
-					message: "This feature is only available in Dokploy Cloud",
+					message: "This feature is only available in Nomploy Cloud",
 				});
 			}
 			const owner = await findUserById(ctx.user.ownerId);

@@ -124,7 +124,7 @@ export const AddImport = ({ environmentId, projectName }: Props) => {
 			const result = await previewTemplate({
 				appName: data.appName,
 				base64: data.base64.trim(),
-				serverId: data.serverId === "dokploy" ? undefined : data.serverId,
+				serverId: data.serverId === "nomploy" ? undefined : data.serverId,
 			});
 			setTemplateInfo(result);
 			setPreviewOpen(true);
@@ -143,7 +143,7 @@ export const AddImport = ({ environmentId, projectName }: Props) => {
 				appName: data.appName,
 				environmentId,
 				composeType: "docker-compose",
-				serverId: data.serverId === "dokploy" ? undefined : data.serverId,
+				serverId: data.serverId === "nomploy" ? undefined : data.serverId,
 			});
 			await importCompose({
 				composeId: compose.composeId,
@@ -246,22 +246,22 @@ export const AddImport = ({ environmentId, projectName }: Props) => {
 											<Select
 												onValueChange={field.onChange}
 												defaultValue={
-													field.value || (!isCloud ? "dokploy" : undefined)
+													field.value || (!isCloud ? "nomploy" : undefined)
 												}
 											>
 												<SelectTrigger>
 													<SelectValue
 														placeholder={
-															!isCloud ? "Dokploy" : "Select a Server"
+															!isCloud ? "Nomploy" : "Select a Server"
 														}
 													/>
 												</SelectTrigger>
 												<SelectContent>
 													<SelectGroup>
 														{!isCloud && (
-															<SelectItem value="dokploy">
+															<SelectItem value="nomploy">
 																<span className="flex items-center gap-2 justify-between w-full">
-																	<span>Dokploy</span>
+																	<span>Nomploy</span>
 																	<span className="text-muted-foreground text-xs self-center">
 																		Default
 																	</span>

@@ -1,16 +1,16 @@
 {
-	"name": "dokploy",
+	"name": "nomploy",
 	"private": true,
 	"workspaces": [
 		"apps/*",
 		"packages/*"
 	],
 	"scripts": {
-		"dokploy:setup": "pnpm --filter=dokploy run setup",
-		"dokploy:dev": "pnpm --filter=dokploy run dev",
-		"dokploy:build": "pnpm --filter=dokploy run build",
-		"dokploy:start": "pnpm --filter=dokploy run start",
-		"test": "pnpm --filter=dokploy run test",
+		"nomploy:setup": "pnpm --filter=nomploy run setup",
+		"nomploy:dev": "pnpm --filter=nomploy run dev",
+		"nomploy:build": "pnpm --filter=nomploy run build",
+		"nomploy:start": "pnpm --filter=nomploy run start",
+		"test": "pnpm --filter=nomploy run test",
 		"server:script": "pnpm --filter=server run switch:dev",
 		"server:dev": "pnpm --filter=server run dev",
 		"server:build": "pnpm --filter=server run build",
@@ -20,7 +20,7 @@
 		"format-and-lint": "biome check .",
 		"check": "biome check --write --no-errors-on-unmatched --files-ignore-unknown=true",
 		"format-and-lint:fix": "biome check . --write",
-		"generate:openapi": "pnpm --filter=dokploy run generate:openapi"
+		"generate:openapi": "pnpm --filter=nomploy run generate:openapi"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.1.1",

@@ -1,4 +1,4 @@
-import { findGitlabById, updateGitlab } from "@dokploy/server";
+import { findGitlabById, updateGitlab } from "@nomploy/server";
 import type { NextApiRequest, NextApiResponse } from "next";
 
 export default async function handler(
@@ -12,7 +12,7 @@ export default async function handler(
 	}
 
 	const gitlab = await findGitlabById(gitlabId as string);
-	// Use internal URL for token exchange when GitLab is on same instance as Dokploy
+	// Use internal URL for token exchange when GitLab is on same instance as Nomploy
 	const baseUrl = gitlab.gitlabInternalUrl || gitlab.gitlabUrl;
 	const gitlabUrl = new URL(baseUrl);
 

@@ -1,4 +1,4 @@
-import { dbUrl } from "@dokploy/server/db";
+import { dbUrl } from "@nomploy/server/db";
 import { defineConfig } from "drizzle-kit";
 
 export default defineConfig({

@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Readable } from "node:stream";
-import { docker, paths } from "@dokploy/server/constants";
-import type { Compose } from "@dokploy/server/services/compose";
+import { docker, paths } from "@nomploy/server/constants";
+import type { Compose } from "@nomploy/server/services/compose";
 import type { ContainerInfo, ResourceRequirements } from "dockerode";
 import { parse } from "dotenv";
 import { quote } from "shell-quote";
@@ -616,7 +616,7 @@ export const generateConfigContainer = (
 					Networks: networkSwarm,
 				}
 			: {
-					Networks: [{ Target: "dokploy-network" }],
+					Networks: [{ Target: "nomploy-network" }],
 				}),
 		...(endpointSpecSwarm && {
 			EndpointSpec: {
@@ -855,20 +855,20 @@ const getSwarmServiceContainerId = async (
 };
 
 export const checkPostgresHealth = async (): Promise<ServiceHealthStatus> => {
-	const serviceCheck = await checkSwarmServiceRunning("dokploy-postgres");
+	const serviceCheck = await checkSwarmServiceRunning("nomploy-postgres");
 	if (serviceCheck.status === "unhealthy") {
 		return serviceCheck;
 	}
 
 	// Verify PostgreSQL actually accepts connections
-	const containerId = await getSwarmServiceContainerId("dokploy-postgres");
+	const containerId = await getSwarmServiceContainerId("nomploy-postgres");
 	if (!containerId) {
 		return { status: "unhealthy", message: "Could not find running container" };
 	}
 
 	try {
 		const exec = await docker.getContainer(containerId).exec({
-			Cmd: ["pg_isready", "-U", "dokploy"],
+			Cmd: ["pg_isready", "-U", "nomploy"],
 			AttachStdout: true,
 			AttachStderr: true,
 		});
@@ -901,13 +901,13 @@ export const checkPostgresHealth = async (): Promise<ServiceHealthStatus> => {
 };
 
 export const checkRedisHealth = async (): Promise<ServiceHealthStatus> => {
-	const serviceCheck = await checkSwarmServiceRunning("dokploy-redis");
+	const serviceCheck = await checkSwarmServiceRunning("nomploy-redis");
 	if (serviceCheck.status === "unhealthy") {
 		return serviceCheck;
 	}
 
 	// Verify Redis actually responds to PING
-	const containerId = await getSwarmServiceContainerId("dokploy-redis");
+	const containerId = await getSwarmServiceContainerId("nomploy-redis");
 	if (!containerId) {
 		return { status: "unhealthy", message: "Could not find running container" };
 	}
@@ -947,7 +947,7 @@ export const checkRedisHealth = async (): Promise<ServiceHealthStatus> => {
 export const checkTraefikHealth = async (): Promise<ServiceHealthStatus> => {
 	// Traefik can run as a standalone container or a swarm service
 	try {
-		const container = docker.getContainer("dokploy-traefik");
+		const container = docker.getContainer("nomploy-traefik");
 		const info = await container.inspect();
 		if (!info.State.Running) {
 			return {
@@ -958,6 +958,6 @@ export const checkTraefikHealth = async (): Promise<ServiceHealthStatus> => {
 		return { status: "healthy" };
 	} catch {
 		// Not a standalone container, check as swarm service
-		return checkSwarmServiceRunning("dokploy-traefik");
+		return checkSwarmServiceRunning("nomploy-traefik");
 	}
 };

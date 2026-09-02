@@ -1,11 +1,11 @@
-import type { BackupSchedule } from "@dokploy/server/services/backup";
+import type { BackupSchedule } from "@nomploy/server/services/backup";
 import {
 	createDeploymentBackup,
 	updateDeploymentStatus,
-} from "@dokploy/server/services/deployment";
-import { findEnvironmentById } from "@dokploy/server/services/environment";
-import type { Libsql } from "@dokploy/server/services/libsql";
-import { findProjectById } from "@dokploy/server/services/project";
+} from "@nomploy/server/services/deployment";
+import { findEnvironmentById } from "@nomploy/server/services/environment";
+import type { Libsql } from "@nomploy/server/services/libsql";
+import { findProjectById } from "@nomploy/server/services/project";
 import { sendDatabaseBackupNotifications } from "../notifications/database-backup";
 import { execAsync, execAsyncRemote } from "../process/execAsync";
 import {

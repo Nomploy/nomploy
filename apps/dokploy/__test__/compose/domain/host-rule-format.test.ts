@@ -1,5 +1,5 @@
-import type { Domain } from "@dokploy/server";
-import { createDomainLabels } from "@dokploy/server";
+import type { Domain } from "@nomploy/server";
+import { createDomainLabels } from "@nomploy/server";
 import { describe, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
 

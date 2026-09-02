@@ -7,7 +7,7 @@ import {
 	IS_CLOUD,
 	recordAdvancedStats,
 	validateRequest,
-} from "@dokploy/server";
+} from "@nomploy/server";
 import { WebSocketServer } from "ws";
 
 export const setupDockerStatsMonitoringSocketServer = (
@@ -57,8 +57,8 @@ export const setupDockerStatsMonitoringSocketServer = (
 		}
 		const intervalId = setInterval(async () => {
 			try {
-				// Special case: when monitoring "dokploy", get host system stats instead of container stats
-				if (appName === "dokploy") {
+				// Special case: when monitoring "nomploy", get host system stats instead of container stats
+				if (appName === "nomploy") {
 					const stat = await getHostSystemStats();
 
 					await recordAdvancedStats(stat, appName);

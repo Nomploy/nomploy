@@ -1,8 +1,8 @@
 import fs, { createReadStream, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
-import { paths } from "@dokploy/server/constants";
-import type { Domain } from "@dokploy/server/services/domain";
+import { paths } from "@nomploy/server/constants";
+import type { Domain } from "@nomploy/server/services/domain";
 import { parse, stringify } from "yaml";
 import { encodeBase64 } from "../docker/utils";
 import { execAsync, execAsyncRemote } from "../process/execAsync";
@@ -165,8 +165,8 @@ export const readMonitoringConfig = async (readAll = false) => {
 						trimmed.endsWith("}")
 					) {
 						const log = JSON.parse(trimmed);
-						// Exclude Dokploy service app and Dashboard requests
-						if (log.ServiceName !== "dokploy-service-app@file") {
+						// Exclude Nomploy service app and Dashboard requests
+						if (log.ServiceName !== "nomploy-service-app@file") {
 							content += `${line}\n`;
 							validCount++;
 							if (validCount >= 500) {

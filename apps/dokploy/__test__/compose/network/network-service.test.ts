@@ -1,8 +1,8 @@
-import type { ComposeSpecification } from "@dokploy/server";
+import type { ComposeSpecification } from "@nomploy/server";
 import {
 	addSuffixToServiceNetworks,
 	generateRandomHash,
-} from "@dokploy/server";
+} from "@nomploy/server";
 import { expect, test } from "vitest";
 import { parse } from "yaml";
 
@@ -192,10 +192,10 @@ services:
   web:
     image: nginx:latest
     networks:
-      - dokploy-network
+      - nomploy-network
 `;
 
-test("It shouldn't add suffix to dokploy-network in services", () => {
+test("It shouldn't add suffix to nomploy-network in services", () => {
 	const composeData = parse(composeFile7) as ComposeSpecification;
 
 	const suffix = generateRandomHash();
@@ -207,7 +207,7 @@ test("It shouldn't add suffix to dokploy-network in services", () => {
 	const service = networks.web;
 
 	expect(service).toBeDefined();
-	expect(service?.networks).toContain("dokploy-network");
+	expect(service?.networks).toContain("nomploy-network");
 });
 
 const composeFile8 = `
@@ -219,7 +219,7 @@ services:
     networks:
       - frontend
       - backend
-      - dokploy-network
+      - nomploy-network
 
 
   api:
@@ -228,23 +228,23 @@ services:
       frontend:
         aliases:
           - api
-      dokploy-network:
+      nomploy-network:
         aliases:
           - api
   redis:
     image: redis:alpine
     networks:
-      dokploy-network:
+      nomploy-network:
   db:
     image: myapi:latest
     networks:
-      dokploy-network:
+      nomploy-network:
         aliases:
           - apid
 
 `;
 
-test("It shouldn't add suffix to dokploy-network in services multiples cases", () => {
+test("It shouldn't add suffix to nomploy-network in services multiples cases", () => {
 	const composeData = parse(composeFile8) as ComposeSpecification;
 
 	const suffix = generateRandomHash();
@@ -267,9 +267,9 @@ test("It shouldn't add suffix to dokploy-network in services multiples cases", (
 	};
 
 	expect(service).toBeDefined();
-	expect(service?.networks).toContain("dokploy-network");
+	expect(service?.networks).toContain("nomploy-network");
 
-	expect(redis?.networks).toHaveProperty("dokploy-network");
-	expect(dbNetworks["dokploy-network"]).toBeDefined();
-	expect(apiNetworks["dokploy-network"]).toBeDefined();
+	expect(redis?.networks).toHaveProperty("nomploy-network");
+	expect(dbNetworks["nomploy-network"]).toBeDefined();
+	expect(apiNetworks["nomploy-network"]).toBeDefined();
 });

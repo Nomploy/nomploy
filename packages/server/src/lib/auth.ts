@@ -66,7 +66,7 @@ const { handler, api } = betterAuth({
 			allowDifferentEmails: true,
 		},
 	},
-	appName: "Dokploy",
+	appName: "Nomploy",
 	socialProviders: {
 		github: {
 			clientId: process.env.GITHUB_CLIENT_ID as string,
@@ -149,12 +149,12 @@ const { handler, api } = betterAuth({
 			create: {
 				before: async (_user, context) => {
 					if (!IS_CLOUD) {
-						const xDokployToken =
-							context?.request?.headers?.get("x-dokploy-token");
-						if (xDokployToken) {
+						const xNomployToken =
+							context?.request?.headers?.get("x-nomploy-token");
+						if (xNomployToken) {
 							let invitation: Awaited<ReturnType<typeof getUserByToken>>;
 							try {
-								invitation = await getUserByToken(xDokployToken);
+								invitation = await getUserByToken(xNomployToken);
 							} catch {
 								throw new APIError("BAD_REQUEST", {
 									message: "Invalid invitation token",

@@ -12,7 +12,7 @@ import {
 	getServiceContainersByAppName,
 	getStackContainersByAppName,
 	uploadFileToContainer,
-} from "@dokploy/server";
+} from "@nomploy/server";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { audit } from "@/server/api/utils/audit";
@@ -191,7 +191,7 @@ export const dockerRouter = createTRPCRouter({
 	getContainersByAppNameMatch: withPermission("service", "read")
 		.input(
 			z.object({
-				appType: z.enum(["stack", "docker-compose"]).optional(),
+				appType: z.enum(["stack", "docker-compose", "nomad"]).optional(),
 				appName: z.string().min(1).regex(containerIdRegex, "Invalid app name."),
 				serverId: z.string().optional(),
 			}),

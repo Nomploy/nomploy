@@ -15,7 +15,7 @@ ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable && corepack prepare pnpm@10.22.0 --activate
 
 # Create workspace directory
-WORKDIR /workspaces/dokploy
+WORKDIR /workspaces/nomploy
 
 # Set up user permissions
 USER node

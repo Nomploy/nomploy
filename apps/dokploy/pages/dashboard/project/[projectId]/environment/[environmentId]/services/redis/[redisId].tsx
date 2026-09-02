@@ -1,4 +1,4 @@
-import { validateRequest } from "@dokploy/server/lib/auth";
+import { validateRequest } from "@nomploy/server/lib/auth";
 import { createServerSideHelpers } from "@trpc/react-query/server";
 import copy from "copy-to-clipboard";
 import { HelpCircle, ServerOff } from "lucide-react";
@@ -69,7 +69,7 @@ const Redis = (
 		projectId: data?.environment?.projectId || "",
 	});
 	const { config: whitelabeling } = useWhitelabeling();
-	const appName = whitelabeling?.appName || "Dokploy";
+	const appName = whitelabeling?.appName || "Nomploy";
 	const environmentDropdownItems =
 		environments?.map((env) => ({
 			name: env.name,
@@ -128,7 +128,7 @@ const Redis = (
 													: "destructive"
 										}
 									>
-										{data?.server?.name || "Dokploy Server"}
+										{data?.server?.name || "Nomploy Server"}
 									</Badge>
 									{data?.server?.serverStatus === "inactive" && (
 										<TooltipProvider delayDuration={0}>

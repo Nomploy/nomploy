@@ -54,7 +54,7 @@ interface TemplateMetadata {
  * Fetches the list of available templates from meta.json
  */
 export async function fetchTemplatesList(
-	baseUrl = "https://templates.dokploy.com",
+	baseUrl = "https://templates.nomploy.com",
 ): Promise<TemplateMetadata[]> {
 	const response = await fetch(`${baseUrl}/meta.json`, {
 		signal: AbortSignal.timeout(10000),
@@ -79,7 +79,7 @@ export async function fetchTemplatesList(
  */
 export async function fetchTemplateFiles(
 	templateId: string,
-	baseUrl = "https://templates.dokploy.com",
+	baseUrl = "https://templates.nomploy.com",
 ): Promise<{ config: CompleteTemplate; dockerCompose: string }> {
 	const timeout = AbortSignal.timeout(10000);
 	const [templateYmlResponse, dockerComposeResponse] = await Promise.all([

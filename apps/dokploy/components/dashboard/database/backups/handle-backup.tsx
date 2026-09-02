@@ -217,7 +217,7 @@ export const HandleBackup = ({
 		defaultValues: {
 			database:
 				databaseType === "web-server"
-					? "dokploy"
+					? "nomploy"
 					: databaseType === "libsql"
 						? "iku.db"
 						: "",
@@ -256,7 +256,7 @@ export const HandleBackup = ({
 			database: backup?.database
 				? backup?.database
 				: databaseType === "web-server"
-					? "dokploy"
+					? "nomploy"
 					: databaseType === "libsql"
 						? "iku.db"
 						: "",
@@ -589,7 +589,7 @@ export const HandleBackup = ({
 														databaseType === "web-server" ||
 														databaseType === "libsql"
 													}
-													placeholder={"dokploy"}
+													placeholder={"nomploy"}
 													{...field}
 												/>
 											</FormControl>
@@ -609,7 +609,7 @@ export const HandleBackup = ({
 										<FormItem>
 											<FormLabel>Prefix Destination</FormLabel>
 											<FormControl>
-												<Input placeholder={"dokploy/"} {...field} />
+												<Input placeholder={"nomploy/"} {...field} />
 											</FormControl>
 											<FormDescription>
 												Use if you want to back up in a specific path of your

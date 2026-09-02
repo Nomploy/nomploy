@@ -1,14 +1,14 @@
 import { join } from "node:path";
-import { paths } from "@dokploy/server/constants";
+import { paths } from "@nomploy/server/constants";
 import type {
 	apiBitbucketTestConnection,
 	apiFindBitbucketBranches,
-} from "@dokploy/server/db/schema";
+} from "@nomploy/server/db/schema";
 import {
 	type Bitbucket,
 	findBitbucketById,
-} from "@dokploy/server/services/bitbucket";
-import type { InferResultType } from "@dokploy/server/types/with";
+} from "@nomploy/server/services/bitbucket";
+import type { InferResultType } from "@nomploy/server/types/with";
 import { TRPCError } from "@trpc/server";
 import type { z } from "zod";
 

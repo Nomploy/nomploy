@@ -1,4 +1,4 @@
-import { IS_CLOUD, validateRequest } from "@dokploy/server";
+import { IS_CLOUD, validateRequest } from "@nomploy/server";
 import { createServerSideHelpers } from "@trpc/react-query/server";
 import type { GetServerSidePropsContext } from "next";
 import type { ReactElement } from "react";
@@ -32,7 +32,7 @@ const Page = ({ isCloud }: Props) => {
 								lockedProps={{
 									title: "Enterprise SSO",
 									description:
-										"Single sign-on (SSO) with OIDC and SAML is part of Dokploy Enterprise. Add a valid license to configure it.",
+										"Single sign-on (SSO) with OIDC and SAML is part of Nomploy Enterprise. Add a valid license to configure it.",
 									ctaLabel: "Go to License",
 								}}
 							>
@@ -48,7 +48,7 @@ const Page = ({ isCloud }: Props) => {
 								lockedProps={{
 									title: "Self-hosted Restrictions",
 									description:
-										"Deployment and authentication restrictions are part of Dokploy Enterprise. Add a valid license to configure them.",
+										"Deployment and authentication restrictions are part of Nomploy Enterprise. Add a valid license to configure them.",
 									ctaLabel: "Go to License",
 								}}
 							>

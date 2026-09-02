@@ -1,4 +1,4 @@
-import { parseRawConfig, processLogs } from "@dokploy/server";
+import { parseRawConfig, processLogs } from "@nomploy/server";
 import { describe, expect, it } from "vitest";
 
 const sampleLogEntry = `{"ClientAddr":"172.19.0.1:56732","ClientHost":"172.19.0.1","ClientPort":"56732","ClientUsername":"-","DownstreamContentSize":0,"DownstreamStatus":304,"Duration":14729375,"OriginContentSize":0,"OriginDuration":14051833,"OriginStatus":304,"Overhead":677542,"RequestAddr":"s222-umami-c381af.traefik.me","RequestContentSize":0,"RequestCount":122,"RequestHost":"s222-umami-c381af.traefik.me","RequestMethod":"GET","RequestPath":"/dashboard?_rsc=1rugv","RequestPort":"-","RequestProtocol":"HTTP/1.1","RequestScheme":"http","RetryAttempts":0,"RouterName":"s222-umami-60e104-47-web@docker","ServiceAddr":"10.0.1.15:3000","ServiceName":"s222-umami-60e104-47-web@docker","ServiceURL":{"Scheme":"http","Opaque":"","User":null,"Host":"10.0.1.15:3000","Path":"","RawPath":"","ForceQuery":false,"RawQuery":"","Fragment":"","RawFragment":""},"StartLocal":"2024-08-25T04:34:37.306691884Z","StartUTC":"2024-08-25T04:34:37.306691884Z","entryPointName":"web","level":"info","msg":"","time":"2024-08-25T04:34:37Z"}`;
@@ -55,21 +55,21 @@ describe("processLogs", () => {
 		expect(result.data).toHaveLength(2);
 	});
 
-	it("should filter out Dokploy dashboard requests", () => {
-		const dokployDashboardEntry = `{"ClientAddr":"172.71.187.131:9485","ClientHost":"172.71.187.131","ClientPort":"9485","ClientUsername":"-","DownstreamContentSize":14550,"DownstreamStatus":200,"Duration":57681682,"OriginContentSize":14550,"OriginDuration":57612242,"OriginStatus":200,"Overhead":69440,"RequestAddr":"hostinger.dokploy.com","RequestContentSize":0,"RequestCount":20142,"RequestHost":"hostinger.dokploy.com","RequestMethod":"GET","RequestPath":"/_next/data/cb_zzI4Rp9G7Q7djrFKh0/en/dashboard/traefik.json","RequestPort":"-","RequestProtocol":"HTTP/2.0","RequestScheme":"https","RetryAttempts":0,"RouterName":"dokploy-router-app-secure@file","ServiceAddr":"dokploy:3000","ServiceName":"dokploy-service-app@file","ServiceURL":"http://dokploy:3000","StartLocal":"2025-12-10T05:10:41.957755949Z","StartUTC":"2025-12-10T05:10:41.957755949Z","TLSCipher":"TLS_AES_128_GCM_SHA256","TLSVersion":"1.3","entryPointName":"websecure","level":"info","msg":"","time":"2025-12-10T05:10:42Z"}`;
+	it("should filter out Nomploy dashboard requests", () => {
+		const nomployDashboardEntry = `{"ClientAddr":"172.71.187.131:9485","ClientHost":"172.71.187.131","ClientPort":"9485","ClientUsername":"-","DownstreamContentSize":14550,"DownstreamStatus":200,"Duration":57681682,"OriginContentSize":14550,"OriginDuration":57612242,"OriginStatus":200,"Overhead":69440,"RequestAddr":"hostinger.nomploy.com","RequestContentSize":0,"RequestCount":20142,"RequestHost":"hostinger.nomploy.com","RequestMethod":"GET","RequestPath":"/_next/data/cb_zzI4Rp9G7Q7djrFKh0/en/dashboard/traefik.json","RequestPort":"-","RequestProtocol":"HTTP/2.0","RequestScheme":"https","RetryAttempts":0,"RouterName":"nomploy-router-app-secure@file","ServiceAddr":"nomploy:3000","ServiceName":"nomploy-service-app@file","ServiceURL":"http://nomploy:3000","StartLocal":"2025-12-10T05:10:41.957755949Z","StartUTC":"2025-12-10T05:10:41.957755949Z","TLSCipher":"TLS_AES_128_GCM_SHA256","TLSVersion":"1.3","entryPointName":"websecure","level":"info","msg":"","time":"2025-12-10T05:10:42Z"}`;
 
-		// Test with only Dokploy dashboard entry - should be filtered out
-		const resultOnlyDokploy = parseRawConfig(dokployDashboardEntry);
-		expect(resultOnlyDokploy.data).toHaveLength(0);
-		expect(resultOnlyDokploy.totalCount).toBe(0);
+		// Test with only Nomploy dashboard entry - should be filtered out
+		const resultOnlyNomploy = parseRawConfig(nomployDashboardEntry);
+		expect(resultOnlyNomploy.data).toHaveLength(0);
+		expect(resultOnlyNomploy.totalCount).toBe(0);
 
-		// Test with mixed entries - Dokploy should be filtered, others should remain
-		const mixedEntries = `${dokployDashboardEntry}\n${sampleLogEntry}`;
+		// Test with mixed entries - Nomploy should be filtered, others should remain
+		const mixedEntries = `${nomployDashboardEntry}\n${sampleLogEntry}`;
 		const resultMixed = parseRawConfig(mixedEntries);
 		expect(resultMixed.data).toHaveLength(1);
 		expect(resultMixed.totalCount).toBe(1);
 		expect(resultMixed.data[0]?.ServiceName).not.toBe(
-			"dokploy-service-app@file",
+			"nomploy-service-app@file",
 		);
 	});
 });

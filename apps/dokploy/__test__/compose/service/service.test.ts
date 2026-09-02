@@ -1,8 +1,8 @@
-import type { ComposeSpecification } from "@dokploy/server";
+import type { ComposeSpecification } from "@nomploy/server";
 import {
 	addSuffixToAllServiceNames,
 	addSuffixToServiceNames,
-} from "@dokploy/server";
+} from "@nomploy/server";
 import { expect, test } from "vitest";
 import { parse } from "yaml";
 

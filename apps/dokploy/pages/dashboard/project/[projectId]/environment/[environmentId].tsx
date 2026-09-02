@@ -1,5 +1,5 @@
-import type { findEnvironmentById } from "@dokploy/server";
-import { validateRequest } from "@dokploy/server/lib/auth";
+import type { findEnvironmentById } from "@nomploy/server";
+import { validateRequest } from "@nomploy/server/lib/auth";
 import { createServerSideHelpers } from "@trpc/react-query/server";
 import {
 	Ban,
@@ -400,7 +400,7 @@ const EnvironmentPage = (
 			{ enabled: !!selectedTargetProject },
 		);
 	const { config: whitelabeling } = useWhitelabeling();
-	const appName = whitelabeling?.appName || "Dokploy";
+	const appName = whitelabeling?.appName || "Nomploy";
 
 	const emptyServices =
 		!currentEnvironment ||
@@ -974,7 +974,7 @@ const EnvironmentPage = (
 		return Array.from(servers.values());
 	}, [applications]);
 
-	// Check if there are services without a server (Dokploy server)
+	// Check if there are services without a server (Nomploy server)
 	const hasServicesWithoutServer = useMemo(() => {
 		if (!applications) return false;
 		return applications.some((service) => !service.serverId);
@@ -1578,7 +1578,7 @@ const EnvironmentPage = (
 														<SelectItem value="dokploy-server">
 															<div className="flex items-center gap-2">
 																<ServerIcon className="size-4" />
-																<span>Dokploy server</span>
+																<span>Nomploy server</span>
 															</div>
 														</SelectItem>
 													)}

@@ -1,6 +1,6 @@
-import type { apiRestoreBackup } from "@dokploy/server/db/schema";
-import type { Destination } from "@dokploy/server/services/destination";
-import type { MySql } from "@dokploy/server/services/mysql";
+import type { apiRestoreBackup } from "@nomploy/server/db/schema";
+import type { Destination } from "@nomploy/server/services/destination";
+import type { MySql } from "@nomploy/server/services/mysql";
 import type { z } from "zod";
 import { getS3Credentials } from "../backups/utils";
 import { execAsync, execAsyncRemote } from "../process/execAsync";

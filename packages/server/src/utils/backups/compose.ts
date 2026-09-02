@@ -1,11 +1,11 @@
-import type { BackupSchedule } from "@dokploy/server/services/backup";
-import type { Compose } from "@dokploy/server/services/compose";
+import type { BackupSchedule } from "@nomploy/server/services/backup";
+import type { Compose } from "@nomploy/server/services/compose";
 import {
 	createDeploymentBackup,
 	updateDeploymentStatus,
-} from "@dokploy/server/services/deployment";
-import { findEnvironmentById } from "@dokploy/server/services/environment";
-import { findProjectById } from "@dokploy/server/services/project";
+} from "@nomploy/server/services/deployment";
+import { findEnvironmentById } from "@nomploy/server/services/environment";
+import { findProjectById } from "@nomploy/server/services/project";
 import { sendDatabaseBackupNotifications } from "../notifications/database-backup";
 import { execAsync, execAsyncRemote } from "../process/execAsync";
 import {

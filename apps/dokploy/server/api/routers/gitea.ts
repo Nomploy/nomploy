@@ -8,8 +8,8 @@ import {
 	testGiteaConnection,
 	updateGitea,
 	updateGitProvider,
-} from "@dokploy/server";
-import { db } from "@dokploy/server/db";
+} from "@nomploy/server";
+import { db } from "@nomploy/server/db";
 import { TRPCError } from "@trpc/server";
 import {
 	createTRPCRouter,

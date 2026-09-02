@@ -42,7 +42,7 @@ export const ToggleRemoteServersOnly = () => {
 					<TooltipContent side="top" className="max-w-sm">
 						<p>
 							When enabled, all services (applications, databases, compose) must
-							be deployed to a remote server. Deploying directly to the Dokploy
+							be deployed to a remote server. Deploying directly to the Nomploy
 							host VM is not allowed.
 						</p>
 					</TooltipContent>

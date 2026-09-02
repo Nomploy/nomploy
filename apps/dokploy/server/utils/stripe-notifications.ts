@@ -1,6 +1,6 @@
-import InvoiceNotificationEmail from "@dokploy/server/emails/emails/invoice-notification";
-import PaymentFailedEmail from "@dokploy/server/emails/emails/payment-failed";
-import { sendEmail } from "@dokploy/server/verification/send-verification-email";
+import InvoiceNotificationEmail from "@nomploy/server/emails/emails/invoice-notification";
+import PaymentFailedEmail from "@nomploy/server/emails/emails/payment-failed";
+import { sendEmail } from "@nomploy/server/verification/send-verification-email";
 import { renderAsync } from "@react-email/components";
 import { format } from "date-fns";
 import type Stripe from "stripe";
@@ -51,7 +51,7 @@ export const sendInvoiceEmail = async (
 			const pdfBuffer = await downloadPdf(invoice.invoice_pdf);
 			if (pdfBuffer) {
 				attachments.push({
-					filename: `dokploy-invoice-${invoice.number || invoice.id}.pdf`,
+					filename: `nomploy-invoice-${invoice.number || invoice.id}.pdf`,
 					content: pdfBuffer,
 				});
 			}
@@ -59,7 +59,7 @@ export const sendInvoiceEmail = async (
 
 		await sendEmail({
 			email: admin.email,
-			subject: `Dokploy Invoice ${invoice.number || ""} - ${amountFormatted}`,
+			subject: `Nomploy Invoice ${invoice.number || ""} - ${amountFormatted}`,
 			text: htmlContent,
 			attachments,
 		});
@@ -97,7 +97,7 @@ export const sendPaymentFailedEmail = async (
 
 		await sendEmail({
 			email: admin.email,
-			subject: `Action required: Dokploy payment failed - ${amountFormatted}`,
+			subject: `Action required: Nomploy payment failed - ${amountFormatted}`,
 			text: htmlContent,
 		});
 

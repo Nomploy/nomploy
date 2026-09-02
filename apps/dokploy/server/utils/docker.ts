@@ -1,4 +1,4 @@
-import { execAsync } from "@dokploy/server";
+import { execAsync } from "@nomploy/server";
 
 /** Returns if the current operating system is Windows Subsystem for Linux (WSL). */
 export const isWSL = async () => {

@@ -1,5 +1,5 @@
-import type { Schema } from "@dokploy/server/templates";
-import { processValue } from "@dokploy/server/templates/processors";
+import type { Schema } from "@nomploy/server/templates";
+import { processValue } from "@nomploy/server/templates/processors";
 import { describe, expect, it } from "vitest";
 
 describe("helpers functions", () => {
@@ -213,7 +213,7 @@ describe("helpers functions", () => {
 			expect(decodedPayload).toHaveProperty("iat");
 			expect(decodedPayload).toHaveProperty("iss");
 			expect(decodedPayload).toHaveProperty("exp");
-			expect(decodedPayload.iss).toEqual("dokploy");
+			expect(decodedPayload.iss).toEqual("nomploy");
 		});
 		it.each([6, 8, 12, 16, 32])(
 			"should generate a random hex string from parameter %d byte length",
@@ -239,7 +239,7 @@ describe("helpers functions", () => {
 			expect(decodedPayload).toHaveProperty("iat");
 			expect(decodedPayload).toHaveProperty("iss");
 			expect(decodedPayload).toHaveProperty("exp");
-			expect(decodedPayload.iss).toEqual("dokploy");
+			expect(decodedPayload.iss).toEqual("nomploy");
 		});
 	});
 	describe("${jwt:secret:payload}", () => {

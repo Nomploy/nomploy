@@ -1,8 +1,8 @@
 import fs, { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { paths } from "@dokploy/server/constants";
-import type { Compose } from "@dokploy/server/services/compose";
-import type { Domain } from "@dokploy/server/services/domain";
+import { paths } from "@nomploy/server/constants";
+import type { Compose } from "@nomploy/server/services/compose";
+import type { Domain } from "@nomploy/server/services/domain";
 import { parse, stringify } from "yaml";
 import { execAsyncRemote } from "../process/execAsync";
 import { cloneBitbucketRepository } from "../providers/bitbucket";
@@ -208,29 +208,29 @@ export const addDomainToCompose = async (
 			labels.unshift(...httpLabels);
 			if (!compose.isolatedDeployment) {
 				if (compose.composeType === "docker-compose") {
-					if (!labels.includes("traefik.docker.network=dokploy-network")) {
-						labels.unshift("traefik.docker.network=dokploy-network");
+					if (!labels.includes("traefik.docker.network=nomploy-network")) {
+						labels.unshift("traefik.docker.network=nomploy-network");
 					}
 				} else {
 					// Stack Case
-					if (!labels.includes("traefik.swarm.network=dokploy-network")) {
-						labels.unshift("traefik.swarm.network=dokploy-network");
+					if (!labels.includes("traefik.swarm.network=nomploy-network")) {
+						labels.unshift("traefik.swarm.network=nomploy-network");
 					}
 				}
 			}
 		}
 
 		if (!compose.isolatedDeployment) {
-			// Add the dokploy-network to the service
-			result.services[serviceName].networks = addDokployNetworkToService(
+			// Add the nomploy-network to the service
+			result.services[serviceName].networks = addNomployNetworkToService(
 				result.services[serviceName].networks,
 			);
 		}
 	}
 
-	// Add dokploy-network to the root of the compose file
+	// Add nomploy-network to the root of the compose file
 	if (!compose.isolatedDeployment) {
-		result.networks = addDokployNetworkToRoot(result.networks);
+		result.networks = addNomployNetworkToRoot(result.networks);
 	}
 
 	return result;
@@ -347,11 +347,11 @@ export const createDomainLabels = (
 	return labels;
 };
 
-export const addDokployNetworkToService = (
+export const addNomployNetworkToService = (
 	networkService: DefinitionsService["networks"],
 ) => {
 	let networks = networkService;
-	const network = "dokploy-network";
+	const network = "nomploy-network";
 	const defaultNetwork = "default";
 	if (!networks) {
 		networks = [];
@@ -376,11 +376,11 @@ export const addDokployNetworkToService = (
 	return networks;
 };
 
-export const addDokployNetworkToRoot = (
+export const addNomployNetworkToRoot = (
 	networkRoot: PropertiesNetworks | undefined,
 ) => {
 	let networks = networkRoot;
-	const network = "dokploy-network";
+	const network = "nomploy-network";
 
 	if (!networks) {
 		networks = {};

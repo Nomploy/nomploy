@@ -1,12 +1,12 @@
 import { createAccessControl } from "better-auth/plugins/access";
 
 /**
- * Dokploy Access Control Statements
+ * Nomploy Access Control Statements
  *
  * Defines all resources and their possible actions across the platform.
  * The first 5 (organization, member, invitation, team, ac) are better-auth defaults
  * used internally by the organization plugin.
- * The rest are Dokploy-specific resources.
+ * The rest are Nomploy-specific resources.
  *
  * Enterprise-only resources (only assignable via custom roles):
  * deployment, envVars, server, registry, certificate, backup, domain, logs, monitoring
@@ -19,7 +19,7 @@ export const statements = {
 	team: ["create", "update", "delete"],
 	ac: ["create", "read", "update", "delete"],
 
-	// Dokploy core resources (free tier)
+	// Nomploy core resources (free tier)
 	project: ["create", "delete"],
 	service: ["create", "read", "delete"],
 	environment: ["create", "read", "delete"],

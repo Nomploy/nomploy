@@ -1,14 +1,14 @@
-import * as adminService from "@dokploy/server/services/admin";
-import * as applicationService from "@dokploy/server/services/application";
-import { deployApplication } from "@dokploy/server/services/application";
-import * as deploymentService from "@dokploy/server/services/deployment";
-import * as builders from "@dokploy/server/utils/builders";
-import * as notifications from "@dokploy/server/utils/notifications/build-success";
-import * as execProcess from "@dokploy/server/utils/process/execAsync";
-import * as gitProvider from "@dokploy/server/utils/providers/git";
+import * as adminService from "@nomploy/server/services/admin";
+import * as applicationService from "@nomploy/server/services/application";
+import { deployApplication } from "@nomploy/server/services/application";
+import * as deploymentService from "@nomploy/server/services/deployment";
+import * as builders from "@nomploy/server/utils/builders";
+import * as notifications from "@nomploy/server/utils/notifications/build-success";
+import * as execProcess from "@nomploy/server/utils/process/execAsync";
+import * as gitProvider from "@nomploy/server/utils/providers/git";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@dokploy/server/db", () => {
+vi.mock("@nomploy/server/db", () => {
 	const createChainableMock = (): any => {
 		const chain = {
 			set: vi.fn(() => chain),
@@ -44,10 +44,10 @@ vi.mock("@dokploy/server/db", () => {
 	};
 });
 
-vi.mock("@dokploy/server/services/application", async () => {
+vi.mock("@nomploy/server/services/application", async () => {
 	const actual = await vi.importActual<
-		typeof import("@dokploy/server/services/application")
-	>("@dokploy/server/services/application");
+		typeof import("@nomploy/server/services/application")
+	>("@nomploy/server/services/application");
 	return {
 		...actual,
 		findApplicationById: vi.fn(),
@@ -55,35 +55,35 @@ vi.mock("@dokploy/server/services/application", async () => {
 	};
 });
 
-vi.mock("@dokploy/server/services/admin", () => ({
-	getDokployUrl: vi.fn(),
+vi.mock("@nomploy/server/services/admin", () => ({
+	getNomployUrl: vi.fn(),
 }));
 
-vi.mock("@dokploy/server/services/deployment", () => ({
+vi.mock("@nomploy/server/services/deployment", () => ({
 	createDeployment: vi.fn(),
 	updateDeploymentStatus: vi.fn(),
 	updateDeployment: vi.fn(),
 }));
 
-vi.mock("@dokploy/server/utils/providers/git", async () => {
+vi.mock("@nomploy/server/utils/providers/git", async () => {
 	const actual = await vi.importActual<
-		typeof import("@dokploy/server/utils/providers/git")
-	>("@dokploy/server/utils/providers/git");
+		typeof import("@nomploy/server/utils/providers/git")
+	>("@nomploy/server/utils/providers/git");
 	return {
 		...actual,
 		getGitCommitInfo: vi.fn(),
 	};
 });
 
-vi.mock("@dokploy/server/utils/process/execAsync", () => ({
+vi.mock("@nomploy/server/utils/process/execAsync", () => ({
 	execAsync: vi.fn(),
 	ExecError: class ExecError extends Error {},
 }));
 
-vi.mock("@dokploy/server/utils/builders", async () => {
+vi.mock("@nomploy/server/utils/builders", async () => {
 	const actual = await vi.importActual<
-		typeof import("@dokploy/server/utils/builders")
-	>("@dokploy/server/utils/builders");
+		typeof import("@nomploy/server/utils/builders")
+	>("@nomploy/server/utils/builders");
 	return {
 		...actual,
 		mechanizeDockerContainer: vi.fn(),
@@ -91,27 +91,27 @@ vi.mock("@dokploy/server/utils/builders", async () => {
 	};
 });
 
-vi.mock("@dokploy/server/utils/notifications/build-success", () => ({
+vi.mock("@nomploy/server/utils/notifications/build-success", () => ({
 	sendBuildSuccessNotifications: vi.fn(),
 }));
 
-vi.mock("@dokploy/server/utils/notifications/build-error", () => ({
+vi.mock("@nomploy/server/utils/notifications/build-error", () => ({
 	sendBuildErrorNotifications: vi.fn(),
 }));
 
-vi.mock("@dokploy/server/services/rollbacks", () => ({
+vi.mock("@nomploy/server/services/rollbacks", () => ({
 	createRollback: vi.fn(),
 }));
 
-import { db } from "@dokploy/server/db";
-import { cloneGitRepository } from "@dokploy/server/utils/providers/git";
+import { db } from "@nomploy/server/db";
+import { cloneGitRepository } from "@nomploy/server/utils/providers/git";
 
 const createMockApplication = (overrides = {}) => ({
 	applicationId: "test-app-id",
 	name: "Test App",
 	appName: "test-app",
 	sourceType: "git" as const,
-	customGitUrl: "https://github.com/Dokploy/examples.git",
+	customGitUrl: "https://github.com/Nomploy/examples.git",
 	customGitBranch: "main",
 	customGitSSHKeyId: null,
 	buildType: "nixpacks" as const,
@@ -149,7 +149,7 @@ describe("deployApplication - Command Generation Tests", () => {
 		vi.mocked(applicationService.findApplicationById).mockResolvedValue(
 			createMockApplication() as any,
 		);
-		vi.mocked(adminService.getDokployUrl).mockResolvedValue(
+		vi.mocked(adminService.getNomployUrl).mockResolvedValue(
 			"http://localhost:3000",
 		);
 		vi.mocked(deploymentService.createDeployment).mockResolvedValue(
@@ -183,7 +183,7 @@ describe("deployApplication - Command Generation Tests", () => {
 		const command = await cloneGitRepository(app);
 		console.log(command);
 
-		expect(command).toContain("https://github.com/Dokploy/examples.git");
+		expect(command).toContain("https://github.com/Nomploy/examples.git");
 		expect(command).not.toContain("--recurse-submodules");
 		expect(command).toContain("--branch main");
 		expect(command).toContain("--depth 1");
@@ -195,7 +195,7 @@ describe("deployApplication - Command Generation Tests", () => {
 		const command = await cloneGitRepository(app);
 
 		expect(command).toContain("--recurse-submodules");
-		expect(command).toContain("https://github.com/Dokploy/examples.git");
+		expect(command).toContain("https://github.com/Nomploy/examples.git");
 	});
 
 	it("should verify nixpacks command is called with correct app", async () => {
@@ -211,7 +211,7 @@ describe("deployApplication - Command Generation Tests", () => {
 		expect(builders.getBuildCommand).toHaveBeenCalledWith(
 			expect.objectContaining({
 				buildType: "nixpacks",
-				customGitUrl: "https://github.com/Dokploy/examples.git",
+				customGitUrl: "https://github.com/Nomploy/examples.git",
 				buildPath: "/astro",
 			}),
 		);

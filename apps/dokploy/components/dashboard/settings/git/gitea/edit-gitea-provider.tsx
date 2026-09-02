@@ -246,7 +246,7 @@ export const EditGiteaProvider = ({ giteaId }: Props) => {
 										/>
 									</FormControl>
 									<FormDescription>
-										Use when Gitea runs on the same instance as Dokploy. Used
+										Use when Gitea runs on the same instance as Nomploy. Used
 										for OAuth token exchange to reach Gitea via internal network
 										(e.g. Docker service name).
 									</FormDescription>

@@ -2,8 +2,8 @@ import {
 	getWebServerSettings,
 	IS_CLOUD,
 	isAdminPresent,
-} from "@dokploy/server";
-import { validateRequest } from "@dokploy/server/lib/auth";
+} from "@nomploy/server";
+import { validateRequest } from "@nomploy/server/lib/auth";
 import { standardSchemaResolver as zodResolver } from "@hookform/resolvers/standard-schema";
 import { REGEXP_ONLY_DIGITS } from "input-otp";
 import type { GetServerSidePropsContext } from "next";
@@ -390,7 +390,7 @@ export default function Home({ IS_CLOUD, enforceSSO }: Props) {
 						) : (
 							<Link
 								className="hover:underline text-muted-foreground"
-								href="https://docs.dokploy.com/docs/core/reset-password"
+								href="https://docs.nomploy.com/docs/core/reset-password"
 								target="_blank"
 							>
 								Lost your password?

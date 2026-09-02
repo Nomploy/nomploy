@@ -1,12 +1,12 @@
-# Dokploy Security Policy
+# Nomploy Security Policy
 
-At Dokploy, security is a top priority. We appreciate the help of security researchers and the community in identifying and reporting vulnerabilities.
+At Nomploy, security is a top priority. We appreciate the help of security researchers and the community in identifying and reporting vulnerabilities.
 
 ## How to Report a Vulnerability
 
-If you have discovered a security vulnerability in Dokploy, we ask that you report it responsibly by following these guidelines:
+If you have discovered a security vulnerability in Nomploy, we ask that you report it responsibly by following these guidelines:
 
-1.  **Contact us:** Send an email to [contact@dokploy.com](mailto:contact@dokploy.com).
+1.  **Contact us:** Send an email to [contact@nomploy.com](mailto:contact@nomploy.com).
 2.  **Provide clear details:** Include as much information as possible to help us understand and reproduce the vulnerability. This should include:
     *   A clear description of the vulnerability.
     *   Steps to reproduce the vulnerability.
@@ -25,4 +25,4 @@ If you have discovered a security vulnerability in Dokploy, we ask that you repo
 
 We are committed to working with you quickly and responsibly to address any legitimate security vulnerability.
 
-Thank you for helping us keep Dokploy secure for everyone.
+Thank you for helping us keep Nomploy secure for everyone.

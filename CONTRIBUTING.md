@@ -1,6 +1,6 @@
 # Contributing
 
-Hey, thanks for your interest in contributing to Dokploy! We appreciate your help and taking your time to contribute.
+Hey, thanks for your interest in contributing to Nomploy! We appreciate your help and taking your time to contribute.
 
 Before you start, please first discuss the feature/bug you want to add with the owners and community via github issues.
 
@@ -10,6 +10,7 @@ We have a few guidelines to follow when contributing to this project:
 - [Setup](#setup)
 - [Development](#development)
 - [Build](#build)
+- [Contributor License Agreement (CLA)](#contributor-license-agreement-cla)
 - [Pull Request](#pull-request)
 - [Important Considerations](#important-considerations-for-pull-requests)
 
@@ -56,8 +57,8 @@ Before you start, please make the clone based on the `canary` branch, since the 
 We use Node v24.4.0 and recommend this specific version. If you have nvm installed, you can run `nvm install 24.4.0 && nvm use` in the root directory.
 
 ```bash
-git clone https://github.com/dokploy/dokploy.git
-cd dokploy
+git clone https://github.com/nomploy/nomploy.git
+cd nomploy
 pnpm install
 cp apps/dokploy/.env.example apps/dokploy/.env
 ```
@@ -71,7 +72,7 @@ cp apps/dokploy/.env.example apps/dokploy/.env
 Run the command that will spin up all the required services and files.
 
 ```bash
-pnpm run dokploy:setup
+pnpm run nomploy:setup
 ```
 
 Run this script
@@ -83,7 +84,7 @@ pnpm run server:script
 Now run the development server.
 
 ```bash
-pnpm run dokploy:dev
+pnpm run nomploy:dev
 ```
 
 Go to http://localhost:3000 to see the development server
@@ -94,7 +95,7 @@ Go to http://localhost:3000 to see the development server
 ## Build
 
 ```bash
-pnpm run dokploy:build
+pnpm run nomploy:build
 ```
 
 ## Docker
@@ -135,7 +136,7 @@ pnpm dlx localtunnel --port 3000
 If you run into permission issues of docker run the following command
 
 ```bash
-sudo chown -R USERNAME dokploy or sudo chown -R $(whoami) ~/.docker
+sudo chown -R USERNAME nomploy or sudo chown -R $(whoami) ~/.docker
 ```
 
 ## Application deploy
@@ -159,12 +160,30 @@ curl -sSL https://railpack.com/install.sh | sh
 curl -sSL "https://github.com/buildpacks/pack/releases/download/v0.39.1/pack-v0.39.1-linux.tgz" | tar -C /usr/local/bin/ --no-same-owner -xzv pack
 ```
 
+## Contributor License Agreement (CLA)
+
+nomploy is licensed under the **AGPL-3.0** (see [`LICENSE`](LICENSE) and
+[`LICENSING.md`](LICENSING.md)). To keep the project's licensing options open —
+including offering commercial licenses alongside the AGPL — all contributions are
+accepted under our [Contributor License Agreement](CLA.md).
+
+You only need to sign **once**. The first time you open a pull request, the CLA
+bot will comment with a link to the agreement; to sign, reply on the PR with:
+
+```
+I have read the CLA Document and I hereby sign the CLA
+```
+
+Your PR can be merged once the CLA check passes. By signing you confirm you have
+the right to contribute your work and you allow it to be dual-licensed (see
+[`CLA.md`](CLA.md) for the full terms).
+
 ## Pull Request
 
 - The `canary` branch is the source of truth and should always reflect the latest stable release.
 - Create a new branch for each feature or bug fix.
 - Make sure to add tests for your changes.
-- Make sure to update the documentation for any changes Go to the [docs.dokploy.com](https://docs.dokploy.com) website to see the changes.
+- Make sure to update the documentation for any changes Go to the [docs.nomploy.com](https://docs.nomploy.com) website to see the changes.
 - When creating a pull request, please provide a clear and concise description of the changes made.
 - If you include a video or screenshot, would be awesome so we can see the changes in action.
 - If your pull request fixes an open issue, please reference the issue in the pull request description.
@@ -176,13 +195,13 @@ curl -sSL "https://github.com/buildpacks/pack/releases/download/v0.39.1/pack-v0.
 - **Focus and Scope:** Each Pull Request should ideally address a single, well-defined problem or introduce one new feature. This greatly facilitates review and reduces the chances of introducing unintended side effects.
 - **Avoid Unfocused Changes:** Please avoid submitting Pull Requests that contain only minor changes such as whitespace adjustments, IDE-generated formatting, or removal of unused variables, unless these are part of a larger, clearly defined refactor or a dedicated "cleanup" Pull Request that addresses a specific `good first issue` or maintenance task.
 - **Issue Association:** For any significant change, it's highly recommended to open an issue first to discuss the proposed solution with the community and maintainers. This ensures alignment and avoids duplicated effort. If your PR resolves an existing issue, please link it in the description (e.g., `Fixes #123`, `Closes #456`).
-- **Large Features:** Pull Requests that introduce very large or broad features **will not be accepted** unless the idea is first outlined and discussed in a GitHub issue. Large features should be designed together with the Dokploy team so the project stays coherent and moves in the same direction. Open an issue to propose and align on the design before implementing.
+- **Large Features:** Pull Requests that introduce very large or broad features **will not be accepted** unless the idea is first outlined and discussed in a GitHub issue. Large features should be designed together with the Nomploy team so the project stays coherent and moves in the same direction. Open an issue to propose and align on the design before implementing.
 
 Thank you for your contribution!
 
 ## Templates
 
-To add a new template, go to `https://github.com/Dokploy/templates` repository and read the README.md file.
+To add a new template, go to `https://github.com/Nomploy/templates` repository and read the README.md file.
 
 ### Recommendations
 
@@ -193,4 +212,4 @@ To add a new template, go to `https://github.com/Dokploy/templates` repository a
 
 ## Docs & Website
 
-To contribute to the Dokploy docs or website, please go to this [repository](https://github.com/Dokploy/website).
+To contribute to the Nomploy docs or website, please go to this [repository](https://github.com/Nomploy/website).

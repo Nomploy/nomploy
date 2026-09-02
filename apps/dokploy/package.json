@@ -1,8 +1,8 @@
 {
-	"name": "dokploy",
+	"name": "nomploy",
 	"version": "v0.29.7",
 	"private": true,
-	"license": "Apache-2.0",
+	"license": "AGPL-3.0-only",
 	"type": "module",
 	"scripts": {
 		"build": "npm run build-server && npm run build-next",
@@ -58,7 +58,7 @@
 		"@codemirror/legacy-modes": "6.4.0",
 		"@codemirror/search": "^6.6.0",
 		"@codemirror/view": "^6.39.15",
-		"@dokploy/server": "workspace:*",
+		"@nomploy/server": "workspace:*",
 		"@dokploy/trpc-openapi": "0.0.18",
 		"@faker-js/faker": "^8.4.1",
 		"@hookform/resolvers": "^5.2.2",

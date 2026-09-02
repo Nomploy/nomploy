@@ -3,7 +3,7 @@ import { join } from "node:path";
 import {
 	execAsync,
 	execAsyncRemote,
-} from "@dokploy/server/utils/process/execAsync";
+} from "@nomploy/server/utils/process/execAsync";
 import { and, eq } from "drizzle-orm";
 
 import semver from "semver";
@@ -24,15 +24,15 @@ export const DEFAULT_UPDATE_DATA: IUpdateData = {
 	updateAvailable: false,
 };
 
-/** Returns current Dokploy docker image tag or `latest` by default. */
-export const getDokployImageTag = () => {
+/** Returns current Nomploy docker image tag or `latest` by default. */
+export const getNomployImageTag = () => {
 	return process.env.RELEASE_TAG || "latest";
 };
 
-/** Returns Dokploy docker service image digest */
+/** Returns Nomploy docker service image digest */
 export const getServiceImageDigest = async () => {
 	const { stdout } = await execAsync(
-		"docker service inspect dokploy --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'",
+		"docker service inspect nomploy --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'",
 	);
 
 	const currentDigest = stdout.trim().split("@")[1];
@@ -50,7 +50,7 @@ export const getUpdateData = async (
 ): Promise<IUpdateData> => {
 	try {
 		const baseUrl =
-			"https://hub.docker.com/v2/repositories/dokploy/dokploy/tags";
+			"https://hub.docker.com/v2/repositories/nomploy/nomploy/tags";
 		let url: string | null = `${baseUrl}?page_size=100`;
 		let allResults: { digest: string; name: string }[] = [];
 
@@ -70,7 +70,7 @@ export const getUpdateData = async (
 			url = data?.next;
 		}
 
-		const currentImageTag = getDokployImageTag();
+		const currentImageTag = getNomployImageTag();
 
 		// Special handling for canary and feature branches
 		// For development versions (canary/feature), don't perform update checks
@@ -288,14 +288,14 @@ export const reloadDockerResource = async (
 	const resourceType = await getDockerResourceType(resourceName, serverId);
 	let command = "";
 	if (resourceType === "service") {
-		if (resourceName === "dokploy") {
-			const currentImageTag = getDokployImageTag();
+		if (resourceName === "nomploy") {
+			const currentImageTag = getNomployImageTag();
 			let imageTag = version;
 			if (currentImageTag === "canary" || currentImageTag === "feature") {
 				imageTag = currentImageTag;
 			}
 
-			command = `docker service update --force --image dokploy/dokploy:${imageTag} ${resourceName}`;
+			command = `docker service update --force --image nomploy/nomploy:${imageTag} ${resourceName}`;
 		} else {
 			command = `docker service update --force ${resourceName}`;
 		}
@@ -414,7 +414,7 @@ export const checkPortInUse = async (
 ): Promise<{ isInUse: boolean; conflictingContainer?: string }> => {
 	try {
 		// Check if port is in use by a Docker container
-		const dockerCommand = `docker ps -a --format '{{.Names}}' | grep -v '^dokploy-traefik$' | while read name; do docker port "$name" 2>/dev/null | grep -q ':${port}' && echo "$name" && break; done || true`;
+		const dockerCommand = `docker ps -a --format '{{.Names}}' | grep -v '^nomploy-traefik$' | while read name; do docker port "$name" 2>/dev/null | grep -q ':${port}' && echo "$name" && break; done || true`;
 		const { stdout: dockerOut } = serverId
 			? await execAsyncRemote(serverId, dockerCommand)
 			: await execAsync(dockerCommand);
@@ -429,7 +429,7 @@ export const checkPortInUse = async (
 		}
 
 		// Check if port is in use by a host-level service (non-Docker)
-		// Dokploy runs inside a container, so we spawn an ephemeral container
+		// Nomploy runs inside a container, so we spawn an ephemeral container
 		// with --net=host to share the host's network stack and use nc -z to
 		// check if something is listening on the port
 		const hostCommand = `docker run --rm --net=host busybox sh -c 'nc -z 0.0.0.0 ${port} 2>/dev/null && echo in_use || echo free'`;
@@ -453,7 +453,7 @@ export const checkPortInUse = async (
 
 export const writeTraefikSetup = async (input: TraefikOptions) => {
 	const resourceType = await getDockerResourceType(
-		"dokploy-traefik",
+		"nomploy-traefik",
 		input.serverId,
 	);
 
@@ -491,7 +491,7 @@ export const reconnectServicesToTraefik = async (serverId?: string) => {
 	let commands = "";
 
 	for (const compose of composeResult) {
-		commands += `docker network connect ${compose.appName} $(docker ps --filter "name=dokploy-traefik" -q) >/dev/null 2>&1\n`;
+		commands += `docker network connect ${compose.appName} $(docker ps --filter "name=nomploy-traefik" -q) >/dev/null 2>&1\n`;
 	}
 
 	if (serverId) {

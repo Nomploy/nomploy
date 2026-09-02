@@ -1,8 +1,8 @@
-import { CLEANUP_CRON_JOB } from "@dokploy/server/constants";
-import { member } from "@dokploy/server/db/schema";
-import type { BackupSchedule } from "@dokploy/server/services/backup";
-import { getAllServers } from "@dokploy/server/services/server";
-import { getWebServerSettings } from "@dokploy/server/services/web-server-settings";
+import { CLEANUP_CRON_JOB } from "@nomploy/server/constants";
+import { member } from "@nomploy/server/db/schema";
+import type { BackupSchedule } from "@nomploy/server/services/backup";
+import { getAllServers } from "@nomploy/server/services/server";
+import { getWebServerSettings } from "@nomploy/server/services/web-server-settings";
 import { eq } from "drizzle-orm";
 import { scheduleJob } from "node-schedule";
 import { db } from "../../db/index";
@@ -135,7 +135,7 @@ export const keepLatestNBackups = async (
 		const appName = getServiceAppName(backup);
 		const backupFilesPath = `:s3:${backup.destination.bucket}/${appName}/${normalizeS3Path(backup.prefix)}`;
 
-		// --include "*.bson.gz" or "*.sql.gz" or "*.zip" ensures nothing else other than the dokploy backup files are touched by rclone
+		// --include "*.bson.gz" or "*.sql.gz" or "*.zip" ensures nothing else other than the nomploy backup files are touched by rclone
 		const rcloneList = `rclone lsf ${rcloneFlags.join(" ")} --include "*${backup.databaseType === "web-server" ? ".zip" : ".{sql.gz,bson.gz}"}" ${backupFilesPath}`;
 		// when we pipe the above command with this one, we only get the list of files we want to delete
 		const sortAndPickUnwantedBackups = `sort -r | tail -n +$((${backup.keepLatestCount}+1)) | xargs -I{}`;

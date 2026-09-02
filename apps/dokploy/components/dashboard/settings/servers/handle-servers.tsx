@@ -186,7 +186,7 @@ export const HandleServers = ({ serverId, asButton = false }: Props) => {
 						</li>
 						<li>
 							<a
-								href=" https://app.americancloud.com/register?ref=dokploy"
+								href=" https://app.americancloud.com/register?ref=nomploy"
 								className="text-link underline"
 							>
 								American Cloud - Get $20 Credits

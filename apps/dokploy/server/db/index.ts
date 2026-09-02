@@ -1,5 +1,5 @@
-import { dbUrl } from "@dokploy/server/db/constants";
-import * as schema from "@dokploy/server/db/schema";
+import { dbUrl } from "@nomploy/server/db/constants";
+import * as schema from "@nomploy/server/db/schema";
 import { and, eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres from "postgres";

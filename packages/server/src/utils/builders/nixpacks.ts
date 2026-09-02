@@ -1,5 +1,5 @@
 import path from "node:path";
-import { getStaticCommand } from "@dokploy/server/utils/builders/static";
+import { getStaticCommand } from "@nomploy/server/utils/builders/static";
 import { nanoid } from "nanoid";
 import { prepareEnvironmentVariablesForShell } from "../docker/utils";
 import { getBuildAppDirectory } from "../filesystem/directory";

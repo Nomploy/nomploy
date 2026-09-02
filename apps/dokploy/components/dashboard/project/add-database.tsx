@@ -235,8 +235,8 @@ export const AddDatabase = ({ environmentId, projectName }: Props) => {
 
 	const hasServers = servers && servers.length > 0;
 	// Show dropdown logic based on cloud environment
-	// Cloud: show only if there are remote servers (no Dokploy option)
-	// Self-hosted: show only if there are remote servers (Dokploy is default, hide if no remote servers)
+	// Cloud: show only if there are remote servers (no Nomploy option)
+	// Self-hosted: show only if there are remote servers (Nomploy is default, hide if no remote servers)
 	const shouldShowServerDropdown = hasServers;
 
 	const form = useForm({
@@ -273,7 +273,7 @@ export const AddDatabase = ({ environmentId, projectName }: Props) => {
 			name: data.name,
 			appName: data.appName,
 			dockerImage: defaultDockerImage,
-			serverId: data.serverId === "dokploy" ? undefined : data.serverId,
+			serverId: data.serverId === "nomploy" ? undefined : data.serverId,
 			environmentId,
 			description: data.description,
 		};
@@ -287,7 +287,7 @@ export const AddDatabase = ({ environmentId, projectName }: Props) => {
 				databasePassword: data.databasePassword,
 				databaseUser:
 					data.databaseUser || databasesUserDefaultPlaceholder[data.type],
-				serverId: data.serverId === "dokploy" ? null : data.serverId,
+				serverId: data.serverId === "nomploy" ? null : data.serverId,
 			});
 		} else if (data.type === "mariadb") {
 			promise = mariadbMutation.mutateAsync({
@@ -297,7 +297,7 @@ export const AddDatabase = ({ environmentId, projectName }: Props) => {
 				databaseName: data.databaseName || "mariadb",
 				databaseUser:
 					data.databaseUser || databasesUserDefaultPlaceholder[data.type],
-				serverId: data.serverId === "dokploy" ? null : data.serverId,
+				serverId: data.serverId === "nomploy" ? null : data.serverId,
 			});
 		} else if (data.type === "mongo") {
 			promise = mongoMutation.mutateAsync({
@@ -305,7 +305,7 @@ export const AddDatabase = ({ environmentId, projectName }: Props) => {
 				databasePassword: data.databasePassword,
 				databaseUser:
 					data.databaseUser || databasesUserDefaultPlaceholder[data.type],
-				serverId: data.serverId === "dokploy" ? null : data.serverId,
+				serverId: data.serverId === "nomploy" ? null : data.serverId,
 				replicaSets: data.replicaSets,
 			});
 		} else if (data.type === "mysql") {
@@ -315,7 +315,7 @@ export const AddDatabase = ({ environmentId, projectName }: Props) => {
 				databaseName: data.databaseName || "mysql",
 				databaseUser:
 					data.databaseUser || databasesUserDefaultPlaceholder[data.type],
-				serverId: data.serverId === "dokploy" ? null : data.serverId,
+				serverId: data.serverId === "nomploy" ? null : data.serverId,
 				databaseRootPassword: data.databaseRootPassword || "",
 			});
 		} else if (data.type === "postgres") {
@@ -325,13 +325,13 @@ export const AddDatabase = ({ environmentId, projectName }: Props) => {
 				databaseName: data.databaseName || "postgres",
 				databaseUser:
 					data.databaseUser || databasesUserDefaultPlaceholder[data.type],
-				serverId: data.serverId === "dokploy" ? null : data.serverId,
+				serverId: data.serverId === "nomploy" ? null : data.serverId,
 			});
 		} else if (data.type === "redis") {
 			promise = redisMutation.mutateAsync({
 				...commonParams,
 				databasePassword: data.databasePassword,
-				serverId: data.serverId === "dokploy" ? null : data.serverId,
+				serverId: data.serverId === "nomploy" ? null : data.serverId,
 			});
 		}
 
@@ -474,22 +474,22 @@ export const AddDatabase = ({ environmentId, projectName }: Props) => {
 													onValueChange={field.onChange}
 													defaultValue={
 														field.value ||
-														(showLocalOption ? "dokploy" : undefined)
+														(showLocalOption ? "nomploy" : undefined)
 													}
 												>
 													<SelectTrigger>
 														<SelectValue
 															placeholder={
-																showLocalOption ? "Dokploy" : "Select a Server"
+																showLocalOption ? "Nomploy" : "Select a Server"
 															}
 														/>
 													</SelectTrigger>
 													<SelectContent>
 														<SelectGroup>
 															{showLocalOption && (
-																<SelectItem value="dokploy">
+																<SelectItem value="nomploy">
 																	<span className="flex items-center gap-2 justify-between w-full">
-																		<span>Dokploy</span>
+																		<span>Nomploy</span>
 																		<span className="text-muted-foreground text-xs self-center">
 																			Default
 																		</span>

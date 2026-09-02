@@ -27,7 +27,7 @@ import { ContainerPaidMonitoring } from "./show-paid-container-monitoring";
 interface Props {
 	appName: string;
 	serverId?: string;
-	appType: "stack" | "docker-compose";
+	appType: "stack" | "docker-compose" | "nomad";
 	baseUrl: string;
 	token: string;
 }

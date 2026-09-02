@@ -1,6 +1,6 @@
-import { findOwner, generateRandomPassword } from "@dokploy/server";
-import { db } from "@dokploy/server/db";
-import { account } from "@dokploy/server/db/schema";
+import { findOwner, generateRandomPassword } from "@nomploy/server";
+import { db } from "@nomploy/server/db";
+import { account } from "@nomploy/server/db/schema";
 import { eq } from "drizzle-orm";
 
 (async () => {

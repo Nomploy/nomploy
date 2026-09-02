@@ -1,6 +1,6 @@
-import { db } from "@dokploy/server/db";
-import { notifications } from "@dokploy/server/db/schema";
-import DatabaseBackupEmail from "@dokploy/server/emails/emails/database-backup";
+import { db } from "@nomploy/server/db";
+import { notifications } from "@nomploy/server/db/schema";
+import DatabaseBackupEmail from "@nomploy/server/emails/emails/database-backup";
 import { renderAsync } from "@react-email/components";
 import { format } from "date-fns";
 import { and, eq } from "drizzle-orm";
@@ -90,7 +90,7 @@ export const sendDatabaseBackupNotifications = async ({
 				if (email) {
 					await sendEmailNotification(
 						email,
-						"Database backup for dokploy",
+						"Database backup for nomploy",
 						template,
 					);
 				}
@@ -98,7 +98,7 @@ export const sendDatabaseBackupNotifications = async ({
 				if (resend) {
 					await sendResendNotification(
 						resend,
-						"Database backup for dokploy",
+						"Database backup for nomploy",
 						template,
 					);
 				}
@@ -163,7 +163,7 @@ export const sendDatabaseBackupNotifications = async ({
 					],
 					timestamp: date.toISOString(),
 					footer: {
-						text: "Dokploy Database Backup Notification",
+						text: "Nomploy Database Backup Notification",
 					},
 				});
 			}
@@ -286,7 +286,7 @@ export const sendDatabaseBackupNotifications = async ({
 				await sendMattermostNotification(mattermost, {
 					text: `**${statusEmoji} Database Backup ${typeStatus}**\n\n**Project:** ${projectName}\n**Application:** ${applicationName}\n**Type:** ${databaseType}\n**Database Name:** ${databaseName}\n**Date:** ${format(date, "PP")}\n**Time:** ${format(date, "pp")}${errorMsg}`,
 					channel: mattermost.channel,
-					username: mattermost.username || "Dokploy",
+					username: mattermost.username || "Nomploy",
 				});
 			}
 

@@ -3,8 +3,8 @@ import {
 	getBitbucketHeaders,
 	IS_CLOUD,
 	shouldDeploy,
-} from "@dokploy/server";
-import { db } from "@dokploy/server/db";
+} from "@nomploy/server";
+import { db } from "@nomploy/server/db";
 import { eq } from "drizzle-orm";
 import type { NextApiRequest, NextApiResponse } from "next";
 import { applications } from "@/server/db/schema";

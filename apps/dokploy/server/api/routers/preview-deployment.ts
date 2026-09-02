@@ -4,8 +4,8 @@ import {
 	findPreviewDeploymentsByApplicationId,
 	IS_CLOUD,
 	removePreviewDeployment,
-} from "@dokploy/server";
-import { checkServicePermissionAndAccess } from "@dokploy/server/services/permission";
+} from "@nomploy/server";
+import { checkServicePermissionAndAccess } from "@nomploy/server/services/permission";
 import { z } from "zod";
 import { audit } from "@/server/api/utils/audit";
 import { apiFindAllByApplication } from "@/server/db/schema";

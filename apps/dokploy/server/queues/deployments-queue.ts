@@ -9,7 +9,7 @@ import {
 	updateApplicationStatus,
 	updateCompose,
 	updatePreviewDeployment,
-} from "@dokploy/server";
+} from "@nomploy/server";
 import { type Job, Worker } from "bullmq";
 import type { DeploymentJob } from "./queue-types";
 import { redisConfig } from "./redis-connection";

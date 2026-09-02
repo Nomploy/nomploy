@@ -1,5 +1,5 @@
-import { db } from "@dokploy/server/db";
-import { webServerSettings } from "@dokploy/server/db/schema";
+import { db } from "@nomploy/server/db";
+import { webServerSettings } from "@nomploy/server/db/schema";
 import { eq } from "drizzle-orm";
 
 /**

@@ -26,7 +26,7 @@ import { ContainerFreeMonitoring } from "./show-free-container-monitoring";
 interface Props {
 	appName: string;
 	serverId?: string;
-	appType: "stack" | "docker-compose";
+	appType: "stack" | "docker-compose" | "nomad";
 }
 
 export const ComposeFreeMonitoring = ({

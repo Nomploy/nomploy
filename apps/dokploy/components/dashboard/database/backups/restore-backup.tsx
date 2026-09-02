@@ -213,7 +213,7 @@ export const RestoreBackup = ({
 			backupFile: "",
 			databaseName:
 				databaseType === "web-server"
-					? "dokploy"
+					? "nomploy"
 					: databaseType === "libsql"
 						? "iku.db"
 						: "",

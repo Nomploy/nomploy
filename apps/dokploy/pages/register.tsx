@@ -1,4 +1,4 @@
-import { IS_CLOUD, isAdminPresent, validateRequest } from "@dokploy/server";
+import { IS_CLOUD, isAdminPresent, validateRequest } from "@nomploy/server";
 import { standardSchemaResolver as zodResolver } from "@hookform/resolvers/standard-schema";
 import { AlertTriangle } from "lucide-react";
 import type { GetServerSidePropsContext } from "next";
@@ -209,7 +209,7 @@ const Register = ({ isCloud }: Props) => {
 												<FormItem>
 													<FormLabel>Email</FormLabel>
 													<FormControl>
-														<Input placeholder="email@dokploy.com" {...field} />
+														<Input placeholder="email@nomploy.com" {...field} />
 													</FormControl>
 													<FormMessage />
 												</FormItem>
@@ -275,7 +275,7 @@ const Register = ({ isCloud }: Props) => {
 									Need help?
 									<Link
 										className="underline"
-										href="https://dokploy.com"
+										href="https://nomploy.com"
 										target="_blank"
 									>
 										Contact us

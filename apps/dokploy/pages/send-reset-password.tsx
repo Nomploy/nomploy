@@ -1,4 +1,4 @@
-import { IS_CLOUD } from "@dokploy/server";
+import { IS_CLOUD } from "@nomploy/server";
 import { standardSchemaResolver as zodResolver } from "@hookform/resolvers/standard-schema";
 import type { GetServerSidePropsContext } from "next";
 import Link from "next/link";
@@ -92,7 +92,7 @@ export default function Home() {
 						}
 					/>
 					<span className="font-medium text-sm">
-						{whitelabeling?.appName || "Dokploy"}
+						{whitelabeling?.appName || "Nomploy"}
 					</span>
 				</Link>
 				<CardTitle className="text-2xl font-bold">Reset Password</CardTitle>

@@ -1,11 +1,11 @@
-import { db } from "@dokploy/server/db";
+import { db } from "@nomploy/server/db";
 import {
 	account,
 	apikey,
 	invitation,
 	member,
 	user,
-} from "@dokploy/server/db/schema";
+} from "@nomploy/server/db/schema";
 import { TRPCError } from "@trpc/server";
 import * as bcrypt from "bcrypt";
 import { and, eq } from "drizzle-orm";

@@ -1,6 +1,6 @@
-import { IS_CLOUD } from "@dokploy/server/constants";
-import { validateRequest } from "@dokploy/server/lib/auth";
-import { hasPermission } from "@dokploy/server/services/permission";
+import { IS_CLOUD } from "@nomploy/server/constants";
+import { validateRequest } from "@nomploy/server/lib/auth";
+import { hasPermission } from "@nomploy/server/services/permission";
 import { Loader2 } from "lucide-react";
 import type { GetServerSidePropsContext } from "next";
 import type { ReactElement } from "react";
@@ -27,7 +27,7 @@ const Dashboard = () => {
 			{/* <AlertBlock>
 				You are watching the <strong>Free</strong> plan.{" "}
 				<a
-					href="https://dokploy.com#pricing"
+					href="https://nomploy.com#pricing"
 					target="_blank"
 					className="underline"
 					rel="noreferrer"
@@ -74,7 +74,7 @@ const Dashboard = () => {
 					) : (
 						<Card className="h-full bg-sidebar  p-2.5 rounded-xl">
 							<div className="rounded-xl bg-background shadow-md p-6">
-								<ContainerFreeMonitoring appName="dokploy" />
+								<ContainerFreeMonitoring appName="nomploy" />
 							</div>
 						</Card>
 					)}

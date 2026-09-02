@@ -1,5 +1,5 @@
-import type { ApplicationNested, Domain, Redirect } from "@dokploy/server";
-import { createRouterConfig } from "@dokploy/server";
+import type { ApplicationNested, Domain, Redirect } from "@nomploy/server";
+import { createRouterConfig } from "@nomploy/server";
 import { expect, test } from "vitest";
 
 const baseApp: ApplicationNested = {

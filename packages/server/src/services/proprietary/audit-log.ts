@@ -1,8 +1,12 @@
-import { db } from "@dokploy/server/db";
-import type { AuditAction, AuditResourceType } from "@dokploy/server/db/schema";
-import { auditLog } from "@dokploy/server/db/schema";
-import { hasValidLicense } from "@dokploy/server/services/proprietary/license-key";
-import { and, desc, eq, gte, ilike, lte } from "drizzle-orm";
+/**
+ * nomploy — free (Apache-2.0) replacement for the former enterprise audit log.
+ *
+ * Audit logging was a paid enterprise feature. nomploy keeps the same public
+ * API so the auth layer and routers keep compiling, but writing is a no-op and
+ * reads return an empty result set. The `auditLog` table still exists in the
+ * schema; nothing here depends on it.
+ */
+import type { AuditAction, AuditResourceType } from "@nomploy/server/db/schema";
 
 export type { AuditAction, AuditResourceType };
 
@@ -18,29 +22,9 @@ export interface CreateAuditLogInput {
 	metadata?: Record<string, unknown>;
 }
 
-/**
- * Creates an audit log entry. Fire-and-forget safe — errors are swallowed
- * so a logging failure never breaks the main operation.
- */
-export const createAuditLog = async (input: CreateAuditLogInput) => {
-	try {
-		const licensed = await hasValidLicense(input.organizationId);
-		if (!licensed) return;
-
-		await db.insert(auditLog).values({
-			organizationId: input.organizationId,
-			userId: input.userId,
-			userEmail: input.userEmail,
-			userRole: input.userRole,
-			action: input.action,
-			resourceType: input.resourceType,
-			resourceId: input.resourceId,
-			resourceName: input.resourceName,
-			metadata: input.metadata ? JSON.stringify(input.metadata) : undefined,
-		});
-	} catch (err) {
-		console.error("[audit-log] Failed to create audit log entry:", err);
-	}
+/** No-op in nomploy — audit logging is an enterprise feature that is not shipped. */
+export const createAuditLog = async (_input: CreateAuditLogInput) => {
+	return;
 };
 
 export interface GetAuditLogsInput {
@@ -56,40 +40,7 @@ export interface GetAuditLogsInput {
 	offset?: number;
 }
 
-export const getAuditLogs = async (input: GetAuditLogsInput) => {
-	const {
-		organizationId,
-		userId,
-		userEmail,
-		resourceName,
-		action,
-		resourceType,
-		from,
-		to,
-		limit = 50,
-		offset = 0,
-	} = input;
-
-	const conditions = [eq(auditLog.organizationId, organizationId)];
-
-	if (userId) conditions.push(eq(auditLog.userId, userId));
-	if (userEmail) conditions.push(ilike(auditLog.userEmail, `%${userEmail}%`));
-	if (resourceName)
-		conditions.push(ilike(auditLog.resourceName, `%${resourceName}%`));
-	if (action) conditions.push(eq(auditLog.action, action));
-	if (resourceType) conditions.push(eq(auditLog.resourceType, resourceType));
-	if (from) conditions.push(gte(auditLog.createdAt, from));
-	if (to) conditions.push(lte(auditLog.createdAt, to));
-
-	const [logs, total] = await Promise.all([
-		db.query.auditLog.findMany({
-			where: and(...conditions),
-			orderBy: [desc(auditLog.createdAt)],
-			limit,
-			offset,
-		}),
-		db.$count(auditLog, and(...conditions)),
-	]);
-
-	return { logs, total };
+/** Always empty in nomploy — audit logging is not shipped. */
+export const getAuditLogs = async (_input: GetAuditLogsInput) => {
+	return { logs: [] as unknown[], total: 0 };
 };

@@ -1,4 +1,4 @@
-import { normalizeS3Path } from "@dokploy/server/utils/backups/utils";
+import { normalizeS3Path } from "@nomploy/server/utils/backups/utils";
 import { describe, expect, test } from "vitest";
 
 describe("normalizeS3Path", () => {

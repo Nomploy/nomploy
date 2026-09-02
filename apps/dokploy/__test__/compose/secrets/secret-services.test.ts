@@ -1,8 +1,8 @@
-import type { ComposeSpecification } from "@dokploy/server";
+import type { ComposeSpecification } from "@nomploy/server";
 import {
 	addSuffixToSecretsInServices,
 	generateRandomHash,
-} from "@dokploy/server";
+} from "@nomploy/server";
 import { expect, test } from "vitest";
 import { parse } from "yaml";
 

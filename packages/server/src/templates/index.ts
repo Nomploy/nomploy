@@ -2,7 +2,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Domain } from "@dokploy/server/services/domain";
+import type { Domain } from "@nomploy/server/services/domain";
 import { TRPCError } from "@trpc/server";
 import { fetchTemplateFiles } from "./github";
 
@@ -95,7 +95,7 @@ export function generateJwt(options: GenerateJWTOptions = {}): string {
 		typ: "JWT",
 	});
 	if (!payload.iss) {
-		payload.iss = "dokploy";
+		payload.iss = "nomploy";
 	}
 	if (!payload.iat) {
 		payload.iat = Math.floor(Date.now() / 1000);

@@ -1,6 +1,6 @@
 import { exec, execFile } from "node:child_process";
 import util from "node:util";
-import { findServerById } from "@dokploy/server/services/server";
+import { findServerById } from "@nomploy/server/services/server";
 import { Client } from "ssh2";
 import { ExecError } from "./ExecError";
 
@@ -211,8 +211,8 @@ export const execAsyncRemote = async (
 						`Technical details: ${technicalDetail}`,
 						"",
 						"💡 Hints:",
-						"  • Check that the SSH key you added in Dokploy is the same one installed on the server (e.g. in ~/.ssh/authorized_keys).",
-						"  • Try generating a new SSH key in Dokploy and add only the public key to the server, then try again.",
+						"  • Check that the SSH key you added in Nomploy is the same one installed on the server (e.g. in ~/.ssh/authorized_keys).",
+						"  • Try generating a new SSH key in Nomploy and add only the public key to the server, then try again.",
 						"  • Make sure to follow the instructions on the Setup Server Button on the SSH Keys tab and then click on deployments tab and check the logs for more details.",
 					].join("\n");
 					const errorMsg = `Authentication failed: Invalid SSH private key. ❌ Error: ${err.message} ${err.level}`;

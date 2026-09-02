@@ -43,7 +43,7 @@ jobs:
         if: matrix.job == 'test'
         run: |
           docker swarm init
-          docker network create --driver overlay dokploy-network || true
+          docker network create --driver overlay nomploy-network || true
           echo "✅ Docker Swarm initialized"
       
       - run: pnpm install --frozen-lockfile

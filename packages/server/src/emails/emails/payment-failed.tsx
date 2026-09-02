@@ -33,7 +33,7 @@ export const PaymentFailedEmail = ({
 	date = "2024-01-01",
 	hostedInvoiceUrl = "https://invoice.stripe.com/example",
 }: TemplateProps) => {
-	const previewText = `Action required: Your Dokploy payment for ${amountDue} failed`;
+	const previewText = `Action required: Your Nomploy payment for ${amountDue} failed`;
 	return (
 		<Html>
 			<Head />
@@ -54,10 +54,10 @@ export const PaymentFailedEmail = ({
 						{/* Header */}
 						<Section className="bg-[#09090b] rounded-t-xl px-[40px] py-[32px] text-center">
 							<Img
-								src="https://raw.githubusercontent.com/Dokploy/website/refs/heads/main/apps/docs/public/logo-dokploy-blackpng.png"
+								src="https://raw.githubusercontent.com/Nomploy/website/refs/heads/main/apps/docs/public/logo-nomploy-blackpng.png"
 								width="190"
 								height="120"
-								alt="Dokploy"
+								alt="Nomploy"
 								className="my-0 mx-auto"
 							/>
 						</Section>
@@ -149,10 +149,10 @@ export const PaymentFailedEmail = ({
 							<Text className="text-[#a1a1aa] text-[12px] leading-[18px] m-0">
 								This is an automated email from{" "}
 								<Link
-									href="https://dokploy.com"
+									href="https://nomploy.com"
 									className="text-[#71717a] underline"
 								>
-									Dokploy Cloud
+									Nomploy Cloud
 								</Link>
 								. If you have any questions about your billing, please contact
 								our{" "}

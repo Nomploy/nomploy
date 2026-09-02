@@ -1,5 +1,5 @@
 import type http from "node:http";
-import { findServerById, IS_CLOUD, validateRequest } from "@dokploy/server";
+import { findServerById, IS_CLOUD, validateRequest } from "@nomploy/server";
 import { spawn } from "node-pty";
 import { Client } from "ssh2";
 import { WebSocketServer } from "ws";

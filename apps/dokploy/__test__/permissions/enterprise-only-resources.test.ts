@@ -1,7 +1,7 @@
 import {
 	enterpriseOnlyResources,
 	statements,
-} from "@dokploy/server/lib/access-control";
+} from "@nomploy/server/lib/access-control";
 import { describe, expect, it } from "vitest";
 
 const FREE_TIER_RESOURCES = [

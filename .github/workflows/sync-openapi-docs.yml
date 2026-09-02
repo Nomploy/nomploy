@@ -1,23 +1,15 @@
 name: Generate and Sync OpenAPI
 
 on:
-  push:
-    branches:
-      - canary
-      - main
-    paths:
-      - 'apps/dokploy/server/api/routers/**'
-      - 'packages/server/src/services/**'
-      - 'packages/server/src/db/schema/**'
-
+  # Disabled automatic runs on the fork (syncs to external docs; needs secrets). Run manually.
   workflow_dispatch:
 
 jobs:
   generate-and-commit:
-    name: Generate OpenAPI and commit to Dokploy repo
+    name: Generate OpenAPI and commit to Nomploy repo
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Dokploy repository
+      - name: Checkout Nomploy repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -45,7 +37,7 @@ jobs:
       - name: Sync to website repository
         run: |
           # Clona el repositorio de website
-          git clone https://x-access-token:${{ secrets.DOCS_SYNC_TOKEN }}@github.com/dokploy/website.git website-repo
+          git clone https://x-access-token:${{ secrets.DOCS_SYNC_TOKEN }}@github.com/nomploy/website.git website-repo
           
           cd website-repo
           
@@ -54,8 +46,8 @@ jobs:
           cp -f ../openapi.json apps/docs/public/openapi.json
           
           # Configura git
-          git config user.name "Dokploy Bot"
-          git config user.email "bot@dokploy.com"
+          git config user.name "Nomploy Bot"
+          git config user.email "bot@nomploy.com"
           
           # Agrega y commitea siempre
           git add apps/docs/public/openapi.json
@@ -70,14 +62,14 @@ jobs:
 
       - name: Sync to MCP repository
         run: |
-          git clone https://x-access-token:${{ secrets.DOCS_SYNC_TOKEN }}@github.com/dokploy/mcp.git mcp-repo
+          git clone https://x-access-token:${{ secrets.DOCS_SYNC_TOKEN }}@github.com/nomploy/mcp.git mcp-repo
 
           cd mcp-repo
 
           cp -f ../openapi.json openapi.json
 
-          git config user.name "Dokploy Bot"
-          git config user.email "bot@dokploy.com"
+          git config user.name "Nomploy Bot"
+          git config user.email "bot@nomploy.com"
 
           git add openapi.json
           git commit -m "chore: sync OpenAPI specification [skip ci]" \
@@ -91,14 +83,14 @@ jobs:
 
       - name: Sync to CLI repository
         run: |
-          git clone https://x-access-token:${{ secrets.DOCS_SYNC_TOKEN }}@github.com/dokploy/cli.git cli-repo
+          git clone https://x-access-token:${{ secrets.DOCS_SYNC_TOKEN }}@github.com/nomploy/cli.git cli-repo
 
           cd cli-repo
 
           cp -f ../openapi.json openapi.json
 
-          git config user.name "Dokploy Bot"
-          git config user.email "bot@dokploy.com"
+          git config user.name "Nomploy Bot"
+          git config user.email "bot@nomploy.com"
 
           git add openapi.json
           git commit -m "chore: sync OpenAPI specification [skip ci]" \
@@ -112,14 +104,14 @@ jobs:
 
       - name: Sync to SDK repository
         run: |
-          git clone https://x-access-token:${{ secrets.DOCS_SYNC_TOKEN }}@github.com/dokploy/sdk.git sdk-repo
+          git clone https://x-access-token:${{ secrets.DOCS_SYNC_TOKEN }}@github.com/nomploy/sdk.git sdk-repo
 
           cd sdk-repo
 
           cp -f ../openapi.json openapi.json
 
-          git config user.name "Dokploy Bot"
-          git config user.email "bot@dokploy.com"
+          git config user.name "Nomploy Bot"
+          git config user.email "bot@nomploy.com"
 
           git add openapi.json
           git commit -m "chore: sync OpenAPI specification [skip ci]" \

@@ -1,8 +1,8 @@
-import { db } from "@dokploy/server/db";
+import { db } from "@nomploy/server/db";
 import {
 	type apiCreateDestination,
 	destinations,
-} from "@dokploy/server/db/schema";
+} from "@nomploy/server/db/schema";
 import { TRPCError } from "@trpc/server";
 import { and, eq } from "drizzle-orm";
 import type { z } from "zod";

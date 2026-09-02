@@ -54,7 +54,7 @@ export const server = pgTable("server", {
 	metricsConfig: jsonb("metricsConfig")
 		.$type<{
 			server: {
-				type: "Dokploy" | "Remote";
+				type: "Nomploy" | "Remote";
 				refreshRate: number;
 				port: number;
 				token: string;
@@ -178,10 +178,10 @@ export const apiUpdateServer = createSchema
 	.required()
 	.extend({
 		command: z.string().optional(),
-		nomadAddress: z.string().optional(),
-		nomadToken: z.string().optional(),
-		nomadNamespace: z.string().optional(),
-		registryUrl: z.string().optional(),
+		nomadAddress: z.string().nullish(),
+		nomadToken: z.string().nullish(),
+		nomadNamespace: z.string().nullish(),
+		registryUrl: z.string().nullish(),
 	});
 
 export const apiUpdateServerMonitoring = createSchema

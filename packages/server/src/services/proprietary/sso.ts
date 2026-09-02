@@ -1,21 +1,27 @@
-import { db } from "@dokploy/server/db";
-import { organization } from "@dokploy/server/db/schema";
+/**
+ * nomploy — free (Apache-2.0) replacement for the former enterprise SSO helpers.
+ *
+ * SSO (OIDC / SAML) was a paid enterprise feature and is not shipped in nomploy.
+ * `getSSOProviders` therefore reports no configured providers. The remaining
+ * functions are small, generic utilities kept so the auth layer keeps compiling.
+ */
+import { db } from "@nomploy/server/db";
+import { organization } from "@nomploy/server/db/schema";
 import { eq } from "drizzle-orm";
 
+/** SSO is not available in nomploy — there are never any configured providers. */
 export const getSSOProviders = async () => {
-	const providers = await db.query.ssoProvider.findMany({
-		columns: {
-			id: true,
-			providerId: true,
-			issuer: true,
-			domain: true,
-			oidcConfig: true,
-			samlConfig: true,
-		},
-	});
-	return providers;
+	return [] as Array<{
+		id: string;
+		providerId: string;
+		issuer: string;
+		domain: string;
+		oidcConfig: unknown;
+		samlConfig: unknown;
+	}>;
 };
 
+/** Convert an incoming request's headers into a standard `Headers` object. */
 export const requestToHeaders = (req: {
 	headers?: Record<string, string | string[] | undefined>;
 }): Headers => {
@@ -30,17 +36,16 @@ export const requestToHeaders = (req: {
 	return headers;
 };
 
+/** Trim and drop trailing slashes, e.g. "https://x.com/" -> "https://x.com". */
 export const normalizeTrustedOrigin = (value: string): string => {
-	// Keep it simple: trim and remove trailing slashes.
-	// e.g. "https://example.com/" -> "https://example.com"
 	return value.trim().replace(/\/+$/, "");
 };
 
+/** Look up the owner (user id) of an organization. */
 export const getOrganizationOwnerId = async (organizationId: string) => {
 	const org = await db.query.organization.findFirst({
 		where: eq(organization.id, organizationId),
 		columns: { ownerId: true },
 	});
-	if (!org) return null;
-	return org.ownerId;
+	return org?.ownerId ?? null;
 };

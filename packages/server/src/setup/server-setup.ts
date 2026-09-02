@@ -1,14 +1,14 @@
 import path from "node:path";
-import { IS_CLOUD, paths } from "@dokploy/server/constants";
-import { getDokployUrl } from "@dokploy/server/services/admin";
+import { IS_CLOUD, paths } from "@nomploy/server/constants";
+import { getNomployUrl } from "@nomploy/server/services/admin";
 import {
 	createServerDeployment,
 	updateDeploymentStatus,
-} from "@dokploy/server/services/deployment";
+} from "@nomploy/server/services/deployment";
 import {
 	findServerById,
 	updateServerById,
-} from "@dokploy/server/services/server";
+} from "@nomploy/server/services/server";
 import {
 	getDefaultMiddlewares,
 	getDefaultServerTraefikConfig,
@@ -16,7 +16,7 @@ import {
 	TRAEFIK_PORT,
 	TRAEFIK_SSL_PORT,
 	TRAEFIK_VERSION,
-} from "@dokploy/server/setup/traefik-setup";
+} from "@nomploy/server/setup/traefik-setup";
 import slug from "slugify";
 import { Client } from "ssh2";
 import { recreateDirectory } from "../utils/filesystem/directory";
@@ -75,7 +75,7 @@ export const serverSetup = async (
 		if (IS_CLOUD) {
 			onData?.("\nConfiguring Monitoring: 🔄\n");
 
-			const baseUrl = await getDokployUrl();
+			const baseUrl = await getNomployUrl();
 			const token = generateToken();
 			const urlCallback = `${baseUrl}/api/trpc/notification.receiveNotification`;
 
@@ -308,8 +308,8 @@ const installRequirements = async (
 						`Technical details: ${technicalDetail}`,
 						"",
 						"💡 Hints:",
-						"  • Check that the SSH key you added in Dokploy is the same one installed on the server (e.g. in ~/.ssh/authorized_keys).",
-						"  • Try generating a new SSH key in Dokploy and add only the public key to the server, then try again.",
+						"  • Check that the SSH key you added in Nomploy is the same one installed on the server (e.g. in ~/.ssh/authorized_keys).",
+						"  • Try generating a new SSH key in Nomploy and add only the public key to the server, then try again.",
 						"  • Make sure to follow the instructions on the Setup Server Button on the SSH Keys tab",
 					].join("\n");
 					onData?.(friendlyMessage);
@@ -330,7 +330,7 @@ const installRequirements = async (
 						"",
 						"💡 Hints:",
 						"  • Check that the server IP address and SSH port are correct and the server is powered on.",
-						"  • If the server is in a private network, ensure Dokploy can reach it (VPN, firewall rules, or correct security groups).",
+						"  • If the server is in a private network, ensure Nomploy can reach it (VPN, firewall rules, or correct security groups).",
 						"  • Make sure the SSH port (usually 22) is open and the SSH service is running on the server.",
 					].join("\n");
 					onData?.(friendlyMessage);
@@ -364,17 +364,17 @@ const setupDirectories = () => {
 };
 
 const setupMainDirectory = () => `
-	# Check if the /etc/dokploy directory exists
-	if [ -d /etc/dokploy ]; then
-		echo "/etc/dokploy already exists ✅"
+	# Check if the /etc/nomploy directory exists
+	if [ -d /etc/nomploy ]; then
+		echo "/etc/nomploy already exists ✅"
 	else
-		# Create the /etc/dokploy directory
-		$SUDO_CMD mkdir -p /etc/dokploy
-		echo "Directory /etc/dokploy created ✅"
+		# Create the /etc/nomploy directory
+		$SUDO_CMD mkdir -p /etc/nomploy
+		echo "Directory /etc/nomploy created ✅"
 	fi
 	# Ensure the current user owns the directory
 	if [ -n "$SUDO_CMD" ]; then
-		$SUDO_CMD chown -R $CURRENT_USER:$CURRENT_USER /etc/dokploy
+		$SUDO_CMD chown -R $CURRENT_USER:$CURRENT_USER /etc/nomploy
 	fi
 `;
 
@@ -436,15 +436,15 @@ export const setupSwarm = () => `
 	`;
 
 const setupNetwork = () => `
-	# Check if the dokploy-network already exists
-	if $SUDO_CMD docker network ls | grep -q 'dokploy-network'; then
-		echo "Network dokploy-network already exists ✅"
+	# Check if the nomploy-network already exists
+	if $SUDO_CMD docker network ls | grep -q 'nomploy-network'; then
+		echo "Network nomploy-network already exists ✅"
 	else
-		# Create the dokploy-network if it doesn't exist
-		if $SUDO_CMD docker network create --driver overlay --attachable dokploy-network; then
+		# Create the nomploy-network if it doesn't exist
+		if $SUDO_CMD docker network create --driver overlay --attachable nomploy-network; then
 			echo "Network created ✅"
 		else
-			echo "Failed to create dokploy-network ❌" >&2
+			echo "Failed to create nomploy-network ❌" >&2
 			exit 1
 		fi
 	fi
@@ -509,7 +509,7 @@ if [ -x "$(command -v snap)" ]; then
     SNAP_DOCKER_INSTALLED=$(snap list docker >/dev/null 2>&1 && echo "true" || echo "false")
     if [ "$SNAP_DOCKER_INSTALLED" = "true" ]; then
         echo " - Docker is installed via snap."
-        echo "   Please note that Dokploy does not support Docker installed via snap."
+        echo "   Please note that Nomploy does not support Docker installed via snap."
         echo "   Please remove Docker with snap (snap remove docker) and reexecute this script."
         exit 1
     fi
@@ -638,13 +638,13 @@ const createTraefikConfig = () => {
 	const config = getDefaultServerTraefikConfig();
 
 	const command = `
-	if [ -f "/etc/dokploy/traefik/dynamic/acme.json" ]; then
-		chmod 600 "/etc/dokploy/traefik/dynamic/acme.json"
+	if [ -f "/etc/nomploy/traefik/dynamic/acme.json" ]; then
+		chmod 600 "/etc/nomploy/traefik/dynamic/acme.json"
 	fi
-	if [ -f "/etc/dokploy/traefik/traefik.yml" ]; then
+	if [ -f "/etc/nomploy/traefik/traefik.yml" ]; then
 		echo "Traefik config already exists ✅"
 	else
-		echo "${config}" > /etc/dokploy/traefik/traefik.yml
+		echo "${config}" > /etc/nomploy/traefik/traefik.yml
 	fi
 	`;
 
@@ -654,10 +654,10 @@ const createTraefikConfig = () => {
 const createDefaultMiddlewares = () => {
 	const config = getDefaultMiddlewares();
 	const command = `
-	if [ -f "/etc/dokploy/traefik/dynamic/middlewares.yml" ]; then
+	if [ -f "/etc/nomploy/traefik/dynamic/middlewares.yml" ]; then
 		echo "Middlewares config already exists ✅"
 	else
-		echo "${config}" > /etc/dokploy/traefik/dynamic/middlewares.yml
+		echo "${config}" > /etc/nomploy/traefik/dynamic/middlewares.yml
 	fi
 	`;
 	return command;
@@ -676,30 +676,30 @@ export const installRClone = () => `
 export const createTraefikInstance = () => {
 	const command = `
 	    # Check if dokpyloy-traefik exists
-		if $SUDO_CMD docker service inspect dokploy-traefik > /dev/null 2>&1; then
+		if $SUDO_CMD docker service inspect nomploy-traefik > /dev/null 2>&1; then
 			echo "Migrating Traefik to Standalone..."
-			$SUDO_CMD docker service rm dokploy-traefik
+			$SUDO_CMD docker service rm nomploy-traefik
 			sleep 8
 			echo "Traefik migrated to Standalone ✅"
 		fi
 
-		if $SUDO_CMD docker inspect dokploy-traefik > /dev/null 2>&1; then
+		if $SUDO_CMD docker inspect nomploy-traefik > /dev/null 2>&1; then
 			echo "Traefik already exists ✅"
 		else
-			# Create the dokploy-traefik container
+			# Create the nomploy-traefik container
 			TRAEFIK_VERSION=${TRAEFIK_VERSION}
 			$SUDO_CMD docker run -d \
-				--name dokploy-traefik \
+				--name nomploy-traefik \
 				--restart always \
-				-v /etc/dokploy/traefik/traefik.yml:/etc/traefik/traefik.yml \
-				-v /etc/dokploy/traefik/dynamic:/etc/dokploy/traefik/dynamic \
+				-v /etc/nomploy/traefik/traefik.yml:/etc/traefik/traefik.yml \
+				-v /etc/nomploy/traefik/dynamic:/etc/nomploy/traefik/dynamic \
 				-v /var/run/docker.sock:/var/run/docker.sock \
 				-p ${TRAEFIK_SSL_PORT}:${TRAEFIK_SSL_PORT} \
 				-p ${TRAEFIK_PORT}:${TRAEFIK_PORT} \
 				-p ${TRAEFIK_HTTP3_PORT}:${TRAEFIK_HTTP3_PORT}/udp \
 				traefik:v$TRAEFIK_VERSION
 
-			$SUDO_CMD docker network connect dokploy-network dokploy-traefik;
+			$SUDO_CMD docker network connect nomploy-network nomploy-traefik;
 			echo "Traefik version $TRAEFIK_VERSION installed ✅"
 		fi
 	`;
@@ -736,8 +736,8 @@ const setupPermissions = () => `
 		else
 			echo "User $CURRENT_USER already in docker group ✅"
 		fi
-		# Ensure the user owns the dokploy directory
-		$SUDO_CMD chown -R $CURRENT_USER:$CURRENT_USER /etc/dokploy
+		# Ensure the user owns the nomploy directory
+		$SUDO_CMD chown -R $CURRENT_USER:$CURRENT_USER /etc/nomploy
 		echo "Permissions configured for $CURRENT_USER ✅"
 	else
 		echo "Running as root, no extra permissions needed ✅"

@@ -32,20 +32,20 @@ import {
 	stopCompose,
 	updateCompose,
 	updateDeploymentStatus,
-} from "@dokploy/server";
-import { db } from "@dokploy/server/db";
+} from "@nomploy/server";
+import { db } from "@nomploy/server/db";
 import {
 	addNewService,
 	checkServiceAccess,
 	checkServicePermissionAndAccess,
 	findMemberByUserId,
-} from "@dokploy/server/services/permission";
+} from "@nomploy/server/services/permission";
 import {
 	type CompleteTemplate,
 	fetchTemplateFiles,
 	fetchTemplatesList,
-} from "@dokploy/server/templates/github";
-import { processTemplate } from "@dokploy/server/templates/processors";
+} from "@nomploy/server/templates/github";
+import { processTemplate } from "@nomploy/server/templates/processors";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import _ from "lodash";

@@ -1,5 +1,5 @@
-import { validateRequest } from "@dokploy/server/lib/auth";
-import { hasPermission } from "@dokploy/server/services/permission";
+import { validateRequest } from "@nomploy/server/lib/auth";
+import { hasPermission } from "@nomploy/server/services/permission";
 import { Rocket } from "lucide-react";
 import type { GetServerSidePropsContext } from "next";
 import { useRouter } from "next/router";

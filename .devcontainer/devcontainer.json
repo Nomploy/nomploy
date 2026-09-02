@@ -1,5 +1,5 @@
 {
-	"name": "Dokploy development container",
+	"name": "Nomploy development container",
 	"build": {
 		"dockerfile": "Dockerfile",
 		"context": ".."
@@ -35,7 +35,7 @@
 	"forwardPorts": [3000, 5432, 6379],
 	"portsAttributes": {
 		"3000": {
-			"label": "Dokploy App",
+			"label": "Nomploy App",
 			"onAutoForward": "notify"
 		},
 		"5432": {
@@ -48,6 +48,6 @@
 		}
 	},
 	"remoteUser": "node",
-	"workspaceFolder": "/workspaces/dokploy",
-	"runArgs": ["--name", "dokploy-devcontainer"]
+	"workspaceFolder": "/workspaces/nomploy",
+	"runArgs": ["--name", "nomploy-devcontainer"]
 }

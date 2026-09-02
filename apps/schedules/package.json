@@ -1,5 +1,5 @@
 {
-	"name": "@dokploy/schedules",
+	"name": "@nomploy/schedules",
 	"type": "module",
 	"scripts": {
 		"dev": "PORT=4001 tsx watch src/index.ts",
@@ -8,7 +8,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@dokploy/server": "workspace:*",
+		"@nomploy/server": "workspace:*",
 		"@hono/node-server": "^1.14.3",
 		"@hono/zod-validator": "0.7.6",
 		"bullmq": "5.67.3",

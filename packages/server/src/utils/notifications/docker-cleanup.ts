@@ -1,6 +1,6 @@
-import { db } from "@dokploy/server/db";
-import { notifications } from "@dokploy/server/db/schema";
-import DockerCleanupEmail from "@dokploy/server/emails/emails/docker-cleanup";
+import { db } from "@nomploy/server/db";
+import { notifications } from "@nomploy/server/db/schema";
+import DockerCleanupEmail from "@nomploy/server/emails/emails/docker-cleanup";
 import { renderAsync } from "@react-email/components";
 import { format } from "date-fns";
 import { and, eq } from "drizzle-orm";
@@ -21,7 +21,7 @@ import {
 
 export const sendDockerCleanupNotifications = async (
 	organizationId: string,
-	message = "Docker cleanup for dokploy",
+	message = "Docker cleanup for nomploy",
 ) => {
 	const date = new Date();
 	const unixDate = ~~(Number(date) / 1000);
@@ -70,7 +70,7 @@ export const sendDockerCleanupNotifications = async (
 				if (email) {
 					await sendEmailNotification(
 						email,
-						"Docker cleanup for dokploy",
+						"Docker cleanup for nomploy",
 						template,
 					);
 				}
@@ -78,7 +78,7 @@ export const sendDockerCleanupNotifications = async (
 				if (resend) {
 					await sendResendNotification(
 						resend,
-						"Docker cleanup for dokploy",
+						"Docker cleanup for nomploy",
 						template,
 					);
 				}
@@ -114,7 +114,7 @@ export const sendDockerCleanupNotifications = async (
 					],
 					timestamp: date.toISOString(),
 					footer: {
-						text: "Dokploy Docker Cleanup Notification",
+						text: "Nomploy Docker Cleanup Notification",
 					},
 				});
 			}
@@ -175,7 +175,7 @@ export const sendDockerCleanupNotifications = async (
 				await sendMattermostNotification(mattermost, {
 					text: `**✅ Docker Cleanup**\n\n**Message:** ${message}\n**Date:** ${format(date, "PP")}\n**Time:** ${format(date, "pp")}`,
 					channel: mattermost.channel,
-					username: mattermost.username || "Dokploy",
+					username: mattermost.username || "Nomploy",
 				});
 			}
 

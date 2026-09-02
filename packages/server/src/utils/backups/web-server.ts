@@ -2,14 +2,14 @@ import { createWriteStream } from "node:fs";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { IS_CLOUD, paths } from "@dokploy/server/constants";
-import type { BackupSchedule } from "@dokploy/server/services/backup";
+import { IS_CLOUD, paths } from "@nomploy/server/constants";
+import type { BackupSchedule } from "@nomploy/server/services/backup";
 import {
 	createDeploymentBackup,
 	updateDeploymentStatus,
-} from "@dokploy/server/services/deployment";
-import { findDestinationById } from "@dokploy/server/services/destination";
-import { sendDokployBackupNotifications } from "../notifications/dokploy-backup";
+} from "@nomploy/server/services/deployment";
+import { findDestinationById } from "@nomploy/server/services/destination";
+import { sendNomployBackupNotifications } from "../notifications/nomploy-backup";
 import { execAsync } from "../process/execAsync";
 import { getBackupTimestamp, getS3Credentials, normalizeS3Path } from "./utils";
 
@@ -39,7 +39,7 @@ export const runWebServerBackup = async (backup: BackupSchedule) => {
 		const rcloneFlags = getS3Credentials(destination);
 		const timestamp = getBackupTimestamp();
 		const { BASE_PATH } = paths();
-		const tempDir = await mkdtemp(join(tmpdir(), "dokploy-backup-"));
+		const tempDir = await mkdtemp(join(tmpdir(), "nomploy-backup-"));
 		const backupFileName = `webserver-backup-${timestamp}.zip`;
 		const s3Path = `:s3:${destination.bucket}/${backup.appName}/${normalizeS3Path(backup.prefix)}${backupFileName}`;
 
@@ -48,21 +48,21 @@ export const runWebServerBackup = async (backup: BackupSchedule) => {
 
 			// First get the container ID
 			const { stdout: containerId } = await execAsync(
-				`docker ps --filter "name=dokploy-postgres" --filter "status=running" -q | head -n 1`,
+				`docker ps --filter "name=nomploy-postgres" --filter "status=running" -q | head -n 1`,
 			);
 
 			if (!containerId) {
-				writeStream.write("Dokploy postgres container not found❌\n");
+				writeStream.write("Nomploy postgres container not found❌\n");
 				writeStream.end();
-				throw new Error("Dokploy postgres container not found");
+				throw new Error("Nomploy postgres container not found");
 			}
 
-			writeStream.write(`Dokploy postgres container ID: ${containerId}\n`);
+			writeStream.write(`Nomploy postgres container ID: ${containerId}\n`);
 
 			const postgresContainerId = containerId.trim();
 
 			// First dump the database inside the container
-			const dumpCommand = `docker exec ${postgresContainerId} pg_dump -v -Fc -U dokploy -d dokploy -f /tmp/database.sql`;
+			const dumpCommand = `docker exec ${postgresContainerId} pg_dump -v -Fc -U nomploy -d nomploy -f /tmp/database.sql`;
 			writeStream.write(`Running dump command: ${dumpCommand}\n`);
 			await execAsync(dumpCommand);
 
@@ -103,7 +103,7 @@ export const runWebServerBackup = async (backup: BackupSchedule) => {
 			await execAsync(uploadCommand);
 			writeStream.write("Uploaded backup to S3 ✅\n");
 			writeStream.end();
-			await sendDokployBackupNotifications({
+			await sendNomployBackupNotifications({
 				type: "success",
 				backupSize: formatBytes(computedBackupSize),
 			});
@@ -123,7 +123,7 @@ export const runWebServerBackup = async (backup: BackupSchedule) => {
 			error instanceof Error ? error.message : "Unknown error\n",
 		);
 		writeStream.end();
-		await sendDokployBackupNotifications({
+		await sendNomployBackupNotifications({
 			type: "error",
 			// @ts-ignore
 			errorMessage: error?.message || "Error message not provided",

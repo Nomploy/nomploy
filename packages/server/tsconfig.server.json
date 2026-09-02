@@ -13,7 +13,7 @@
 		"baseUrl": ".",
 		"jsx": "react-jsx",
 		"paths": {
-			"@dokploy/server/*": ["./src/*"]
+			"@nomploy/server/*": ["./src/*"]
 		}
 	},
 	"include": ["next-env.d.ts", "./src/**/*"],

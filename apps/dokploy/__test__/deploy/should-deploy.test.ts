@@ -1,4 +1,4 @@
-import { shouldDeploy } from "@dokploy/server";
+import { shouldDeploy } from "@nomploy/server";
 import { describe, expect, it } from "vitest";
 
 describe("shouldDeploy", () => {

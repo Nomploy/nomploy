@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { api } from "@/utils/api";
 
-export const ShowWelcomeDokploy = () => {
+export const ShowWelcomeNomploy = () => {
 	const { data } = api.user.get.useQuery();
 	const [open, setOpen] = useState(false);
 
@@ -44,7 +44,7 @@ export const ShowWelcomeDokploy = () => {
 				<DialogContent className="sm:max-w-xl">
 					<DialogHeader>
 						<DialogTitle className="text-2xl font-semibold text-center">
-							Welcome to Dokploy Cloud 🎉
+							Welcome to Nomploy Cloud 🎉
 						</DialogTitle>
 						<p className="text-center text-sm text-muted-foreground mt-2">
 							Unlock powerful features to streamline your deployments and manage

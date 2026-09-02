@@ -1,5 +1,5 @@
-import { IS_CLOUD, shouldDeploy } from "@dokploy/server";
-import { db } from "@dokploy/server/db";
+import { IS_CLOUD, shouldDeploy } from "@nomploy/server";
+import { db } from "@nomploy/server/db";
 import { eq } from "drizzle-orm";
 import type { NextApiRequest, NextApiResponse } from "next";
 import { compose } from "@/server/db/schema";

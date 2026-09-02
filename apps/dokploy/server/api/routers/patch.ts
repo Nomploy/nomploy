@@ -12,8 +12,8 @@ import {
 	readPatchRepoDirectory,
 	readPatchRepoFile,
 	updatePatch,
-} from "@dokploy/server";
-import { checkServicePermissionAndAccess } from "@dokploy/server/services/permission";
+} from "@nomploy/server";
+import { checkServicePermissionAndAccess } from "@nomploy/server/services/permission";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {

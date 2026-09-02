@@ -57,12 +57,12 @@ export const CreateServer = ({ stepper }: Props) => {
 		api.stripe.canCreateMoreServers.useQuery();
 	const { mutateAsync } = api.server.create.useMutation();
 	const cloudSSHKey = sshKeys?.find(
-		(sshKey) => sshKey.name === "dokploy-cloud-ssh-key",
+		(sshKey) => sshKey.name === "nomploy-cloud-ssh-key",
 	);
 
 	const form = useForm<Schema>({
 		defaultValues: {
-			description: "Dokploy Cloud Server",
+			description: "Nomploy Cloud Server",
 			name: "My First Server",
 			ipAddress: "",
 			port: 22,
@@ -74,7 +74,7 @@ export const CreateServer = ({ stepper }: Props) => {
 
 	useEffect(() => {
 		form.reset({
-			description: "Dokploy Cloud Server",
+			description: "Nomploy Cloud Server",
 			name: "My First Server",
 			ipAddress: "",
 			port: 22,

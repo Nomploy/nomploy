@@ -1,10 +1,10 @@
-import { db } from "@dokploy/server/db";
+import { db } from "@nomploy/server/db";
 import {
 	type apiCreatePreviewDeployment,
 	deployments,
 	organization,
 	previewDeployments,
-} from "@dokploy/server/db/schema";
+} from "@nomploy/server/db/schema";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq } from "drizzle-orm";
 import type { z } from "zod";
@@ -154,7 +154,7 @@ export const createPreviewDeployment = async (
 		owner: application?.owner || "",
 		repo: application?.repository || "",
 		issue_number: Number.parseInt(schema.pullRequestNumber),
-		body: `### Dokploy Preview Deployment\n\n${runningComment}`,
+		body: `### Nomploy Preview Deployment\n\n${runningComment}`,
 	});
 
 	const previewDeployment = await db

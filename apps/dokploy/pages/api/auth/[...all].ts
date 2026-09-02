@@ -1,4 +1,4 @@
-import { auth } from "@dokploy/server/index";
+import { auth } from "@nomploy/server/index";
 import { toNodeHandler } from "better-auth/node";
 
 // Disallow body parsing, we will parse it manually

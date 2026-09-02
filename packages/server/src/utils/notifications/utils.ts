@@ -11,7 +11,7 @@ import type {
 	slack,
 	teams,
 	telegram,
-} from "@dokploy/server/db/schema";
+} from "@nomploy/server/db/schema";
 import nodemailer from "nodemailer";
 import { Resend } from "resend";
 

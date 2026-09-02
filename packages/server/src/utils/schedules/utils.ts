@@ -1,13 +1,13 @@
 import { createWriteStream } from "node:fs";
 import path from "node:path";
-import { IS_CLOUD, paths } from "@dokploy/server/constants";
-import type { Schedule } from "@dokploy/server/db/schema/schedule";
+import { IS_CLOUD, paths } from "@nomploy/server/constants";
+import type { Schedule } from "@nomploy/server/db/schema/schedule";
 import {
 	createDeploymentSchedule,
 	updateDeployment,
 	updateDeploymentStatus,
-} from "@dokploy/server/services/deployment";
-import { findScheduleById } from "@dokploy/server/services/schedule";
+} from "@nomploy/server/services/deployment";
+import { findScheduleById } from "@nomploy/server/services/schedule";
 import { scheduledJobs, scheduleJob as scheduleJobNode } from "node-schedule";
 import { getComposeContainer, getServiceContainer } from "../docker/utils";
 import { execAsyncRemote } from "../process/execAsync";

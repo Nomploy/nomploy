@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execAsync, IS_CLOUD, paths } from "@dokploy/server";
+import { execAsync, IS_CLOUD, paths } from "@nomploy/server";
 
 /**
  * Validates that the container ID matches Docker's expected format.
@@ -77,16 +77,16 @@ export const getShell = () => {
 	}
 };
 
-/** Returns private SSH key for dokploy local server terminal. Uses already created SSH key or generates a new SSH key.
+/** Returns private SSH key for nomploy local server terminal. Uses already created SSH key or generates a new SSH key.
  */
 export const setupLocalServerSSHKey = async () => {
 	const { SSH_PATH } = paths(true);
-	const sshKeyPath = path.join(SSH_PATH, "auto_generated-dokploy-local");
+	const sshKeyPath = path.join(SSH_PATH, "auto_generated-nomploy-local");
 
 	if (!fs.existsSync(sshKeyPath)) {
 		// Generate new SSH key if it hasn't been created yet
 		await execAsync(
-			`ssh-keygen -t rsa -b 4096 -f ${sshKeyPath} -N "" -C "dokploy-local-access"`,
+			`ssh-keygen -t rsa -b 4096 -f ${sshKeyPath} -N "" -C "nomploy-local-access"`,
 		);
 	}
 

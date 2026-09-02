@@ -1,4 +1,4 @@
-import { validateRequest } from "@dokploy/server/lib/auth";
+import { validateRequest } from "@nomploy/server/lib/auth";
 import { createServerSideHelpers } from "@trpc/react-query/server";
 import copy from "copy-to-clipboard";
 import { CircuitBoard, HelpCircle, ServerOff } from "lucide-react";
@@ -91,7 +91,7 @@ const Service = (
 		projectId: data?.environment?.projectId || "",
 	});
 	const { config: whitelabeling } = useWhitelabeling();
-	const appName = whitelabeling?.appName || "Dokploy";
+	const appName = whitelabeling?.appName || "Nomploy";
 	const environmentDropdownItems =
 		environments?.map((env) => ({
 			name: env.name,
@@ -150,7 +150,7 @@ const Service = (
 														: "destructive"
 											}
 										>
-											{data?.server?.name || "Dokploy Server"}
+											{data?.server?.name || "Nomploy Server"}
 										</Badge>
 										{data?.server?.serverStatus === "inactive" && (
 											<TooltipProvider>

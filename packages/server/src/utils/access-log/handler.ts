@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { paths } from "@dokploy/server/constants";
+import { paths } from "@nomploy/server/constants";
 import {
 	getWebServerSettings,
 	updateWebServerSettings,
-} from "@dokploy/server/services/web-server-settings";
+} from "@nomploy/server/services/web-server-settings";
 import { scheduledJobs, scheduleJob } from "node-schedule";
 import { execAsync } from "../process/execAsync";
 
@@ -32,7 +32,7 @@ export const startLogCleanup = async (
 				await execAsync(
 					`tail -n 1000 ${accessLogPath} > ${accessLogPath}.tmp && mv ${accessLogPath}.tmp ${accessLogPath}`,
 				);
-				await execAsync("docker exec dokploy-traefik kill -USR1 1");
+				await execAsync("docker exec nomploy-traefik kill -USR1 1");
 			} catch (error) {
 				console.error("Error during log cleanup:", error);
 			}

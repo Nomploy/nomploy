@@ -537,7 +537,7 @@ export const AddDomain = ({ id, type, domainId = "", children }: Props) => {
 											<FormLabel>Host</FormLabel>
 											<div className="flex gap-2">
 												<FormControl>
-													<Input placeholder="api.dokploy.com" {...field} />
+													<Input placeholder="api.nomploy.com" {...field} />
 												</FormControl>
 												<TooltipProvider delayDuration={0}>
 													<Tooltip>

@@ -19,7 +19,7 @@ function getServiceInfo(d: any) {
 	const app = d.application;
 	const comp = d.compose;
 	const serverName: string =
-		d.server?.name ?? app?.server?.name ?? comp?.server?.name ?? "Dokploy";
+		d.server?.name ?? app?.server?.name ?? comp?.server?.name ?? "Nomploy";
 	if (app?.environment?.project && app.environment) {
 		return {
 			name: app.name as string,

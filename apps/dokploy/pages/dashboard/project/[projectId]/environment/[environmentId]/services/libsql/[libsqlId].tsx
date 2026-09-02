@@ -1,4 +1,4 @@
-import { validateRequest } from "@dokploy/server/lib/auth";
+import { validateRequest } from "@nomploy/server/lib/auth";
 import { createServerSideHelpers } from "@trpc/react-query/server";
 import copy from "copy-to-clipboard";
 import { HelpCircle, ServerOff } from "lucide-react";
@@ -74,7 +74,7 @@ const Libsql = (
 				<Head>
 					<title>
 						Database: {data?.name} - {data?.environment?.project?.name} |
-						Dokploy
+						Nomploy
 					</title>
 				</Head>
 				<Card className="h-full bg-sidebar  p-2.5 rounded-xl w-full">
@@ -118,7 +118,7 @@ const Libsql = (
 													: "destructive"
 										}
 									>
-										{data?.server?.name || "Dokploy Server"}
+										{data?.server?.name || "Nomploy Server"}
 									</Badge>
 									{data?.server?.serverStatus === "inactive" && (
 										<TooltipProvider delayDuration={0}>

@@ -4,8 +4,8 @@ import {
 	IS_CLOUD,
 	removeCertificateById,
 	updateCertificate,
-} from "@dokploy/server";
-import { db } from "@dokploy/server/db";
+} from "@nomploy/server";
+import { db } from "@nomploy/server/db";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 import { createTRPCRouter, withPermission } from "@/server/api/trpc";

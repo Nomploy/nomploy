@@ -1,9 +1,9 @@
-import { getBuildComposeCommand } from "@dokploy/server/utils/builders/compose";
+import { getBuildComposeCommand } from "@nomploy/server/utils/builders/compose";
 import { describe, expect, it, vi } from "vitest";
 
 // Isolate the command builder from the compose-file I/O performed by
 // writeDomainsToCompose; we only care about the docker invocation it emits.
-vi.mock("@dokploy/server/utils/docker/domain", () => ({
+vi.mock("@nomploy/server/utils/docker/domain", () => ({
 	writeDomainsToCompose: vi.fn().mockResolvedValue(""),
 }));
 

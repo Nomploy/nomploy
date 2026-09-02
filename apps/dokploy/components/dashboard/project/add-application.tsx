@@ -80,8 +80,8 @@ export const AddApplication = ({ environmentId, projectName }: Props) => {
 
 	const hasServers = servers && servers.length > 0;
 	// Show dropdown logic based on cloud environment
-	// Cloud: show only if there are remote servers (no Dokploy option)
-	// Self-hosted: show only if there are remote servers (Dokploy is default, hide if no remote servers)
+	// Cloud: show only if there are remote servers (no Nomploy option)
+	// Self-hosted: show only if there are remote servers (Nomploy is default, hide if no remote servers)
 	const shouldShowServerDropdown = hasServers;
 
 	const { mutateAsync, isPending, error, isError } =
@@ -101,7 +101,7 @@ export const AddApplication = ({ environmentId, projectName }: Props) => {
 			name: data.name,
 			appName: data.appName,
 			description: data.description,
-			serverId: data.serverId === "dokploy" ? undefined : data.serverId,
+			serverId: data.serverId === "nomploy" ? undefined : data.serverId,
 			environmentId,
 		})
 			.then(async () => {
@@ -195,22 +195,22 @@ export const AddApplication = ({ environmentId, projectName }: Props) => {
 										<Select
 											onValueChange={field.onChange}
 											defaultValue={
-												field.value || (showLocalOption ? "dokploy" : undefined)
+												field.value || (showLocalOption ? "nomploy" : undefined)
 											}
 										>
 											<SelectTrigger>
 												<SelectValue
 													placeholder={
-														showLocalOption ? "Dokploy" : "Select a Server"
+														showLocalOption ? "Nomploy" : "Select a Server"
 													}
 												/>
 											</SelectTrigger>
 											<SelectContent>
 												<SelectGroup>
 													{showLocalOption && (
-														<SelectItem value="dokploy">
+														<SelectItem value="nomploy">
 															<span className="flex items-center gap-2 justify-between w-full">
-																<span>Dokploy</span>
+																<span>Nomploy</span>
 																<span className="text-muted-foreground text-xs self-center">
 																	Default
 																</span>

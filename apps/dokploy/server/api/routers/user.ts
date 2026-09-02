@@ -4,7 +4,7 @@ import {
 	findNotificationById,
 	findOrganizationById,
 	findUserById,
-	getDokployUrl,
+	getNomployUrl,
 	getUserByToken,
 	getWebServerSettings,
 	IS_CLOUD,
@@ -13,8 +13,8 @@ import {
 	sendEmailNotification,
 	sendResendNotification,
 	updateUser,
-} from "@dokploy/server";
-import { db } from "@dokploy/server/db";
+} from "@nomploy/server";
+import { db } from "@nomploy/server/db";
 import {
 	account,
 	apiAssignPermissions,
@@ -25,12 +25,12 @@ import {
 	member,
 	session,
 	user,
-} from "@dokploy/server/db/schema";
+} from "@nomploy/server/db/schema";
 import {
 	hasPermission,
 	resolvePermissions,
-} from "@dokploy/server/services/permission";
-import { hasValidLicense } from "@dokploy/server/services/proprietary/license-key";
+} from "@nomploy/server/services/permission";
+import { hasValidLicense } from "@nomploy/server/services/proprietary/license-key";
 import { TRPCError } from "@trpc/server";
 import * as bcrypt from "bcrypt";
 import { and, asc, eq, gt, ne } from "drizzle-orm";
@@ -649,7 +649,7 @@ export const userRouter = createTRPCRouter({
 			const host =
 				process.env.NODE_ENV === "development"
 					? "http://localhost:3000"
-					: await getDokployUrl();
+					: await getNomployUrl();
 			const inviteLink = `${host}/invitation?token=${input.invitationId}`;
 
 			const organization = await findOrganizationById(
@@ -659,7 +659,7 @@ export const userRouter = createTRPCRouter({
 			try {
 				const toEmail = currentInvitation?.email || "";
 				const orgName = organization?.name || "organization";
-				const subject = `You've been invited to join ${orgName} on Dokploy`;
+				const subject = `You've been invited to join ${orgName} on Nomploy`;
 				const html = await renderInvitationEmail({
 					email: toEmail,
 					inviteLink,

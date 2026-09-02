@@ -12,7 +12,7 @@ interface Props {
 export default function Custom404({ statusCode, error }: Props) {
 	const displayStatusCode = statusCode || 400;
 	const { config: whitelabeling } = useWhitelabelingPublic();
-	const appName = whitelabeling?.appName || "Dokploy";
+	const appName = whitelabeling?.appName || "Nomploy";
 	const logoUrl = whitelabeling?.logoUrl || undefined;
 	const errorTitle = whitelabeling?.errorPageTitle;
 	const errorDescription = whitelabeling?.errorPageDescription;

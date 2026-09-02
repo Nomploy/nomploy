@@ -1,7 +1,7 @@
 import {
 	execAsync,
 	execAsyncRemote,
-} from "@dokploy/server/utils/process/execAsync";
+} from "@nomploy/server/utils/process/execAsync";
 
 export const getContainers = async (serverId?: string | null) => {
 	try {
@@ -60,8 +60,8 @@ export const getContainers = async (serverId?: string | null) => {
 			})
 			.filter(
 				(container) =>
-					!container.name.includes("dokploy") ||
-					container.name.includes("dokploy-monitoring"),
+					!container.name.includes("nomploy") ||
+					container.name.includes("nomploy-monitoring"),
 			);
 
 		return containers;
@@ -103,7 +103,7 @@ export const getConfig = async (
 
 export const getContainersByAppNameMatch = async (
 	appName: string,
-	appType?: "stack" | "docker-compose",
+	appType?: "stack" | "docker-compose" | "nomad",
 	serverId?: string,
 ) => {
 	try {
@@ -573,7 +573,7 @@ export const getNodeApplications = async (serverId?: string) => {
 			.trim()
 			.split("\n")
 			.map((line) => JSON.parse(line))
-			.filter((service) => !service.Name.startsWith("dokploy-"));
+			.filter((service) => !service.Name.startsWith("nomploy-"));
 
 		return appArray;
 	} catch (error) {
@@ -680,7 +680,7 @@ export const uploadFileToContainer = async (
 		: `/${destinationPath}`;
 
 	const base64Content = fileBuffer.toString("base64");
-	const tempFileName = `dokploy-upload-${Date.now()}-${fileName.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
+	const tempFileName = `nomploy-upload-${Date.now()}-${fileName.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
 	const tempPath = `/tmp/${tempFileName}`;
 
 	const command = `echo '${base64Content}' | base64 -d > "${tempPath}" && docker cp "${tempPath}" "${containerId}:${normalizedPath}" ; rm -f "${tempPath}"`;

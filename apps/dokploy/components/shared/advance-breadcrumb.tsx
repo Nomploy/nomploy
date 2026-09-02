@@ -1,4 +1,4 @@
-import type { ServiceType } from "@dokploy/server/db/schema";
+import type { ServiceType } from "@nomploy/server/db/schema";
 import {
 	Check,
 	ChevronDown,

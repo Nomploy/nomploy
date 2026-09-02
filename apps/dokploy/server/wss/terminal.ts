@@ -4,7 +4,7 @@ import {
 	findServerById,
 	IS_CLOUD,
 	validateRequest,
-} from "@dokploy/server";
+} from "@nomploy/server";
 import { publicIpv4, publicIpv6 } from "public-ip";
 import { Client, type ConnectConfig } from "ssh2";
 import { WebSocketServer } from "ws";
@@ -17,13 +17,13 @@ mkdir -p $HOME/.ssh && \\
 chmod 700 $HOME/.ssh && \\
 touch $HOME/.ssh/authorized_keys && \\
 chmod 600 $HOME/.ssh/authorized_keys && \\
-cat /etc/dokploy/ssh/auto_generated-dokploy-local.pub >> $HOME/.ssh/authorized_keys && \\
-echo "✓ Dokploy SSH key added successfully. Reopen the terminal in Dokploy to reconnect."
+cat /etc/nomploy/ssh/auto_generated-nomploy-local.pub >> $HOME/.ssh/authorized_keys && \\
+echo "✓ Nomploy SSH key added successfully. Reopen the terminal in Nomploy to reconnect."
 # ----------------------------------------`;
 
 const COMMAND_TO_GRANT_PERMISSION_ACCESS = `
 # ----------------------------------------
-sudo chown -R $USER:$USER /etc/dokploy/ssh
+sudo chown -R $USER:$USER /etc/nomploy/ssh
 # ----------------------------------------
 `;
 

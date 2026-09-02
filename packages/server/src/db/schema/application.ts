@@ -1,4 +1,4 @@
-import { VALID_BRANCH_REGEX } from "@dokploy/server/utils/git-branch-validation";
+import { VALID_BRANCH_REGEX } from "@nomploy/server/utils/git-branch-validation";
 import { relations } from "drizzle-orm";
 import {
 	bigint,

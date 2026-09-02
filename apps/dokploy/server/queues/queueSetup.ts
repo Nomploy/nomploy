@@ -1,8 +1,8 @@
-import { IS_CLOUD } from "@dokploy/server";
+import { IS_CLOUD } from "@nomploy/server";
 import {
 	execAsync,
 	execAsyncRemote,
-} from "@dokploy/server/utils/process/execAsync";
+} from "@nomploy/server/utils/process/execAsync";
 import type { Job } from "bullmq";
 import { Queue } from "bullmq";
 import { deploymentWorker } from "./deployments-queue";

@@ -43,7 +43,7 @@ const defaultData = {
 
 interface Props {
 	appName: string;
-	appType?: "application" | "stack" | "docker-compose";
+	appType?: "application" | "stack" | "docker-compose" | "nomad";
 }
 export interface DockerStats {
 	cpu: {
@@ -263,7 +263,7 @@ export const ContainerFreeMonitoring = ({
 						</div>
 					</CardContent>
 				</Card>
-				{appName === "dokploy" && (
+				{appName === "nomploy" && (
 					<Card className="bg-background">
 						<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 							<CardTitle className="text-sm font-medium">Disk Space</CardTitle>
@@ -285,7 +285,7 @@ export const ContainerFreeMonitoring = ({
 						</CardContent>
 					</Card>
 				)}
-				{appName === "dokploy" && (
+				{appName === "nomploy" && (
 					<Card className="bg-background">
 						<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 							<CardTitle className="text-sm font-medium">

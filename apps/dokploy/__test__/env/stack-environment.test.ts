@@ -1,4 +1,4 @@
-import { getEnvironmentVariablesObject } from "@dokploy/server/index";
+import { getEnvironmentVariablesObject } from "@nomploy/server/index";
 import { describe, expect, it } from "vitest";
 
 const projectEnv = `

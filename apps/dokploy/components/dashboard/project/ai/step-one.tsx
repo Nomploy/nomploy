@@ -28,8 +28,8 @@ export const StepOne = ({ setTemplateInfo, templateInfo }: any) => {
 	const { data: isCloud } = api.settings.isCloud.useQuery();
 	const hasServers = servers && servers.length > 0;
 	// Show dropdown logic based on cloud environment
-	// Cloud: show only if there are remote servers (no Dokploy option)
-	// Self-hosted: show only if there are remote servers (Dokploy is default, hide if no remote servers)
+	// Cloud: show only if there are remote servers (no Nomploy option)
+	// Self-hosted: show only if there are remote servers (Nomploy is default, hide if no remote servers)
 	const shouldShowServerDropdown = hasServers;
 
 	const handleExampleClick = (example: string) => {
@@ -61,10 +61,10 @@ export const StepOne = ({ setTemplateInfo, templateInfo }: any) => {
 							<Select
 								value={
 									templateInfo.server?.serverId ||
-									(!isCloud ? "dokploy" : undefined)
+									(!isCloud ? "nomploy" : undefined)
 								}
 								onValueChange={(value) => {
-									if (value === "dokploy") {
+									if (value === "nomploy") {
 										setTemplateInfo({
 											...templateInfo,
 											server: undefined,
@@ -82,15 +82,15 @@ export const StepOne = ({ setTemplateInfo, templateInfo }: any) => {
 							>
 								<SelectTrigger className="w-full">
 									<SelectValue
-										placeholder={!isCloud ? "Dokploy" : "Select a Server"}
+										placeholder={!isCloud ? "Nomploy" : "Select a Server"}
 									/>
 								</SelectTrigger>
 								<SelectContent>
 									<SelectGroup>
 										{!isCloud && (
-											<SelectItem value="dokploy">
+											<SelectItem value="nomploy">
 												<span className="flex items-center gap-2 justify-between w-full">
-													<span>Dokploy</span>
+													<span>Nomploy</span>
 													<span className="text-muted-foreground text-xs self-center">
 														Default
 													</span>

@@ -71,7 +71,7 @@ import {
 import { cn } from "@/lib/utils";
 import { api } from "@/utils/api";
 
-const TEMPLATE_BASE_URL_KEY = "dokploy_template_base_url";
+const TEMPLATE_BASE_URL_KEY = "nomploy_template_base_url";
 
 interface Props {
 	environmentId: string;
@@ -183,8 +183,8 @@ export const AddTemplate = ({ environmentId, baseUrl }: Props) => {
 
 	const hasServers = servers && servers.length > 0;
 	// Show dropdown logic based on cloud environment
-	// Cloud: show only if there are remote servers (no Dokploy option)
-	// Self-hosted: show only if there are remote servers (Dokploy is default, hide if no remote servers)
+	// Cloud: show only if there are remote servers (no Nomploy option)
+	// Self-hosted: show only if there are remote servers (Nomploy is default, hide if no remote servers)
 	const shouldShowServerDropdown = hasServers;
 
 	const handleToggleBookmark = async (
@@ -421,7 +421,7 @@ export const AddTemplate = ({ environmentId, baseUrl }: Props) => {
 										>
 											{/** biome-ignore lint/performance/noImgElement: this is a valid use for img tag */}
 											<img
-												src={`${customBaseUrl || "https://templates.dokploy.com/"}/blueprints/${template?.id}/${template?.logo}`}
+												src={`${customBaseUrl || "https://templates.nomploy.com/"}/blueprints/${template?.id}/${template?.logo}`}
 												className={cn(
 													"object-contain",
 													viewMode === "detailed" ? "size-24" : "size-16",
@@ -552,22 +552,22 @@ export const AddTemplate = ({ environmentId, baseUrl }: Props) => {
 																		setServerId(e);
 																	}}
 																	defaultValue={
-																		!isCloud ? "dokploy" : undefined
+																		!isCloud ? "nomploy" : undefined
 																	}
 																>
 																	<SelectTrigger>
 																		<SelectValue
 																			placeholder={
-																				!isCloud ? "Dokploy" : "Select a Server"
+																				!isCloud ? "Nomploy" : "Select a Server"
 																			}
 																		/>
 																	</SelectTrigger>
 																	<SelectContent>
 																		<SelectGroup>
 																			{!isCloud && (
-																				<SelectItem value="dokploy">
+																				<SelectItem value="nomploy">
 																					<span className="flex items-center gap-2 justify-between w-full">
-																						<span>Dokploy</span>
+																						<span>Nomploy</span>
 																						<span className="text-muted-foreground text-xs self-center">
 																							Default
 																						</span>
@@ -604,7 +604,7 @@ export const AddTemplate = ({ environmentId, baseUrl }: Props) => {
 															onClick={async () => {
 																const promise = mutateAsync({
 																	serverId:
-																		serverId === "dokploy"
+																		serverId === "nomploy"
 																			? undefined
 																			: serverId,
 																	environmentId,

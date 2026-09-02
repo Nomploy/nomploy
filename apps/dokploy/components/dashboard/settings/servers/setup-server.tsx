@@ -191,7 +191,7 @@ export const SetupServer = ({ serverId, asButton = false }: Props) => {
 											Automatic process
 										</span>
 										<Link
-											href="https://docs.dokploy.com/docs/core/remote-servers/instructions#requirements"
+											href="https://docs.nomploy.com/docs/core/remote-servers/instructions#requirements"
 											target="_blank"
 											className="text-primary flex flex-row gap-2"
 										>

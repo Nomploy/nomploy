@@ -1,4 +1,4 @@
-import { getPublicIpWithFallback, LICENSE_KEY_URL } from "@dokploy/server";
+import { getPublicIpWithFallback, LICENSE_KEY_URL } from "@nomploy/server";
 
 const LICENSE_SERVER_UNREACHABLE =
 	"Could not reach the license server. Check your connection or try again later.";

@@ -1,5 +1,5 @@
-import type { Registry } from "@dokploy/server";
-import { getRegistryTag } from "@dokploy/server";
+import type { Registry } from "@nomploy/server";
+import { getRegistryTag } from "@nomploy/server";
 import { describe, expect, it } from "vitest";
 
 describe("getRegistryTag", () => {
@@ -208,12 +208,12 @@ describe("getRegistryTag", () => {
 	});
 
 	describe("special characters in username", () => {
-		it("should handle Harbor robot account username with $ (e.g. robot$library+dokploy)", () => {
+		it("should handle Harbor robot account username with $ (e.g. robot$library+nomploy)", () => {
 			const registry = createMockRegistry({
-				username: "robot$library+dokploy",
+				username: "robot$library+nomploy",
 			});
 			const result = getRegistryTag(registry, "nginx");
-			expect(result).toBe("docker.io/robot$library+dokploy/nginx");
+			expect(result).toBe("docker.io/robot$library+nomploy/nginx");
 		});
 
 		it("should handle username with $ and other special characters", () => {

@@ -1,5 +1,5 @@
-import type { ComposeSpecification } from "@dokploy/server";
-import { addSuffixToAllProperties } from "@dokploy/server";
+import type { ComposeSpecification } from "@nomploy/server";
+import { addSuffixToAllProperties } from "@nomploy/server";
 import { expect, test } from "vitest";
 import { parse } from "yaml";
 

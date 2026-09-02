@@ -1,4 +1,4 @@
-import { IS_CLOUD } from "@dokploy/server";
+import { IS_CLOUD } from "@nomploy/server";
 import { standardSchemaResolver as zodResolver } from "@hookform/resolvers/standard-schema";
 import type { GetServerSidePropsContext } from "next";
 import Link from "next/link";

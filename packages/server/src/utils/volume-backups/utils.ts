@@ -1,14 +1,14 @@
 import path from "node:path";
-import { paths } from "@dokploy/server/constants";
+import { paths } from "@nomploy/server/constants";
 import {
 	createDeploymentVolumeBackup,
 	updateDeploymentStatus,
-} from "@dokploy/server/services/deployment";
-import { findVolumeBackupById } from "@dokploy/server/services/volume-backups";
+} from "@nomploy/server/services/deployment";
+import { findVolumeBackupById } from "@nomploy/server/services/volume-backups";
 import {
 	execAsync,
 	execAsyncRemote,
-} from "@dokploy/server/utils/process/execAsync";
+} from "@nomploy/server/utils/process/execAsync";
 import { scheduledJobs, scheduleJob } from "node-schedule";
 import { getS3Credentials, normalizeS3Path } from "../backups/utils";
 import { sendVolumeBackupNotifications } from "../notifications/volume-backup";

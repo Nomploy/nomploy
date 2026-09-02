@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { paths } from "@dokploy/server/constants";
+import { paths } from "@nomploy/server/constants";
 import { TRPCError } from "@trpc/server";
 import { execAsync, execAsyncRemote } from "../utils/process/execAsync";
 import { cloneBitbucketRepository } from "../utils/providers/bitbucket";

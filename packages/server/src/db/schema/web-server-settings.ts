@@ -23,7 +23,7 @@ export const webServerSettings = pgTable("webServerSettings", {
 	metricsConfig: jsonb("metricsConfig")
 		.$type<{
 			server: {
-				type: "Dokploy" | "Remote";
+				type: "Nomploy" | "Remote";
 				refreshRate: number;
 				port: number;
 				token: string;
@@ -46,7 +46,7 @@ export const webServerSettings = pgTable("webServerSettings", {
 		.notNull()
 		.default({
 			server: {
-				type: "Dokploy",
+				type: "Nomploy",
 				refreshRate: 60,
 				port: 4500,
 				token: "",
@@ -135,7 +135,7 @@ export const apiUpdateWebServerSettings = createSchema.partial().extend({
 	metricsConfig: z
 		.object({
 			server: z.object({
-				type: z.enum(["Dokploy", "Remote"]),
+				type: z.enum(["Nomploy", "Remote"]),
 				refreshRate: z.number(),
 				port: z.number(),
 				token: z.string(),

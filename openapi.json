@@ -1,21 +1,21 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Dokploy API",
-    "description": "Complete API documentation for Dokploy - Deploy applications, manage databases, and orchestrate your infrastructure. This API allows you to programmatically manage all aspects of your Dokploy instance.",
+    "title": "Nomploy API",
+    "description": "Complete API documentation for Nomploy - Deploy applications, manage databases, and orchestrate your infrastructure. This API allows you to programmatically manage all aspects of your Nomploy instance.",
     "version": "1.0.0",
     "contact": {
-      "name": "Dokploy Team",
-      "url": "https://dokploy.com"
+      "name": "Nomploy Team",
+      "url": "https://nomploy.com"
     },
     "license": {
       "name": "Apache 2.0",
-      "url": "https://github.com/dokploy/dokploy/blob/canary/LICENSE"
+      "url": "https://github.com/nomploy/nomploy/blob/canary/LICENSE"
     }
   },
   "servers": [
     {
-      "url": "https://your-dokploy-instance.com/api"
+      "url": "https://your-nomploy-instance.com/api"
     }
   ],
   "tags": [
@@ -133,7 +133,7 @@
   ],
   "externalDocs": {
     "description": "Full documentation",
-    "url": "https://docs.dokploy.com"
+    "url": "https://docs.nomploy.com"
   },
   "paths": {
     "/admin.setupMonitoring": {
@@ -27402,9 +27402,9 @@
         }
       }
     },
-    "/settings.getDokployVersion": {
+    "/settings.getNomployVersion": {
       "get": {
-        "operationId": "settings-getDokployVersion",
+        "operationId": "settings-getNomployVersion",
         "tags": [
           "settings"
         ],
@@ -29262,9 +29262,9 @@
         }
       }
     },
-    "/settings.getDokployCloudIps": {
+    "/settings.getNomployCloudIps": {
       "get": {
-        "operationId": "settings-getDokployCloudIps",
+        "operationId": "settings-getNomployCloudIps",
         "tags": [
           "settings"
         ],
@@ -33543,10 +33543,10 @@
                 "type": "object",
                 "properties": {
                   "ServerType": {
-                    "default": "Dokploy",
+                    "default": "Nomploy",
                     "type": "string",
                     "enum": [
-                      "Dokploy",
+                      "Nomploy",
                       "Remote"
                     ]
                   },
@@ -48964,7 +48964,7 @@
         "type": "apiKey",
         "in": "header",
         "name": "x-api-key",
-        "description": "API key authentication. Generate an API key from your Dokploy dashboard under Settings > API Keys."
+        "description": "API key authentication. Generate an API key from your Nomploy dashboard under Settings > API Keys."
       }
     }
   },
