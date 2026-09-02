@@ -10,16 +10,19 @@ WORKDIR /usr/src/app
 
 RUN apt-get update && apt-get install -y python3 make g++ git python3-pip pkg-config libsecret-1-dev && rm -rf /var/lib/apt/lists/*
 
-# Dependencies first, keyed ONLY on the lockfile: `pnpm fetch` populates the store
-# from pnpm-lock.yaml alone, so this layer (and the resulting node_modules) is
-# reused across builds whenever the lockfile is unchanged — source edits no longer
-# trigger a full reinstall, and the control plane re-pulls far less on redeploys.
-COPY pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm fetch
+# Dependencies first: copy only the manifests + lockfile, then install. This
+# layer (and the resulting node_modules, including native builds like bcrypt) is
+# reused whenever no package.json/lockfile changes, so source edits no longer
+# reinstall everything — faster CI and far smaller control-plane re-pulls.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/api/package.json ./apps/api/
+COPY apps/dokploy/package.json ./apps/dokploy/
+COPY apps/schedules/package.json ./apps/schedules/
+COPY packages/server/package.json ./packages/server/
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 
-# Now bring in the source and install offline from the populated store.
+# Now bring in the source (the cached install above is reused).
 COPY . .
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --offline
 
 # Deploy only the nomploy app
 
