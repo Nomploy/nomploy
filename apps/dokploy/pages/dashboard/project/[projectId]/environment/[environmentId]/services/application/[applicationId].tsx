@@ -347,6 +347,7 @@ const Service = (
 												<ShowDockerLogs
 													appName={data?.appName || ""}
 													serverId={data?.serverId || ""}
+													appType="nomad"
 												/>
 											</div>
 										</TabsContent>
