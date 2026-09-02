@@ -10,6 +10,7 @@ We have a few guidelines to follow when contributing to this project:
 - [Setup](#setup)
 - [Development](#development)
 - [Build](#build)
+- [Contributor License Agreement (CLA)](#contributor-license-agreement-cla)
 - [Pull Request](#pull-request)
 - [Important Considerations](#important-considerations-for-pull-requests)
 
@@ -158,6 +159,24 @@ curl -sSL https://railpack.com/install.sh | sh
 # Install Buildpacks
 curl -sSL "https://github.com/buildpacks/pack/releases/download/v0.39.1/pack-v0.39.1-linux.tgz" | tar -C /usr/local/bin/ --no-same-owner -xzv pack
 ```
+
+## Contributor License Agreement (CLA)
+
+nomploy is licensed under the **AGPL-3.0** (see [`LICENSE`](LICENSE) and
+[`LICENSING.md`](LICENSING.md)). To keep the project's licensing options open —
+including offering commercial licenses alongside the AGPL — all contributions are
+accepted under our [Contributor License Agreement](CLA.md).
+
+You only need to sign **once**. The first time you open a pull request, the CLA
+bot will comment with a link to the agreement; to sign, reply on the PR with:
+
+```
+I have read the CLA Document and I hereby sign the CLA
+```
+
+Your PR can be merged once the CLA check passes. By signing you confirm you have
+the right to contribute your work and you allow it to be dual-licensed (see
+[`CLA.md`](CLA.md) for the full terms).
 
 ## Pull Request
 
