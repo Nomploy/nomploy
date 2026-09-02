@@ -150,10 +150,20 @@ const NomadAppLogs = ({
 	);
 };
 
-export const ShowDockerLogs = ({ appName, serverId, appType }: Props) => {
-	if (appType === "nomad") {
-		return <NomadAppLogs appName={appName} serverId={serverId} />;
-	}
+export const ShowDockerLogs = ({ appName, serverId, appType }: Props) =>
+	appType === "nomad" ? (
+		<NomadAppLogs appName={appName} serverId={serverId} />
+	) : (
+		<DockerAppLogs appName={appName} serverId={serverId} />
+	);
+
+const DockerAppLogs = ({
+	appName,
+	serverId,
+}: {
+	appName: string;
+	serverId?: string;
+}) => {
 	const [containerId, setContainerId] = useState<string | undefined>();
 	const [option, setOption] = useState<"swarm" | "native">("native");
 
