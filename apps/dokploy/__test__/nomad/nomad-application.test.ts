@@ -74,6 +74,27 @@ describe("nomad application builder — application → HCL", () => {
 		expect(hcl).toContain("tls.certresolver=letsencrypt");
 	});
 
+	it("derives the network port from a domain when the app has no ports", () => {
+		const appNoPorts = { ...application, ports: [] };
+		const domainOnly = [
+			{
+				serviceName: "app",
+				port: 8080,
+				host: "only-domain.example.com",
+				https: false,
+				path: "/",
+				uniqueConfigKey: 1,
+			},
+			// biome-ignore lint/suspicious/noExplicitAny: test mock of Domain[]
+		] as any;
+		const spec = applicationToNomadSpec(appNoPorts, domainOnly);
+		expect(spec.ports.map((p) => p.to)).toEqual([8080]);
+		const hcl = generateApplicationNomadJob(appNoPorts, domainOnly);
+		expect(hcl).toContain("to = 8080");
+		expect(hcl).toContain('provider = "consul"');
+		expect(hcl).toContain("Host(`only-domain.example.com`)");
+	});
+
 	it("uses the docker image directly for docker-source apps", () => {
 		const dockerApp = {
 			...application,

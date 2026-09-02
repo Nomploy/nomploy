@@ -38,6 +38,7 @@ export const resolveApplicationImage = (
  */
 export const applicationToNomadSpec = (
 	application: ApplicationNested,
+	domains: Domain[] = [],
 ): NomadServiceSpec => {
 	const env = getEnvironmentVariablesObject(
 		application.env,
@@ -54,10 +55,21 @@ export const applicationToNomadSpec = (
 		? Math.round(Number.parseInt(application.memoryLimit) / (1024 * 1024))
 		: undefined;
 
-	const ports = (application.ports || []).map((p) => ({
-		label: `port${p.targetPort}`,
-		to: p.targetPort,
-		protocol: p.protocol as "tcp" | "udp" | undefined,
+	// A container port is needed for both the network block and the Consul
+	// service. Applications express routable ports two ways: the ports relation
+	// (Swarm published ports) and — most commonly — a domain's container port.
+	// Derive from both, deduped, so adding just a domain is enough to route.
+	const portNumbers = new Map<number, "tcp" | "udp">();
+	for (const p of application.ports || []) {
+		portNumbers.set(p.targetPort, (p.protocol as "tcp" | "udp") || "tcp");
+	}
+	for (const d of domains) {
+		if (d.port) portNumbers.set(d.port, portNumbers.get(d.port) || "tcp");
+	}
+	const ports = [...portNumbers.entries()].map(([to, protocol]) => ({
+		label: `port${to}`,
+		to,
+		protocol,
 	}));
 
 	const entrypoint = [
@@ -88,7 +100,7 @@ export const generateApplicationNomadJob = (
 ): string =>
 	generateNomadJobSpec(
 		application.appName,
-		[applicationToNomadSpec(application)],
+		[applicationToNomadSpec(application, domains)],
 		domains,
 	);
 
