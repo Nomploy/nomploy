@@ -129,6 +129,11 @@ server { enabled = false }
 client {
   enabled = true
   servers = ["${hubWgIp}:4647"]
+  # Bind & register allocation ports on the WireGuard overlay, not the public
+  # NIC, so Traefik on the control plane can reach services here (and ports are
+  # never exposed publicly). Without this, Consul registers the node's public IP
+  # and cross-node routing fails behind a cloud firewall.
+  network_interface = "wg0"
 }
 consul { address = "127.0.0.1:8500" }
 plugin "docker" {

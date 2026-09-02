@@ -38,16 +38,14 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { api } from "@/utils/api";
-import { ShowNodesModal } from "../cluster/nodes/show-nodes-modal";
 import { TerminalModal } from "../web-server/terminal-modal";
 import { ShowServerActions } from "./actions/show-server-actions";
-import { NomadSettingsModal } from "./nomad-settings-modal";
 import { HandleServers } from "./handle-servers";
+import { NomadSettingsModal } from "./nomad-settings-modal";
 import { SetupServer } from "./setup-server";
 import { ShowDockerContainersModal } from "./show-docker-containers-modal";
 import { ShowMonitoringModal } from "./show-monitoring-modal";
 import { ShowSchedulesModal } from "./show-schedules-modal";
-import { ShowSwarmOverviewModal } from "./show-swarm-overview-modal";
 import { ShowTraefikFileSystemModal } from "./show-traefik-file-system-modal";
 import { WelcomeSubscription } from "./welcome-stripe/welcome-subscription";
 
@@ -173,12 +171,6 @@ export const ShowServers = () => {
 																								}
 																							/>
 																						)}
-																						<ShowSwarmOverviewModal
-																							serverId={server.serverId}
-																						/>
-																						<ShowNodesModal
-																							serverId={server.serverId}
-																						/>
 																						<ShowSchedulesModal
 																							serverId={server.serverId}
 																						/>

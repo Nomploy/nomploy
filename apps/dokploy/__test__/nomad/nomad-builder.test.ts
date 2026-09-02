@@ -78,6 +78,10 @@ describe("nomad builder — compose → HCL (live)", () => {
 
 		// Replicas, image, container port
 		expect(hcl).toContain("count = 2");
+
+		// Multi-replica service spreads across distinct nodes (uses whole cluster)
+		expect(hcl).toContain("spread {");
+		expect(hcl).toContain("node.unique.id");
 		expect(hcl).toContain('image = "myregistry/web:latest"');
 		expect(hcl).toContain("to = 3000");
 

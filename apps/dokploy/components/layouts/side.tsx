@@ -7,7 +7,6 @@ import {
 	BlocksIcon,
 	BookIcon,
 	BotIcon,
-	Boxes,
 	ChevronRight,
 	ChevronsUpDown,
 	CircleHelp,
@@ -206,15 +205,6 @@ const MENU: Menu = {
 		},
 		{
 			isSingle: true,
-			title: "Swarm",
-			url: "/dashboard/swarm",
-			icon: PieChart,
-			// Only enabled for users with access to Docker in non-cloud environments
-			isEnabled: ({ permissions, isCloud }) =>
-				!!(permissions?.docker.read && !isCloud),
-		},
-		{
-			isSingle: true,
 			title: "Nomad",
 			url: "/dashboard/nomad",
 			icon: PieChart,
@@ -377,15 +367,6 @@ const MENU: Menu = {
 			url: "/dashboard/settings/certificates",
 			icon: ShieldCheck,
 			isEnabled: ({ permissions }) => !!permissions?.certificate.read,
-		},
-		{
-			isSingle: true,
-			title: "Cluster",
-			url: "/dashboard/settings/cluster",
-			icon: Boxes,
-			// Only enabled for admins in non-cloud environments
-			isEnabled: ({ permissions, isCloud }) =>
-				!!(permissions?.organization.update && !isCloud),
 		},
 		{
 			isSingle: true,
