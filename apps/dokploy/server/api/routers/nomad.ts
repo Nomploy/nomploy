@@ -111,6 +111,50 @@ const withNs = (path: string, namespace: string) => {
 	return `${path}${sep}namespace=${encodeURIComponent(namespace)}`;
 };
 
+// ── Consul (service catalog + health) ──────────────────────────────────────
+// Read-only. The control-plane Consul holds the whole cluster's catalog, so with
+// no serverId we read it directly; for a remote standalone cluster we reuse that
+// server's Nomad host on Consul's port. Never exposed to the network — the native
+// Consul UI stays bound to 127.0.0.1; this surfaces its data behind the panel.
+const DEFAULT_CONSUL_ADDRESS =
+	process.env.CONSUL_ADDRESS || "http://127.0.0.1:8500";
+const DEFAULT_CONSUL_TOKEN = process.env.CONSUL_TOKEN || "";
+
+const resolveConsul = async (
+	ctx: { session?: { activeOrganizationId?: string } | null },
+	serverId?: string,
+): Promise<{ address: string; token: string }> => {
+	if (!serverId)
+		return { address: DEFAULT_CONSUL_ADDRESS, token: DEFAULT_CONSUL_TOKEN };
+
+	const server = await findServerById(serverId);
+	if (server.organizationId !== ctx.session?.activeOrganizationId) {
+		throw new TRPCError({ code: "UNAUTHORIZED" });
+	}
+	// Derive Consul from the server's Nomad address (same host, Consul's port).
+	const base = server.nomadAddress || DEFAULT_CONSUL_ADDRESS;
+	const address = base.replace(/:\d+(?=\/?$)/, ":8500");
+	return { address, token: "" };
+};
+
+const consulGet = async (
+	cfg: { address: string; token: string },
+	path: string,
+) => {
+	const headers: Record<string, string> = {};
+	if (cfg.token) headers["X-Consul-Token"] = cfg.token;
+	const res = await fetch(`${cfg.address.replace(/\/$/, "")}/v1${path}`, {
+		headers,
+	});
+	if (!res.ok) {
+		throw new TRPCError({
+			code: "INTERNAL_SERVER_ERROR",
+			message: `Consul API error: ${res.status} ${res.statusText}`,
+		});
+	}
+	return res.json();
+};
+
 const serverInput = z.object({ serverId: z.string().optional() });
 
 export const nomadRouter = createTRPCRouter({
@@ -246,6 +290,43 @@ export const nomadRouter = createTRPCRouter({
 		.query(async ({ input, ctx }) => {
 			const cfg = await resolveNomad(ctx, input.serverId);
 			return nomadClient(cfg).get(`/node/${input.nodeId}`);
+		}),
+
+	// Consul service catalog with per-service health, as the native Consul UI
+	// shows it (one call to the internal UI endpoint). Read-only.
+	getConsulServices: withPermission("server", "read")
+		.input(serverInput)
+		.query(async ({ input, ctx }) => {
+			const cfg = await resolveConsul(ctx, input.serverId);
+			const services: any[] = await consulGet(cfg, "/internal/ui/services");
+			return services.map((s) => ({
+				name: s.Name as string,
+				tags: (s.Tags || []) as string[],
+				instances: (s.InstanceCount ?? s.Nodes?.length ?? 0) as number,
+				checksPassing: (s.ChecksPassing || 0) as number,
+				checksWarning: (s.ChecksWarning || 0) as number,
+				checksCritical: (s.ChecksCritical || 0) as number,
+				kind: (s.Kind || "") as string,
+				datacenter: (s.Datacenter || "") as string,
+			}));
+		}),
+
+	// Consul cluster members (servers + clients) with health, for the Consul tab.
+	getConsulNodes: withPermission("server", "read")
+		.input(serverInput)
+		.query(async ({ input, ctx }) => {
+			const cfg = await resolveConsul(ctx, input.serverId);
+			const nodes: any[] = await consulGet(cfg, "/internal/ui/nodes");
+			return nodes.map((n) => ({
+				node: n.Node as string,
+				address: n.Address as string,
+				status: (n.Checks?.every((c: any) => c.Status === "passing")
+					? "passing"
+					: n.Checks?.some((c: any) => c.Status === "critical")
+						? "critical"
+						: "warning") as string,
+				services: (n.Services?.length ?? 0) as number,
+			}));
 		}),
 
 	scaleJob: withPermission("server", "create")
@@ -422,18 +503,20 @@ export const nomadRouter = createTRPCRouter({
 							)
 						) {
 							const hubHost = existsSync(CLUSTER_FILE)
-								? (JSON.parse(readFileSync(CLUSTER_FILE, "utf8"))
-										.hubEndpoint as string)?.replace(/:\d+$/, "")
+								? (
+										JSON.parse(readFileSync(CLUSTER_FILE, "utf8"))
+											.hubEndpoint as string
+									)?.replace(/:\d+$/, "")
 								: undefined;
 							emit.next(
 								`\nThe control plane could not open an SSH connection to ${server.ipAddress}:${server.port}.\n` +
-									`This is almost always network reachability, not a bad key:\n` +
-									`  • If this node is behind a cloud firewall (Hetzner, AWS SG, …), allow inbound\n` +
+									"This is almost always network reachability, not a bad key:\n" +
+									"  • If this node is behind a cloud firewall (Hetzner, AWS SG, …), allow inbound\n" +
 									`    TCP/${server.port} (SSH) and UDP/51820 (WireGuard) from the control-plane IP${
 										hubHost ? ` (${hubHost})` : ""
 									}.\n` +
 									`  • If both machines share a private network, set this server's IP to its\n` +
-									`    private address — the control plane reaches it there with no public exposure.\n`,
+									"    private address — the control plane reaches it there with no public exposure.\n",
 							);
 						}
 						emit.complete();

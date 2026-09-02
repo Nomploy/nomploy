@@ -1,11 +1,8 @@
 import { join } from "node:path";
 import { paths } from "@nomploy/server/constants";
-import type { InferResultType } from "@nomploy/server/types/with";
 import type { Domain } from "@nomploy/server/services/domain";
-import {
-	encodeBase64,
-	getEnvironmentVariablesObject,
-} from "../docker/utils";
+import type { InferResultType } from "@nomploy/server/types/with";
+import { encodeBase64, getEnvironmentVariablesObject } from "../docker/utils";
 import { parseComposeToNomadServices } from "./nomad-parser";
 
 export type NomadComposeNested = InferResultType<
@@ -160,9 +157,13 @@ const generateTaskGroup = (
 	const hasPorts = service.ports.length > 0;
 	const networkBlock = hasPorts
 		? `    network {
-${service.ports.map((p) => `      port "${p.label}" {
+${service.ports
+	.map(
+		(p) => `      port "${p.label}" {
         to = ${p.to}
-      }`).join("\n")}
+      }`,
+	)
+	.join("\n")}
     }`
 		: "";
 	const portsConfig = hasPorts
@@ -183,10 +184,14 @@ ${service.ports.map((p) => `      port "${p.label}" {
 	return `  group "${service.name}" {
     count = ${service.replicas}
 ${spreadBlock}
-${scalingBlock}${hasPorts ? `${networkBlock}
+${scalingBlock}${
+	hasPorts
+		? `${networkBlock}
 
 ${consulServices}
-` : ""}
+`
+		: ""
+}
     task "${service.name}" {
       driver = "docker"
 
@@ -289,22 +294,26 @@ const generateConsulServices = (
 	const blocks = service.ports.map((port) => {
 		const serviceName = `${appName}-${service.name}-${port.to}`;
 		const portDomains = domains.filter(
-			(d) => d.serviceName === service.name && (d.port === port.to || (!d.port && port === service.ports[0])),
+			(d) =>
+				d.serviceName === service.name &&
+				(d.port === port.to || (!d.port && port === service.ports[0])),
 		);
 
 		const tags = generateConsulTags(appName, service.name, port, portDomains);
-		const tagsStr = tags.length > 0
-			? `\n      tags = [\n${tags.map((t) => `        ${JSON.stringify(t)},`).join("\n")}\n      ]`
-			: "";
+		const tagsStr =
+			tags.length > 0
+				? `\n      tags = [\n${tags.map((t) => `        ${JSON.stringify(t)},`).join("\n")}\n      ]`
+				: "";
 
-		const checkBlock = service.healthCheck && port === service.ports[0]
-			? `\n\n      check {
+		const checkBlock =
+			service.healthCheck && port === service.ports[0]
+				? `\n\n      check {
         type     = "${service.healthCheck.type}"
         path     = ${JSON.stringify(service.healthCheck.path || "/")}
         interval = "${service.healthCheck.interval}"
         timeout  = "${service.healthCheck.timeout}"
       }`
-			: `\n\n      check {
+				: `\n\n      check {
         type     = "tcp"
         interval = "30s"
         timeout  = "5s"
