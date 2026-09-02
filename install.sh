@@ -140,6 +140,13 @@ plugin "docker" {
 }
 NOMADHCL
 
+# The Nomad docker plugin above sets auth.config = /root/.docker/config.json.
+# If that file is missing, the docker driver fails to pull EVERY image (even
+# public ones). Create an empty auth config so public pulls work; `docker login`
+# later fills it in for private registries. Must exist before Nomad starts.
+$SUDO mkdir -p /root/.docker
+[ -s /root/.docker/config.json ] || echo '{"auths":{}}' | $SUDO tee /root/.docker/config.json >/dev/null
+
 # Start via --no-block and poll the HTTP APIs for readiness. The packaged units
 # are Type=notify; if the agent doesn't signal systemd, a blocking `restart`
 # would hang and (under set -e) abort the install even though the agent is up.
