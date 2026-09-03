@@ -12,6 +12,11 @@ export interface NomadDatabaseInput {
 	containerPort: number;
 	/** Optional fixed host port for external access (psql from outside, etc.). */
 	externalPort?: number | null;
+	/**
+	 * Additional container ports to publish as static overlay ports (e.g. libSQL's
+	 * gRPC replication port). The primary containerPort is the discoverable one.
+	 */
+	extraPorts?: number[];
 	/** Container path whose data must survive restarts (the engine's data dir). */
 	dataPath: string;
 	/** Service env (KEY=val lines) — already includes engine defaults. */
@@ -91,6 +96,8 @@ export const generateDatabaseNomadJob = (db: NomadDatabaseInput): string => {
 		ports.push(
 			`        port "external" {\n          static = ${db.externalPort}\n          to     = ${db.containerPort}\n        }`,
 		);
+	for (const p of db.extraPorts || [])
+		ports.push(`        port "p${p}" {\n          static = ${p}\n        }`);
 
 	const commandLine = db.command
 		? `\n        command = ${hclString(db.command)}`
@@ -137,7 +144,7 @@ ${ports.join("\n")}
 
       config {
         image   = ${hclString(db.image)}
-        ports   = ["db"${db.externalPort ? ', "external"' : ""}]
+        ports   = ["db"${db.externalPort ? ', "external"' : ""}${(db.extraPorts || []).map((p) => `, "p${p}"`).join("")}]
         volumes = [${volumesHcl}]${commandLine}${argsLine}
       }
 
