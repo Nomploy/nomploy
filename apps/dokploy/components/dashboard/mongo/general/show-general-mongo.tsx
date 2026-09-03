@@ -231,6 +231,7 @@ export const ShowGeneralMongo = ({ mongoId }: Props) => {
 						<DockerTerminalModal
 							appName={data?.appName || ""}
 							serverId={data?.serverId || ""}
+							appType="nomad"
 						>
 							<Button
 								variant="outline"
