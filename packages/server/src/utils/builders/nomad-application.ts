@@ -145,3 +145,19 @@ ${
 }
 `;
 };
+
+/**
+ * Build the deploy command for an application, normalizing its domains to the
+ * single service name so the Consul/Traefik tags attach. Used by every
+ * application deploy/reload path.
+ */
+export const getApplicationNomadDeployCommand = (
+	application: ApplicationNested & { domains?: Domain[] },
+): string =>
+	getBuildNomadApplicationCommand(
+		application,
+		(application.domains ?? []).map((d) => ({
+			...d,
+			serviceName: NOMAD_APP_SERVICE_NAME,
+		})),
+	);

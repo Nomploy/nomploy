@@ -6,7 +6,7 @@ import {
 	libsql,
 } from "@nomploy/server/db/schema";
 import { generatePassword } from "@nomploy/server/templates";
-import { buildLibsql } from "@nomploy/server/utils/databases/libsql";
+import { deployDatabaseToNomad } from "@nomploy/server/utils/databases/nomad-deploy";
 import { pullImage } from "@nomploy/server/utils/docker/utils";
 import { execAsyncRemote } from "@nomploy/server/utils/process/execAsync";
 import { TRPCError } from "@trpc/server";
@@ -142,7 +142,31 @@ export const deployLibsql = async (
 			await pullImage(libsql.dockerImage, onData);
 		}
 
-		await buildLibsql(libsql);
+		{
+			const basicAuth = Buffer.from(
+				`${libsql.databaseUser}:${libsql.databasePassword}`,
+				"utf-8",
+			).toString("base64");
+			await deployDatabaseToNomad(
+				{
+					appName: libsql.appName,
+					image: libsql.dockerImage,
+					containerPort: 8080,
+					extraPorts: [5001],
+					externalPort: libsql.externalPort,
+					dataPath: "/var/lib/sqld",
+					env: `SQLD_NODE="${libsql.sqldNode}"\nSQLD_HTTP_AUTH="basic:${basicAuth}"${libsql.env ? `\n${libsql.env}` : ""}${libsql.sqldNode === "replica" ? `\nSQLD_PRIMARY_URL="${libsql.sqldPrimaryUrl}"` : ""}`,
+					projectEnv: libsql.environment.project.env,
+					environmentEnv: libsql.environment.env,
+					cpuLimit: libsql.cpuLimit,
+					memoryLimit: libsql.memoryLimit,
+					command: libsql.command,
+					mounts: libsql.mounts,
+				},
+				libsql.serverId,
+				onData,
+			);
+		}
 		await updateLibsqlById(libsqlId, {
 			applicationStatus: "done",
 		});

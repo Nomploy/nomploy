@@ -13,6 +13,7 @@ import type { MongoNested } from "../databases/mongo";
 import type { MysqlNested } from "../databases/mysql";
 import type { PostgresNested } from "../databases/postgres";
 import type { RedisNested } from "../databases/redis";
+import { getRunningAllocId } from "../nomad/resolve";
 import { execAsync, execAsyncRemote } from "../process/execAsync";
 import { spawnAsync } from "../process/spawnAsync";
 import { getRemoteDocker } from "../servers/remote-docker";
@@ -110,7 +111,7 @@ export const containerExists = async (containerName: string) => {
 
 export const stopService = async (appName: string) => {
 	try {
-		await execAsync(`docker service scale ${appName}=0 `);
+		await execAsync(`nomad job scale ${appName} 0`);
 	} catch (error) {
 		console.error(error);
 		return error;
@@ -119,7 +120,7 @@ export const stopService = async (appName: string) => {
 
 export const stopServiceRemote = async (serverId: string, appName: string) => {
 	try {
-		await execAsyncRemote(serverId, `docker service scale ${appName}=0 `);
+		await execAsyncRemote(serverId, `nomad job scale ${appName} 0`);
 	} catch (error) {
 		console.error(error);
 		return error;
@@ -360,9 +361,13 @@ export const cleanupAllBackground = async (serverId?: string) => {
 	};
 };
 
+// Start = scale the Nomad job's group back up; stop = scale it to 0. Services run
+// as single-group Nomad jobs (job id = appName), so `nomad job scale <job> <n>`
+// targets the right group. (Start restores one instance; a full redeploy restores
+// the configured replica count.)
 export const startService = async (appName: string) => {
 	try {
-		await execAsync(`docker service scale ${appName}=1 `);
+		await execAsync(`nomad job scale ${appName} 1`);
 	} catch (error) {
 		console.error(error);
 		throw error;
@@ -371,7 +376,7 @@ export const startService = async (appName: string) => {
 
 export const startServiceRemote = async (serverId: string, appName: string) => {
 	try {
-		await execAsyncRemote(serverId, `docker service scale ${appName}=1 `);
+		await execAsyncRemote(serverId, `nomad job scale ${appName} 1`);
 	} catch (error) {
 		console.error(error);
 		throw error;
@@ -384,7 +389,7 @@ export const removeService = async (
 	_deleteVolumes = false,
 ) => {
 	try {
-		const command = `docker service rm ${appName}`;
+		const command = `nomad job stop -purge ${appName}`;
 
 		if (serverId) {
 			await execAsyncRemote(serverId, command);
@@ -728,9 +733,13 @@ export const getServiceContainer = async (
 	serverId?: string | null,
 ) => {
 	try {
+		// Services run as Nomad jobs (job id = appName); their container is labelled
+		// with the allocation id. Resolve the running alloc, then find its container.
+		const allocId = await getRunningAllocId(appName, serverId);
+		if (!allocId) return null;
 		const filter = {
 			status: ["running"],
-			label: [`com.docker.swarm.service.name=${appName}`],
+			label: [`com.hashicorp.nomad.alloc_id=${allocId}`],
 		};
 		const remoteDocker = await getRemoteDocker(serverId);
 		const containers = await remoteDocker.listContainers({

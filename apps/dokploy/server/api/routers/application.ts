@@ -11,7 +11,6 @@ import {
 	getContainerLogs,
 	getWebServerSettings,
 	IS_CLOUD,
-	mechanizeDockerContainer,
 	readConfig,
 	readRemoteConfig,
 	removeDeployments,
@@ -37,6 +36,11 @@ import {
 	checkServicePermissionAndAccess,
 	findMemberByUserId,
 } from "@nomploy/server/services/permission";
+import { getApplicationNomadDeployCommand } from "@nomploy/server/utils/builders/nomad-application";
+import {
+	execAsync,
+	execAsyncRemote,
+} from "@nomploy/server/utils/process/execAsync";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -203,7 +207,13 @@ export const applicationRouter = createTRPCRouter({
 
 			try {
 				await updateApplicationStatus(input.applicationId, "idle");
-				await mechanizeDockerContainer(application);
+				// Re-submit the Nomad job (reload without a rebuild).
+				const command = getApplicationNomadDeployCommand(application);
+				if (application.serverId) {
+					await execAsyncRemote(application.serverId, command);
+				} else {
+					await execAsync(command);
+				}
 				await updateApplicationStatus(input.applicationId, "done");
 				await audit(ctx, {
 					action: "reload",
