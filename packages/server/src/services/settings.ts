@@ -14,6 +14,12 @@ import {
 	initializeTraefikService,
 	type TraefikOptions,
 } from "../setup/traefik-setup";
+import {
+	collectPanelEnv,
+	getPanelNomadDeployCommand,
+	PANEL_JOB_NAME,
+	resolvePanelImage,
+} from "../utils/builders/nomad-panel";
 export interface IUpdateData {
 	latestVersion: string | null;
 	updateAvailable: boolean;
@@ -285,20 +291,31 @@ export const reloadDockerResource = async (
 	serverId?: string,
 	version?: string,
 ) => {
+	// The panel runs as a Nomad job named "nomploy" (its container is
+	// nomploy-<allocId>, so it isn't a plain service/standalone). Self-update the
+	// Dokploy way: re-submit the job with the resolved image. `nomad job run`
+	// pulls it and rolling-restarts the allocation in place — the Nomad
+	// equivalent of Swarm's `docker service update --image`.
+	if (resourceName === PANEL_JOB_NAME) {
+		const currentImageTag = getNomployImageTag();
+		let imageTag = version || currentImageTag;
+		if (currentImageTag === "canary" || currentImageTag === "feature") {
+			imageTag = currentImageTag;
+		}
+		const image = resolvePanelImage(imageTag);
+		const command = getPanelNomadDeployCommand(image, collectPanelEnv());
+		if (serverId) {
+			await execAsyncRemote(serverId, command);
+		} else {
+			await execAsync(command);
+		}
+		return;
+	}
+
 	const resourceType = await getDockerResourceType(resourceName, serverId);
 	let command = "";
 	if (resourceType === "service") {
-		if (resourceName === "nomploy") {
-			const currentImageTag = getNomployImageTag();
-			let imageTag = version;
-			if (currentImageTag === "canary" || currentImageTag === "feature") {
-				imageTag = currentImageTag;
-			}
-
-			command = `docker service update --force --image nomploy/nomploy:${imageTag} ${resourceName}`;
-		} else {
-			command = `docker service update --force ${resourceName}`;
-		}
+		command = `docker service update --force ${resourceName}`;
 	} else if (resourceType === "standalone") {
 		command = `docker restart ${resourceName}`;
 	} else {
