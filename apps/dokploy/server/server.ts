@@ -7,7 +7,6 @@ import {
 	initCancelDeployments,
 	initCronJobs,
 	initEnterpriseBackupCronJobs,
-	initializeNetwork,
 	initSchedules,
 	initVolumeBackupsCronJobs,
 	sendNomployRestartNotifications,
@@ -18,10 +17,10 @@ import next from "next";
 import packageInfo from "../package.json";
 import { setupDockerContainerLogsWebSocketServer } from "./wss/docker-container-logs";
 import { setupDockerContainerTerminalWebSocketServer } from "./wss/docker-container-terminal";
-import { setupNomadTerminalWebSocketServer } from "./wss/nomad-terminal";
 import { setupDockerStatsMonitoringSocketServer } from "./wss/docker-stats";
 import { setupDrawerLogsWebSocketServer } from "./wss/drawer-logs";
 import { setupDeploymentLogsWebSocketServer } from "./wss/listen-deployment";
+import { setupNomadTerminalWebSocketServer } from "./wss/nomad-terminal";
 import { setupTerminalWebSocketServer } from "./wss/terminal";
 
 config({ path: ".env" });
@@ -62,7 +61,8 @@ void app.prepare().then(async () => {
 		console.log(`Server Started on: http://${HOST}:${PORT}`);
 		if (process.env.NODE_ENV === "production" && !IS_CLOUD) {
 			createDefaultMiddlewares();
-			await initializeNetwork();
+			// No docker overlay network on Nomad — services use the WireGuard overlay
+			// + Consul; creating an "overlay" network here needs Swarm and 403s.
 			await initCronJobs();
 			await initSchedules();
 			await initCancelDeployments();
