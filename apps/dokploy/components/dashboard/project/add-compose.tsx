@@ -285,7 +285,6 @@ export const AddCompose = ({ environmentId, projectName }: Props) => {
 											<SelectItem value="docker-compose">
 												Docker Compose
 											</SelectItem>
-											<SelectItem value="stack">Stack</SelectItem>
 											<SelectItem value="nomad">Nomad</SelectItem>
 										</SelectContent>
 									</Select>
