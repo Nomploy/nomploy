@@ -123,7 +123,8 @@ const getRemoteManifestDigest = async (
  * that advanced upstream reports an update; a pinned :sha-* never does.
  *
  * Replaces the old Docker Hub + `docker service inspect` (Swarm) check, neither
- * of which applies to the GHCR + Nomad deployment.
+ * of which applies to the GHCR + Nomad deployment. The digest comparison is the
+ * same signal the reload path acts on: force_pull fetches exactly this digest.
  */
 export const getUpdateData = async (): Promise<IUpdateData> => {
 	try {
