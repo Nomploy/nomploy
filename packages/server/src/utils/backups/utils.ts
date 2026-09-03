@@ -124,7 +124,12 @@ export const getLibsqlBackupCommand = (database: string) => {
 };
 
 export const getServiceContainerCommand = (appName: string) => {
-	return `docker ps -q --filter "status=running" --filter "label=com.docker.swarm.service.name=${appName}" | head -n 1`;
+	// Databases run as Nomad jobs (job id = appName). Their container carries the
+	// Nomad allocation id as a label; resolve the job's running allocation and
+	// find that container. Runs where the DB is pinned (the control plane or the
+	// server), and both have the nomad CLI + docker socket.
+	const allocId = `$(nomad job allocs -t '{{range .}}{{if eq .ClientStatus "running"}}{{.ID}}{{end}}{{end}}' ${appName} 2>/dev/null | head -c 36)`;
+	return `docker ps -q --filter "status=running" --filter "label=com.hashicorp.nomad.alloc_id=${allocId}" | head -n 1`;
 };
 
 export const getComposeContainerCommand = (

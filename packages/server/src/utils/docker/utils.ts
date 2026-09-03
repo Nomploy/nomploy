@@ -13,6 +13,7 @@ import type { MongoNested } from "../databases/mongo";
 import type { MysqlNested } from "../databases/mysql";
 import type { PostgresNested } from "../databases/postgres";
 import type { RedisNested } from "../databases/redis";
+import { getRunningAllocId } from "../nomad/resolve";
 import { execAsync, execAsyncRemote } from "../process/execAsync";
 import { spawnAsync } from "../process/spawnAsync";
 import { getRemoteDocker } from "../servers/remote-docker";
@@ -728,9 +729,13 @@ export const getServiceContainer = async (
 	serverId?: string | null,
 ) => {
 	try {
+		// Services run as Nomad jobs (job id = appName); their container is labelled
+		// with the allocation id. Resolve the running alloc, then find its container.
+		const allocId = await getRunningAllocId(appName, serverId);
+		if (!allocId) return null;
 		const filter = {
 			status: ["running"],
-			label: [`com.docker.swarm.service.name=${appName}`],
+			label: [`com.hashicorp.nomad.alloc_id=${allocId}`],
 		};
 		const remoteDocker = await getRemoteDocker(serverId);
 		const containers = await remoteDocker.listContainers({
