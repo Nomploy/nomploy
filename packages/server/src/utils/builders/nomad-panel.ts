@@ -16,6 +16,10 @@ export const PANEL_JOB_FILE = "/etc/nomploy/nomploy.nomad.hcl";
 // cluster-wide `allow_caps` change — the Nomad docker plugin already runs with
 // `allow_privileged = true` (see install.sh). It mirrors exactly what the
 // `docker run` bootstrap gave the container.
+//
+// The three host bind mounts below additionally require the docker plugin's
+// `volumes { enabled = true }` (also set in install.sh) — it defaults to false,
+// which rejects host-path volumes with "volumes are not enabled".
 const PANEL_ENV_KEYS = [
 	"NODE_ENV",
 	"PORT",

@@ -170,6 +170,12 @@ consul {
 plugin "docker" {
   config {
     allow_privileged = true
+    # Allow tasks to bind host paths. Needed by the nomploy panel job, which
+    # mounts the Docker socket + /etc/nomploy + /etc/wireguard (see the panel
+    # HCL below). Defaults to false, which rejects host-path volumes.
+    volumes {
+      enabled = true
+    }
     auth {
       config = "/root/.docker/config.json"
     }
