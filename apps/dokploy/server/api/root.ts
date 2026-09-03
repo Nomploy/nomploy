@@ -21,6 +21,7 @@ import { mariadbRouter } from "./routers/mariadb";
 import { mongoRouter } from "./routers/mongo";
 import { mountRouter } from "./routers/mount";
 import { mysqlRouter } from "./routers/mysql";
+import { nomadRouter } from "./routers/nomad";
 import { notificationRouter } from "./routers/notification";
 import { organizationRouter } from "./routers/organization";
 import { patchRouter } from "./routers/patch";
@@ -43,8 +44,6 @@ import { serverRouter } from "./routers/server";
 import { settingsRouter } from "./routers/settings";
 import { sshRouter } from "./routers/ssh-key";
 import { stripeRouter } from "./routers/stripe";
-import { swarmRouter } from "./routers/swarm";
-import { nomadRouter } from "./routers/nomad";
 import { tagRouter } from "./routers/tag";
 import { userRouter } from "./routers/user";
 import { volumeBackupsRouter } from "./routers/volume-backups";
@@ -88,7 +87,6 @@ export const appRouter = createTRPCRouter({
 	settings: settingsRouter,
 	sshKey: sshRouter,
 	stripe: stripeRouter,
-	swarm: swarmRouter,
 	nomad: nomadRouter,
 	user: userRouter,
 	ai: aiRouter,

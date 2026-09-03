@@ -33,7 +33,6 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/utils/api";
-import { AddSwarmSettings } from "./modify-swarm-settings";
 
 interface Props {
 	id: string;
@@ -136,10 +135,9 @@ export const ShowClusterSettings = ({ id, type }: Props) => {
 				<div>
 					<CardTitle className="text-xl">Cluster Settings</CardTitle>
 					<CardDescription>
-						Modify swarm settings for the service.
+						Replicas and registry for the service.
 					</CardDescription>
 				</div>
-				<AddSwarmSettings id={id} type={type} />
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
 				<AlertBlock type="info">
