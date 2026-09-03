@@ -1,3 +1,4 @@
+import { generateOpenApiDocument } from "@dokploy/trpc-openapi";
 import {
 	CLEANUP_CRON_JOB,
 	checkGPUStatus,
@@ -16,8 +17,8 @@ import {
 	execAsync,
 	findServerById,
 	getDockerDiskUsage,
-	getNomployImageTag,
 	getLogCleanupStatus,
+	getNomployImageTag,
 	getUpdateData,
 	getWebServerSettings,
 	IS_CLOUD,
@@ -50,7 +51,6 @@ import {
 } from "@nomploy/server";
 import { db } from "@nomploy/server/db";
 import { checkPermission } from "@nomploy/server/services/permission";
-import { generateOpenApiDocument } from "@dokploy/trpc-openapi";
 import { TRPCError } from "@trpc/server";
 import { eq, sql } from "drizzle-orm";
 import { scheduledJobs, scheduleJob } from "node-schedule";
@@ -94,7 +94,7 @@ export const settingsRouter = createTRPCRouter({
 		if (IS_CLOUD) {
 			return true;
 		}
-		await reloadDockerResource("nomploy", undefined, packageInfo.version);
+		await reloadDockerResource("nomploy");
 		await audit(ctx, {
 			action: "reload",
 			resourceType: "settings",
