@@ -161,6 +161,12 @@ client {
   # reachable across the cluster (and never exposed on the public NIC). Keeps
   # Consul service addresses on 10.10.0.0/24, which Traefik routes to.
   network_interface = "wg0"
+  # Marks this as the control-plane node (Postgres/Redis/Consul/Nomad-server +
+  # WireGuard live here). The panel job constrains itself to this meta so it is
+  # never scheduled onto a worker node. Worker nodes (nomad-cluster.ts) omit it.
+  meta {
+    nomploy_control_plane = "true"
+  }
 }
 
 consul {
@@ -381,6 +387,14 @@ $SUDO tee /etc/nomploy/nomploy.nomad.hcl >/dev/null <<PANELHCL
 job "nomploy" {
   namespace = "default"
   type      = "service"
+
+  # Pin the panel to the control-plane node — it reaches Postgres/Redis/Consul/
+  # Nomad on 127.0.0.1 and manages the host's WireGuard, so it must not land on a
+  # worker. The server node carries this meta (see the client block above).
+  constraint {
+    attribute = "\${meta.nomploy_control_plane}"
+    value     = "true"
+  }
 
   meta {
     deployed_at = "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
