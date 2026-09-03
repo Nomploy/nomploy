@@ -170,6 +170,12 @@ consul {
 plugin "docker" {
   config {
     allow_privileged = true
+    # Allow tasks to bind host paths. Needed by the nomploy panel job, which
+    # mounts the Docker socket + /etc/nomploy + /etc/wireguard (see the panel
+    # HCL below). Defaults to false, which rejects host-path volumes.
+    volumes {
+      enabled = true
+    }
     auth {
       config = "/root/.docker/config.json"
     }
@@ -343,24 +349,103 @@ if [ ! -s "$AUTH_SECRET_FILE" ]; then
 fi
 BETTER_AUTH_SECRET="$($SUDO cat "$AUTH_SECRET_FILE")"
 
-# ── nomploy app ───────────────────────────────────────────────────────────────
+# ── nomploy app (Nomad job) ───────────────────────────────────────────────────
+# The panel runs as a Nomad job named "nomploy" so it can self-update the Dokploy
+# way: the UI's Reload/Update re-submits this job with a new image (nomad job
+# run), which pulls it and rolling-restarts the allocation in place. `privileged`
+# + host network + the three bind mounts reproduce exactly what the old
+# `docker run` bootstrap gave it; `allow_privileged = true` is already set on the
+# Nomad docker plugin, so no cluster config change is needed. Keep this HCL in
+# sync with packages/server/src/utils/builders/nomad-panel.ts (the self-update
+# path renders the same job).
 echo "==> Starting nomploy ($NOMPLOY_IMAGE)"
 $SUDO docker pull "$NOMPLOY_IMAGE"
+# Drop any pre-Nomad panel container so it can't fight the job for port 3000.
 $SUDO docker rm -f nomploy >/dev/null 2>&1 || true
-$SUDO docker run -d --name nomploy --restart unless-stopped \
-  --network host \
-  --cap-add NET_ADMIN \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /etc/nomploy:/etc/nomploy \
-  -v /etc/wireguard:/etc/wireguard \
-  -e NODE_ENV=production \
-  -e PORT="$NOMPLOY_PORT" \
-  -e DATABASE_URL="postgresql://nomploy:${POSTGRES_PASSWORD}@127.0.0.1:5432/nomploy" \
-  -e REDIS_HOST="127.0.0.1" \
-  -e BETTER_AUTH_SECRET="$BETTER_AUTH_SECRET" \
-  -e NOMAD_ADDRESS="http://127.0.0.1:4646" \
-  -e CONSUL_ADDRESS="http://127.0.0.1:8500" \
-  "$NOMPLOY_IMAGE"
+
+# Nomad was started with --no-block above; wait for its API before submitting.
+echo "==> Waiting for Nomad API"
+for _ in $(seq 1 60); do
+  curl -fsS http://127.0.0.1:4646/v1/status/leader >/dev/null 2>&1 && break
+  sleep 2
+done
+
+# Let allocations burst above their memory reservation up to memory_max, using
+# free host RAM (best-effort, like the old `docker run` panel). The panel job
+# relies on this to reach memory_max=2048 without reserving it all up front —
+# important on small control-plane nodes.
+$SUDO nomad operator scheduler set-config -memory-oversubscription=true >/dev/null 2>&1 || true
+
+$SUDO mkdir -p /etc/nomploy
+$SUDO tee /etc/nomploy/nomploy.nomad.hcl >/dev/null <<PANELHCL
+job "nomploy" {
+  namespace = "default"
+  type      = "service"
+
+  meta {
+    deployed_at = "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  }
+
+  update {
+    max_parallel     = 1
+    health_check     = "task_states"
+    min_healthy_time = "10s"
+    healthy_deadline = "3m"
+    auto_revert      = true
+  }
+
+  group "nomploy" {
+    count = 1
+
+    restart {
+      attempts = 3
+      interval = "5m"
+      delay    = "15s"
+      mode     = "delay"
+    }
+
+    task "nomploy" {
+      driver = "docker"
+
+      config {
+        image        = "$NOMPLOY_IMAGE"
+        force_pull   = true
+        network_mode = "host"
+        privileged   = true
+        volumes = [
+          "/var/run/docker.sock:/var/run/docker.sock",
+          "/etc/nomploy:/etc/nomploy",
+          "/etc/wireguard:/etc/wireguard",
+        ]
+      }
+
+      env {
+        NODE_ENV           = "production"
+        PORT               = "$NOMPLOY_PORT"
+        DATABASE_URL       = "postgresql://nomploy:${POSTGRES_PASSWORD}@127.0.0.1:5432/nomploy"
+        REDIS_HOST         = "127.0.0.1"
+        BETTER_AUTH_SECRET = "$BETTER_AUTH_SECRET"
+        NOMAD_ADDRESS      = "http://127.0.0.1:4646"
+        CONSUL_ADDRESS     = "http://127.0.0.1:8500"
+        NOMPLOY_IMAGE      = "$NOMPLOY_IMAGE"
+      }
+
+      kill_timeout = "30s"
+
+      # memory = scheduling reservation; memory_max = hard cgroup cap the panel
+      # bursts to (a 1024 MB hard limit OOM-kills Node under load). Bursting needs
+      # memory oversubscription, enabled just below.
+      resources {
+        cpu        = 1000
+        memory     = 512
+        memory_max = 2048
+      }
+    }
+  }
+}
+PANELHCL
+
+$SUDO nomad job run /etc/nomploy/nomploy.nomad.hcl
 
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo ""
