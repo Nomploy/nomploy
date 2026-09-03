@@ -6,7 +6,6 @@ import {
 } from "@nomploy/server/utils/process/execAsync";
 import { and, eq } from "drizzle-orm";
 
-import semver from "semver";
 import { db } from "../db";
 import { compose } from "../db/schema";
 import {
@@ -35,106 +34,113 @@ export const getNomployImageTag = () => {
 	return process.env.RELEASE_TAG || "latest";
 };
 
-/** Returns Nomploy docker service image digest */
-export const getServiceImageDigest = async () => {
-	const { stdout } = await execAsync(
-		"docker service inspect nomploy --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'",
-	);
-
-	const currentDigest = stdout.trim().split("@")[1];
-
-	if (!currentDigest) {
-		throw new Error("Could not get current service image digest");
+/**
+ * Parse an image reference into registry / repository / tag.
+ * "ghcr.io/nomploy/nomploy:latest" -> { registry, repository: "nomploy/nomploy",
+ * tag: "latest" }. A ":" before the first "/" is a registry port, not a tag.
+ */
+const parseImageRef = (ref: string) => {
+	let rest = ref;
+	let tag = "latest";
+	const lastColon = rest.lastIndexOf(":");
+	const lastSlash = rest.lastIndexOf("/");
+	if (lastColon > lastSlash) {
+		tag = rest.slice(lastColon + 1);
+		rest = rest.slice(0, lastColon);
 	}
-
-	return currentDigest;
+	const firstSlash = rest.indexOf("/");
+	const maybeRegistry = firstSlash === -1 ? "" : rest.slice(0, firstSlash);
+	const hasRegistry =
+		maybeRegistry.includes(".") || maybeRegistry.includes(":");
+	const registry = hasRegistry ? maybeRegistry : "registry-1.docker.io";
+	const repository = hasRegistry ? rest.slice(firstSlash + 1) : rest;
+	return { registry, repository, tag };
 };
 
-/** Returns latest version number and information whether server update is available by comparing current image's digest against digest for provided image tag via Docker hub API. */
-export const getUpdateData = async (
-	currentVersion: string,
-): Promise<IUpdateData> => {
+/** The digest the local image for `ref` was pulled at (its RepoDigest), or null. */
+const getLocalImageDigest = async (ref: string): Promise<string | null> => {
 	try {
-		const baseUrl =
-			"https://hub.docker.com/v2/repositories/nomploy/nomploy/tags";
-		let url: string | null = `${baseUrl}?page_size=100`;
-		let allResults: { digest: string; name: string }[] = [];
-
-		// Fetch all tags from Docker Hub
-		while (url) {
-			const response = await fetch(url, {
-				method: "GET",
-				headers: { "Content-Type": "application/json" },
-			});
-
-			const data = (await response.json()) as {
-				next: string | null;
-				results: { digest: string; name: string }[];
-			};
-
-			allResults = allResults.concat(data.results);
-			url = data?.next;
-		}
-
-		const currentImageTag = getNomployImageTag();
-
-		// Special handling for canary and feature branches
-		// For development versions (canary/feature), don't perform update checks
-		// These are unstable versions that change frequently, and users on these
-		// branches are expected to manually manage updates
-		if (currentImageTag === "canary" || currentImageTag === "feature") {
-			const currentDigest = await getServiceImageDigest();
-			const latestDigest = allResults.find(
-				(t) => t.name === currentImageTag,
-			)?.digest;
-			if (!latestDigest) {
-				return DEFAULT_UPDATE_DATA;
-			}
-			if (currentDigest !== latestDigest) {
-				return {
-					latestVersion: currentImageTag,
-					updateAvailable: true,
-				};
-			}
-			return {
-				latestVersion: currentImageTag,
-				updateAvailable: false,
-			};
-		}
-
-		// For stable versions, use semver comparison
-		// Find the "latest" tag and get its digest
-		const latestTag = allResults.find((t) => t.name === "latest");
-
-		if (!latestTag) {
-			return DEFAULT_UPDATE_DATA;
-		}
-
-		// Find the versioned tag (v0.x.x) that has the same digest as "latest"
-		const latestVersionTag = allResults.find(
-			(t) => t.digest === latestTag.digest && t.name.startsWith("v"),
+		const { stdout } = await execAsync(
+			`docker image inspect ${ref} --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}'`,
 		);
+		const digest = stdout.trim().split("@")[1];
+		return digest || null;
+	} catch {
+		return null;
+	}
+};
 
-		if (!latestVersionTag) {
-			return DEFAULT_UPDATE_DATA;
+/**
+ * The current manifest digest of `registry/repository:tag` from the registry v2
+ * API, following the standard WWW-Authenticate bearer-token challenge (works for
+ * GHCR's anonymous pull token on a public package, and Docker Hub, etc.).
+ */
+const getRemoteManifestDigest = async (
+	registry: string,
+	repository: string,
+	tag: string,
+): Promise<string | null> => {
+	const url = `https://${registry}/v2/${repository}/manifests/${tag}`;
+	const accept = [
+		"application/vnd.oci.image.index.v1+json",
+		"application/vnd.docker.distribution.manifest.list.v2+json",
+		"application/vnd.oci.image.manifest.v1+json",
+		"application/vnd.docker.distribution.manifest.v2+json",
+	].join(", ");
+	const fetchManifest = (token?: string) =>
+		fetch(url, {
+			method: "GET",
+			headers: {
+				Accept: accept,
+				...(token ? { Authorization: `Bearer ${token}` } : {}),
+			},
+		});
+
+	let res = await fetchManifest();
+	if (res.status === 401) {
+		const challenge = res.headers.get("www-authenticate") || "";
+		const realm = /realm="([^"]+)"/.exec(challenge)?.[1];
+		const service = /service="([^"]+)"/.exec(challenge)?.[1];
+		const scope =
+			/scope="([^"]+)"/.exec(challenge)?.[1] || `repository:${repository}:pull`;
+		if (realm) {
+			const tokenUrl = new URL(realm);
+			if (service) tokenUrl.searchParams.set("service", service);
+			tokenUrl.searchParams.set("scope", scope);
+			const tokenRes = await fetch(tokenUrl.toString());
+			const { token } = (await tokenRes.json()) as { token?: string };
+			if (token) res = await fetchManifest(token);
 		}
+	}
+	if (!res.ok) return null;
+	return res.headers.get("docker-content-digest");
+};
 
-		const latestVersion = latestVersionTag.name;
-
-		// Use semver to compare versions for stable releases
-		const cleanedCurrent = semver.clean(currentVersion);
-		const cleanedLatest = semver.clean(latestVersion);
-
-		if (!cleanedCurrent || !cleanedLatest) {
-			return DEFAULT_UPDATE_DATA;
-		}
-
-		// Check if the latest version is greater than the current version
-		const updateAvailable = semver.gt(cleanedLatest, cleanedCurrent);
-
+/**
+ * Is a newer panel image available? Compares the digest the panel image
+ * (NOMPLOY_IMAGE, e.g. ghcr.io/nomploy/nomploy:latest) was last pulled at
+ * against that tag's current registry digest. A moving tag (:latest/:canary)
+ * that advanced upstream reports an update; a pinned :sha-* never does.
+ *
+ * Replaces the old Docker Hub + `docker service inspect` (Swarm) check, neither
+ * of which applies to the GHCR + Nomad deployment.
+ */
+export const getUpdateData = async (): Promise<IUpdateData> => {
+	try {
+		const imageRef =
+			process.env.NOMPLOY_IMAGE || "ghcr.io/nomploy/nomploy:latest";
+		const { registry, repository, tag } = parseImageRef(imageRef);
+		const [localDigest, remoteDigest] = await Promise.all([
+			getLocalImageDigest(imageRef),
+			getRemoteManifestDigest(registry, repository, tag),
+		]);
+		if (!remoteDigest || !localDigest) return DEFAULT_UPDATE_DATA;
+		const updateAvailable = localDigest !== remoteDigest;
 		return {
-			latestVersion,
 			updateAvailable,
+			latestVersion: updateAvailable
+				? `${tag} (${remoteDigest.replace("sha256:", "").slice(0, 12)})`
+				: null,
 		};
 	} catch (error) {
 		console.error("Error fetching update data:", error);

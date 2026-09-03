@@ -37,7 +37,6 @@ import {
 	reloadDockerResource,
 	sendDockerCleanupNotifications,
 	setupGPUSupport,
-	spawnAsync,
 	startLogCleanup,
 	stopLogCleanup,
 	updateLetsEncryptEmail,
@@ -562,29 +561,22 @@ export const settingsRouter = createTRPCRouter({
 			return DEFAULT_UPDATE_DATA;
 		}
 
-		return await getUpdateData(packageInfo.version);
+		return await getUpdateData();
 	}),
 	updateServer: adminProcedure.mutation(async ({ ctx }) => {
 		if (IS_CLOUD) {
 			return true;
 		}
 
-		const data = await getUpdateData(packageInfo.version);
-		if (data.updateAvailable) {
-			void spawnAsync("docker", [
-				"service",
-				"update",
-				"--force",
-				"--image",
-				`nomploy/nomploy:${data.latestVersion}`,
-				"nomploy",
-			]);
-			await audit(ctx, {
-				action: "update",
-				resourceType: "settings",
-				resourceName: "nomploy-version",
-			});
-		}
+		// Update = reload the panel on its current image; the Nomad job's
+		// force_pull re-pulls the tag (e.g. :latest) to its newest digest. Same
+		// self-update path as reloadServer — no more Swarm `docker service update`.
+		await reloadDockerResource("nomploy");
+		await audit(ctx, {
+			action: "update",
+			resourceType: "settings",
+			resourceName: "nomploy-version",
+		});
 
 		return true;
 	}),
