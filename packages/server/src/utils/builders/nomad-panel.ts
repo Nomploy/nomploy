@@ -109,6 +109,15 @@ export const generatePanelNomadJob = (
   namespace = "default"
   type      = "service"
 
+  // Pin the panel to the control-plane node — it reaches Postgres/Redis/Consul/
+  // Nomad on 127.0.0.1 and manages the host's WireGuard, so it must never be
+  // scheduled onto a worker. The server node carries meta.nomploy_control_plane
+  // (install.sh); worker nodes (nomad-cluster.ts) do not.
+  constraint {
+    attribute = "\${meta.nomploy_control_plane}"
+    value     = "true"
+  }
+
   // Bumped on every submit so re-running with an unchanged image (e.g. a moving
   // :latest tag) still produces a new deployment — combined with force_pull, a
   // "reload" always restarts on the current digest.
