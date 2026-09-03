@@ -39,6 +39,7 @@ export const resolveApplicationImage = (
 export const applicationToNomadSpec = (
 	application: ApplicationNested,
 	domains: Domain[] = [],
+	imageOverride?: string,
 ): NomadServiceSpec => {
 	const env = getEnvironmentVariablesObject(
 		application.env,
@@ -81,7 +82,7 @@ export const applicationToNomadSpec = (
 
 	return {
 		name: NOMAD_APP_SERVICE_NAME,
-		image: resolveApplicationImage(application),
+		image: imageOverride ?? resolveApplicationImage(application),
 		ports,
 		replicas: application.replicas ?? 1,
 		env,
@@ -97,10 +98,11 @@ export const applicationToNomadSpec = (
 export const generateApplicationNomadJob = (
 	application: ApplicationNested,
 	domains: Domain[],
+	imageOverride?: string,
 ): string =>
 	generateNomadJobSpec(
 		application.appName,
-		[applicationToNomadSpec(application, domains)],
+		[applicationToNomadSpec(application, domains, imageOverride)],
 		domains,
 	);
 
@@ -113,15 +115,22 @@ export const generateApplicationNomadJob = (
 export const getBuildNomadApplicationCommand = (
 	application: ApplicationNested,
 	domains: Domain[],
+	imageOverride?: string,
 ): string => {
 	const { APPLICATIONS_PATH } = paths(!!application.serverId);
 	const projectPath = join(APPLICATIONS_PATH, application.appName, "code");
 	const jobFilePath = join(projectPath, `${application.appName}.nomad.hcl`);
-	const image = resolveApplicationImage(application);
-	const jobSpec = generateApplicationNomadJob(application, domains);
+	const image = imageOverride ?? resolveApplicationImage(application);
+	const jobSpec = generateApplicationNomadJob(
+		application,
+		domains,
+		imageOverride,
+	);
 	const encoded = encodeBase64(jobSpec);
 
+	// A rollback (imageOverride) reuses an image that is already in the registry.
 	const needsPush =
+		!imageOverride &&
 		application.sourceType !== "docker" &&
 		(application.registry || application.buildRegistry);
 

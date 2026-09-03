@@ -6,10 +6,7 @@ import {
 	buildAppName,
 } from "@nomploy/server/db/schema";
 import { getAdvancedStats } from "@nomploy/server/monitoring/utils";
-import {
-	getBuildCommand,
-	mechanizeDockerContainer,
-} from "@nomploy/server/utils/builders";
+import { getBuildCommand } from "@nomploy/server/utils/builders";
 import {
 	getBuildNomadApplicationCommand,
 	NOMAD_APP_SERVICE_NAME,
@@ -451,6 +448,18 @@ export const deployPreviewApplication = async ({
 				branch: previewDeployment.branch,
 			});
 			command += await getBuildCommand(application);
+			// Submit the preview to Nomad (routed by the preview domain).
+			command += getBuildNomadApplicationCommand(
+				application,
+				previewDeployment.domain
+					? [
+							{
+								...previewDeployment.domain,
+								serviceName: NOMAD_APP_SERVICE_NAME,
+							},
+						]
+					: [],
+			);
 
 			const commandWithLog = `(${command}) >> ${deployment.logPath} 2>&1`;
 			if (application.serverId) {
@@ -458,7 +467,6 @@ export const deployPreviewApplication = async ({
 			} else {
 				await execAsync(commandWithLog);
 			}
-			await mechanizeDockerContainer(application);
 		}
 		const successComment = getIssueComment(
 			application.name,
@@ -566,13 +574,19 @@ export const rebuildPreviewApplication = async ({
 		let command = "set -e;";
 		// Only rebuild, don't clone repository
 		command += await getBuildCommand(application);
+		// Submit the preview to Nomad (routed by the preview domain).
+		command += getBuildNomadApplicationCommand(
+			application,
+			previewDeployment.domain
+				? [{ ...previewDeployment.domain, serviceName: NOMAD_APP_SERVICE_NAME }]
+				: [],
+		);
 		const commandWithLog = `(${command}) >> ${deployment.logPath} 2>&1`;
 		if (serverId) {
 			await execAsyncRemote(serverId, commandWithLog);
 		} else {
 			await execAsync(commandWithLog);
 		}
-		await mechanizeDockerContainer(application);
 
 		const successComment = getIssueComment(
 			application.name,
