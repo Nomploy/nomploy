@@ -1,11 +1,16 @@
 name: Docker Publish (GHCR)
 
-# Builds a multi-arch (amd64 + arm64) app image and pushes it to the GitHub
-# Container Registry using the built-in GITHUB_TOKEN — no external secrets.
+# Builds the app image and pushes it to the GitHub Container Registry using the
+# built-in GITHUB_TOKEN — no external secrets.
+#
+# Release builds (main / v* tags) are multi-arch (amd64 + arm64). Branch and
+# manual (workflow_dispatch) builds are amd64-only — that's all the hub needs,
+# so dev dispatches skip the arm64 leg and the manifest wait. The matrix is
+# chosen by the `setup` job below.
 #
 # Each architecture is built on its OWN native runner (fast, no QEMU emulation),
-# pushed by digest, then a merge job assembles one multi-arch manifest. Native
-# arm64 runners (ubuntu-24.04-arm) are free for public repositories.
+# pushed by digest, then a merge job assembles the final manifest. Native arm64
+# runners (ubuntu-24.04-arm) are free for public repositories.
 #
 # NOTE: for `install.sh` to `docker pull` without auth, the ghcr package must be
 # Public (set it in the package settings once).
@@ -34,17 +39,28 @@ env:
   IMAGE: ghcr.io/nomploy/nomploy
 
 jobs:
+  # Pick the build matrix: multi-arch for releases (main / v* tags), amd64-only
+  # for branch + manual builds (the hub is amd64, so dev dispatches stay fast).
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - id: pick
+        run: |
+          amd64='{"platform":"linux/amd64","arch":"amd64","runner":"ubuntu-latest"}'
+          arm64='{"platform":"linux/arm64","arch":"arm64","runner":"ubuntu-24.04-arm"}'
+          if [[ "${GITHUB_REF}" == "refs/heads/main" || "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "matrix={\"include\":[$amd64,$arm64]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "matrix={\"include\":[$amd64]}" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: setup
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - platform: linux/amd64
-            arch: amd64
-            runner: ubuntu-latest
-          - platform: linux/arm64
-            arch: arm64
-            runner: ubuntu-24.04-arm
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
