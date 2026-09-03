@@ -111,7 +111,7 @@ export const containerExists = async (containerName: string) => {
 
 export const stopService = async (appName: string) => {
 	try {
-		await execAsync(`docker service scale ${appName}=0 `);
+		await execAsync(`nomad job scale ${appName} 0`);
 	} catch (error) {
 		console.error(error);
 		return error;
@@ -120,7 +120,7 @@ export const stopService = async (appName: string) => {
 
 export const stopServiceRemote = async (serverId: string, appName: string) => {
 	try {
-		await execAsyncRemote(serverId, `docker service scale ${appName}=0 `);
+		await execAsyncRemote(serverId, `nomad job scale ${appName} 0`);
 	} catch (error) {
 		console.error(error);
 		return error;
@@ -361,9 +361,13 @@ export const cleanupAllBackground = async (serverId?: string) => {
 	};
 };
 
+// Start = scale the Nomad job's group back up; stop = scale it to 0. Services run
+// as single-group Nomad jobs (job id = appName), so `nomad job scale <job> <n>`
+// targets the right group. (Start restores one instance; a full redeploy restores
+// the configured replica count.)
 export const startService = async (appName: string) => {
 	try {
-		await execAsync(`docker service scale ${appName}=1 `);
+		await execAsync(`nomad job scale ${appName} 1`);
 	} catch (error) {
 		console.error(error);
 		throw error;
@@ -372,7 +376,7 @@ export const startService = async (appName: string) => {
 
 export const startServiceRemote = async (serverId: string, appName: string) => {
 	try {
-		await execAsyncRemote(serverId, `docker service scale ${appName}=1 `);
+		await execAsyncRemote(serverId, `nomad job scale ${appName} 1`);
 	} catch (error) {
 		console.error(error);
 		throw error;
@@ -385,7 +389,7 @@ export const removeService = async (
 	_deleteVolumes = false,
 ) => {
 	try {
-		const command = `docker service rm ${appName}`;
+		const command = `nomad job stop -purge ${appName}`;
 
 		if (serverId) {
 			await execAsyncRemote(serverId, command);
