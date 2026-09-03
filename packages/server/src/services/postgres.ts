@@ -6,7 +6,7 @@ import {
 	postgres,
 } from "@nomploy/server/db/schema";
 import { generatePassword } from "@nomploy/server/templates";
-import { buildPostgres } from "@nomploy/server/utils/databases/postgres";
+import { deployDatabaseToNomad } from "@nomploy/server/utils/databases/nomad-deploy";
 import { pullImage } from "@nomploy/server/utils/docker/utils";
 import { execAsyncRemote } from "@nomploy/server/utils/process/execAsync";
 import { TRPCError } from "@trpc/server";
@@ -157,7 +157,28 @@ export const deployPostgres = async (
 			await pullImage(postgres.dockerImage, onData);
 		}
 
-		await buildPostgres(postgres);
+		// Deploy to Nomad instead of a Docker Swarm service.
+		await deployDatabaseToNomad(
+			{
+				appName: postgres.appName,
+				image: postgres.dockerImage,
+				containerPort: 5432,
+				externalPort: postgres.externalPort,
+				dataPath: getMountPath(postgres.dockerImage),
+				env: `POSTGRES_DB="${postgres.databaseName}"\nPOSTGRES_USER="${postgres.databaseUser}"\nPOSTGRES_PASSWORD="${postgres.databasePassword}"${
+					postgres.env ? `\n${postgres.env}` : ""
+				}`,
+				projectEnv: postgres.environment.project.env,
+				environmentEnv: postgres.environment.env,
+				cpuLimit: postgres.cpuLimit,
+				memoryLimit: postgres.memoryLimit,
+				command: postgres.command,
+				args: postgres.args,
+				mounts: postgres.mounts,
+			},
+			postgres.serverId,
+			onData,
+		);
 
 		await updatePostgresById(postgresId, {
 			applicationStatus: "done",

@@ -43,6 +43,11 @@ export interface NomadServiceSpec {
 	};
 }
 
+// The control plane's WireGuard IP, where dnsmasq forwards *.service.consul to
+// Consul (and everything else upstream). Every allocation points its DNS here so
+// services and databases resolve each other by name across the cluster.
+const CLUSTER_DNS_IP = "10.10.0.1";
+
 // ─── Main Entry Point ────────────────────────────────────────────────────────
 
 /**
@@ -115,7 +120,7 @@ export const resolveNomadEnvVars = (
 /**
  * Generate a complete Nomad job HCL file
  */
-const generateNomadJobSpec = (
+export const generateNomadJobSpec = (
 	appName: string,
 	services: NomadServiceSpec[],
 	domains: Domain[],
@@ -155,17 +160,21 @@ const generateTaskGroup = (
 		: "";
 
 	const hasPorts = service.ports.length > 0;
-	const networkBlock = hasPorts
-		? `    network {
-${service.ports
-	.map(
-		(p) => `      port "${p.label}" {
-        to = ${p.to}
-      }`,
-	)
-	.join("\n")}
-    }`
-		: "";
+	// Always give the allocation cluster DNS: the control plane's dnsmasq forwards
+	// *.service.consul to Consul and everything else upstream, so services reach
+	// each other and their databases by name (e.g. a bare "<db-appName>" resolves
+	// via the service.consul search domain). Ports are added when the service has
+	// any.
+	const portLines = service.ports
+		.map((p) => `      port "${p.label}" {\n        to = ${p.to}\n      }`)
+		.join("\n");
+	const networkBlock = `    network {
+      dns {
+        servers  = ["${CLUSTER_DNS_IP}"]
+        searches = ["service.consul"]
+      }
+${portLines}
+    }`;
 	const portsConfig = hasPorts
 		? `\n        ports = [${service.ports.map((p) => `"${p.label}"`).join(", ")}]`
 		: "";
@@ -184,10 +193,10 @@ ${service.ports
 	return `  group "${service.name}" {
     count = ${service.replicas}
 ${spreadBlock}
-${scalingBlock}${
+${scalingBlock}${networkBlock}
+${
 	hasPorts
-		? `${networkBlock}
-
+		? `
 ${consulServices}
 `
 		: ""

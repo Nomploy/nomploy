@@ -216,11 +216,39 @@ wait_api() {
 }
 
 echo "==> Starting Consul + Nomad"
+# The packaged consul unit is Type=notify; on some builds the readiness signal
+# never arrives, so systemd kills it at TimeoutStartSec and restart-loops. Track
+# it by process liveness instead.
+$SUDO mkdir -p /etc/systemd/system/consul.service.d
+$SUDO tee /etc/systemd/system/consul.service.d/type.conf >/dev/null <<'CONSULUNIT'
+[Service]
+Type=exec
+CONSULUNIT
+$SUDO systemctl daemon-reload
 $SUDO systemctl enable consul nomad >/dev/null 2>&1 || true
 $SUDO systemctl restart --no-block consul
 wait_api Consul "http://127.0.0.1:8500/v1/status/leader"
 $SUDO systemctl restart --no-block nomad
 wait_api Nomad "http://127.0.0.1:4646/v1/agent/health"
+
+# ── Cluster DNS (dnsmasq) ───────────────────────────────────────────────────
+# Nomad allocations point their DNS at the hub's WireGuard IP so they can resolve
+# each other and their databases by name. dnsmasq (running as root, so it can bind
+# :53) forwards *.service.consul to the local Consul DNS and everything else to a
+# public resolver.
+echo "==> Configuring cluster DNS (dnsmasq)"
+$SUDO apt-get install -y dnsmasq >/dev/null 2>&1 || $SUDO yum -y install dnsmasq >/dev/null 2>&1 || true
+$SUDO tee /etc/dnsmasq.d/nomploy-consul.conf >/dev/null <<'DNSMASQ'
+bind-interfaces
+listen-address=10.10.0.1
+port=53
+no-resolv
+server=/consul/127.0.0.1#8600
+server=1.1.1.1
+server=8.8.8.8
+DNSMASQ
+$SUDO systemctl enable dnsmasq >/dev/null 2>&1 || true
+$SUDO systemctl restart dnsmasq >/dev/null 2>&1 || true
 
 # ── Datastores ────────────────────────────────────────────────────────────────
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-amukds4wi9001583845717ad2}"

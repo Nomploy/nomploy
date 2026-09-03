@@ -50,9 +50,120 @@ export const badgeStateColor = (state: string) => {
 interface Props {
 	appName: string;
 	serverId?: string;
+	appType?: "stack" | "docker-compose" | "nomad";
 }
 
-export const ShowDockerLogs = ({ appName, serverId }: Props) => {
+// Nomad-scheduled apps: logs come from the running allocation of the app's job
+// (jobId === appName), via the Nomad API (works across cluster nodes) rather
+// than a local docker container.
+const NomadAppLogs = ({
+	appName,
+	serverId,
+}: {
+	appName: string;
+	serverId?: string;
+}) => {
+	const { data: allocs, isPending } = api.nomad.getJobAllocations.useQuery(
+		{ jobId: appName, serverId },
+		{ enabled: !!appName, refetchInterval: 10000 },
+	);
+	// biome-ignore lint/suspicious/noExplicitAny: raw Nomad alloc stubs
+	const running = (allocs || []).filter(
+		(a: any) => a.ClientStatus === "running",
+	);
+	const [allocId, setAllocId] = useState<string | undefined>();
+	const [logType, setLogType] = useState<"stdout" | "stderr">("stdout");
+
+	useEffect(() => {
+		if (!allocId && running.length > 0) setAllocId(running[0].ID);
+	}, [running, allocId]);
+
+	// biome-ignore lint/suspicious/noExplicitAny: raw Nomad alloc stub
+	const current: any = running.find((a: any) => a.ID === allocId);
+	const taskName = current?.TaskGroup as string | undefined;
+
+	const { data: logs, isLoading } = api.nomad.getAllocationLogs.useQuery(
+		{
+			allocId: allocId || "",
+			taskName: taskName || "",
+			logType,
+			serverId,
+		},
+		{ enabled: !!allocId && !!taskName, refetchInterval: 5000 },
+	);
+
+	return (
+		<Card className="bg-background">
+			<CardHeader>
+				<CardTitle className="text-xl">Logs</CardTitle>
+				<CardDescription>
+					Logs from the running Nomad allocation, in real time
+				</CardDescription>
+			</CardHeader>
+			<CardContent className="flex flex-col gap-4">
+				<div className="flex flex-row gap-2 items-center flex-wrap">
+					<Select onValueChange={setAllocId} value={allocId}>
+						<SelectTrigger className="flex-1 min-w-[240px]">
+							{isPending ? (
+								<div className="flex flex-row gap-2 items-center text-sm text-muted-foreground">
+									<span>Loading...</span>
+									<Loader2 className="animate-spin size-4" />
+								</div>
+							) : (
+								<SelectValue placeholder="Select an allocation" />
+							)}
+						</SelectTrigger>
+						<SelectContent>
+							<SelectGroup>
+								{running.map((a: any) => (
+									<SelectItem key={a.ID} value={a.ID}>
+										{a.TaskGroup} ({a.ID.slice(0, 8)}){" "}
+										<Badge variant="green">running</Badge>
+									</SelectItem>
+								))}
+								<SelectLabel>Allocations ({running.length})</SelectLabel>
+							</SelectGroup>
+						</SelectContent>
+					</Select>
+					<Select
+						value={logType}
+						onValueChange={(v) => setLogType(v as "stdout" | "stderr")}
+					>
+						<SelectTrigger className="w-[120px]">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="stdout">stdout</SelectItem>
+							<SelectItem value="stderr">stderr</SelectItem>
+						</SelectContent>
+					</Select>
+				</div>
+				<pre className="bg-black text-green-400 p-4 rounded-lg overflow-auto max-h-[500px] text-xs font-mono whitespace-pre-wrap">
+					{!allocId
+						? "No running allocation"
+						: isLoading
+							? "Loading..."
+							: logs || "No logs available"}
+				</pre>
+			</CardContent>
+		</Card>
+	);
+};
+
+export const ShowDockerLogs = ({ appName, serverId, appType }: Props) =>
+	appType === "nomad" ? (
+		<NomadAppLogs appName={appName} serverId={serverId} />
+	) : (
+		<DockerAppLogs appName={appName} serverId={serverId} />
+	);
+
+const DockerAppLogs = ({
+	appName,
+	serverId,
+}: {
+	appName: string;
+	serverId?: string;
+}) => {
 	const [containerId, setContainerId] = useState<string | undefined>();
 	const [option, setOption] = useState<"swarm" | "native">("native");
 

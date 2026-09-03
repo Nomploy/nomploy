@@ -10,6 +10,10 @@ import {
 	getBuildCommand,
 	mechanizeDockerContainer,
 } from "@nomploy/server/utils/builders";
+import {
+	getBuildNomadApplicationCommand,
+	NOMAD_APP_SERVICE_NAME,
+} from "@nomploy/server/utils/builders/nomad-application";
 import { sendBuildErrorNotifications } from "@nomploy/server/utils/notifications/build-error";
 import { sendBuildSuccessNotifications } from "@nomploy/server/utils/notifications/build-success";
 import {
@@ -213,6 +217,16 @@ export const deployApplication = async ({
 		}
 
 		command += await getBuildCommand(application);
+		// Nomad-first: build the image, then submit it to Nomad (push to registry
+		// for multi-node pull) instead of creating a Docker Swarm service. Domains
+		// are normalized to the single service name so Consul/Traefik tags attach.
+		command += getBuildNomadApplicationCommand(
+			application,
+			(application.domains ?? []).map((d) => ({
+				...d,
+				serviceName: NOMAD_APP_SERVICE_NAME,
+			})),
+		);
 
 		const commandWithLog = `(${command}) >> ${deployment.logPath} 2>&1`;
 		if (serverId) {
@@ -221,7 +235,6 @@ export const deployApplication = async ({
 			await execAsync(commandWithLog);
 		}
 
-		await mechanizeDockerContainer(application);
 		await updateDeploymentStatus(deployment.deploymentId, "done");
 		await updateApplicationStatus(applicationId, "done");
 
@@ -306,13 +319,20 @@ export const rebuildApplication = async ({
 		let command = "set -e;";
 		// Check case for docker only
 		command += await getBuildCommand(application);
+		// Nomad-first: submit to Nomad instead of a Docker Swarm service.
+		command += getBuildNomadApplicationCommand(
+			application,
+			(application.domains ?? []).map((d) => ({
+				...d,
+				serviceName: NOMAD_APP_SERVICE_NAME,
+			})),
+		);
 		const commandWithLog = `(${command}) >> ${deployment.logPath} 2>&1`;
 		if (serverId) {
 			await execAsyncRemote(serverId, commandWithLog);
 		} else {
 			await execAsync(commandWithLog);
 		}
-		await mechanizeDockerContainer(application);
 		await updateDeploymentStatus(deployment.deploymentId, "done");
 		await updateApplicationStatus(applicationId, "done");
 

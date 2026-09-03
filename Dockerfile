@@ -6,13 +6,23 @@ RUN corepack enable
 RUN corepack prepare pnpm@10.22.0 --activate
 
 FROM base AS build
-COPY . /usr/src/app
 WORKDIR /usr/src/app
 
 RUN apt-get update && apt-get install -y python3 make g++ git python3-pip pkg-config libsecret-1-dev && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies
+# Dependencies first: copy only the manifests + lockfile, then install. This
+# layer (and the resulting node_modules, including native builds like bcrypt) is
+# reused whenever no package.json/lockfile changes, so source edits no longer
+# reinstall everything — faster CI and far smaller control-plane re-pulls.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/api/package.json ./apps/api/
+COPY apps/dokploy/package.json ./apps/dokploy/
+COPY apps/schedules/package.json ./apps/schedules/
+COPY packages/server/package.json ./packages/server/
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+
+# Now bring in the source (the cached install above is reused).
+COPY . .
 
 # Deploy only the nomploy app
 

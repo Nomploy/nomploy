@@ -1,7 +1,6 @@
 import type { Domain } from "@nomploy/server/services/domain";
 import type { ApplicationNested } from "../builders";
 import {
-	createServiceConfig,
 	loadOrCreateConfig,
 	loadOrCreateConfigRemote,
 	removeTraefikConfig,
@@ -10,49 +9,19 @@ import {
 	writeTraefikConfigRemote,
 } from "./application";
 import type { FileConfig, HttpRouter } from "./file-types";
-import { createPathMiddlewares, removePathMiddlewares } from "./middleware";
+import { removePathMiddlewares } from "./middleware";
 
-export const manageDomain = async (app: ApplicationNested, domain: Domain) => {
-	const { appName } = app;
-	let config: FileConfig;
-
-	if (app.serverId) {
-		config = await loadOrCreateConfigRemote(app.serverId, appName);
+// Application routing is now handled by the Nomad job's Consul-catalog tags
+// (see builders/nomad-application). A Traefik file router for the app would
+// shadow the Consul router with a stale backend (the old Swarm service name),
+// so on any domain change we make sure the legacy file config is gone instead of
+// writing one. The `domain` arg is kept for the call sites' signature.
+export const manageDomain = async (app: ApplicationNested, _domain: Domain) => {
+	const { appName, serverId } = app;
+	if (serverId) {
+		await removeTraefikConfigRemote(appName, serverId);
 	} else {
-		config = loadOrCreateConfig(appName);
-	}
-	const serviceName = `${appName}-service-${domain.uniqueConfigKey}`;
-	const routerName = `${appName}-router-${domain.uniqueConfigKey}`;
-	const routerNameSecure = `${appName}-router-websecure-${domain.uniqueConfigKey}`;
-
-	config.http = config.http || { routers: {}, services: {} };
-	config.http.routers = config.http.routers || {};
-	config.http.services = config.http.services || {};
-
-	config.http.routers[routerName] = await createRouterConfig(
-		app,
-		domain,
-		domain.customEntrypoint || "web",
-	);
-
-	if (!domain.customEntrypoint && domain.https) {
-		config.http.routers[routerNameSecure] = await createRouterConfig(
-			app,
-			domain,
-			"websecure",
-		);
-	} else {
-		delete config.http.routers[routerNameSecure];
-	}
-
-	config.http.services[serviceName] = createServiceConfig(appName, domain);
-
-	await createPathMiddlewares(app, domain);
-
-	if (app.serverId) {
-		await writeTraefikConfigRemote(config, appName, app.serverId);
-	} else {
-		writeTraefikConfig(config, appName);
+		await removeTraefikConfig(appName);
 	}
 };
 

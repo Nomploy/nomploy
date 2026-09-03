@@ -299,6 +299,7 @@ const Mariadb = (
 												<ShowDockerLogs
 													serverId={data?.serverId || ""}
 													appName={data?.appName || ""}
+													appType="nomad"
 												/>
 											</div>
 										</TabsContent>

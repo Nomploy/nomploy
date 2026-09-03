@@ -6,7 +6,7 @@ import {
 	mysql,
 } from "@nomploy/server/db/schema";
 import { generatePassword } from "@nomploy/server/templates";
-import { buildMysql } from "@nomploy/server/utils/databases/mysql";
+import { deployDatabaseToNomad } from "@nomploy/server/utils/databases/nomad-deploy";
 import { pullImage } from "@nomploy/server/utils/docker/utils";
 import { execAsyncRemote } from "@nomploy/server/utils/process/execAsync";
 import { TRPCError } from "@trpc/server";
@@ -145,7 +145,28 @@ export const deployMySql = async (
 			await pullImage(mysql.dockerImage, onData);
 		}
 
-		await buildMysql(mysql);
+		await deployDatabaseToNomad(
+			{
+				appName: mysql.appName,
+				image: mysql.dockerImage,
+				containerPort: 3306,
+				externalPort: mysql.externalPort,
+				dataPath: "/var/lib/mysql",
+				env:
+					mysql.databaseUser !== "root"
+						? `MYSQL_USER="${mysql.databaseUser}"\nMYSQL_DATABASE="${mysql.databaseName}"\nMYSQL_PASSWORD="${mysql.databasePassword}"\nMYSQL_ROOT_PASSWORD="${mysql.databaseRootPassword}"${mysql.env ? `\n${mysql.env}` : ""}`
+						: `MYSQL_DATABASE="${mysql.databaseName}"\nMYSQL_ROOT_PASSWORD="${mysql.databaseRootPassword}"${mysql.env ? `\n${mysql.env}` : ""}`,
+				projectEnv: mysql.environment.project.env,
+				environmentEnv: mysql.environment.env,
+				cpuLimit: mysql.cpuLimit,
+				memoryLimit: mysql.memoryLimit,
+				command: mysql.command,
+				args: mysql.args,
+				mounts: mysql.mounts,
+			},
+			mysql.serverId,
+			onData,
+		);
 		await updateMySqlById(mysqlId, {
 			applicationStatus: "done",
 		});
