@@ -56,16 +56,23 @@ export const collectPanelEnv = (
 };
 
 /**
- * Resolve the image the panel job should run. Reuses the repo the panel was
- * started with (NOMPLOY_IMAGE, e.g. ghcr.io/nomploy/nomploy:latest) and swaps in
- * `tag`, so the registry always matches how it was actually installed instead of
- * a hardcoded Docker Hub reference.
+ * Resolve the image the panel job should run, based on NOMPLOY_IMAGE (how the
+ * panel was actually installed, e.g. ghcr.io/nomploy/nomploy:latest).
+ *
+ * With no `tag` it returns NOMPLOY_IMAGE unchanged — the right choice for a
+ * reload/restart: keep the current image and let the job's force_pull re-pull a
+ * moving tag (:latest, :canary) to its newest digest. Do NOT feed it
+ * packageInfo.version — release version tags (v0.29.7) are not pushed to the
+ * registry, only :latest and :sha-*, so mapping to one yields a "not found" pull.
+ *
+ * A `tag` is only for an explicit retag (swaps the tag, keeping repo+registry).
  */
 export const resolvePanelImage = (
-	tag: string,
+	tag?: string,
 	env: NodeJS.ProcessEnv = process.env,
 ): string => {
 	const current = env.NOMPLOY_IMAGE || "ghcr.io/nomploy/nomploy:latest";
+	if (!tag) return current;
 	// Strip an existing :tag (but not a registry :port) — split on the last colon
 	// only if what follows has no "/".
 	const lastColon = current.lastIndexOf(":");

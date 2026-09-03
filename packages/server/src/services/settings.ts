@@ -289,7 +289,6 @@ fi`;
 export const reloadDockerResource = async (
 	resourceName: string,
 	serverId?: string,
-	version?: string,
 ) => {
 	// The panel runs as a Nomad job named "nomploy" (its container is
 	// nomploy-<allocId>, so it isn't a plain service/standalone). Self-update the
@@ -297,12 +296,12 @@ export const reloadDockerResource = async (
 	// pulls it and rolling-restarts the allocation in place — the Nomad
 	// equivalent of Swarm's `docker service update --image`.
 	if (resourceName === PANEL_JOB_NAME) {
-		const currentImageTag = getNomployImageTag();
-		let imageTag = version || currentImageTag;
-		if (currentImageTag === "canary" || currentImageTag === "feature") {
-			imageTag = currentImageTag;
-		}
-		const image = resolvePanelImage(imageTag);
+		// Reload the panel on its CURRENT image (NOMPLOY_IMAGE); force_pull in the
+		// job re-pulls a moving tag (:latest/:canary) to its newest digest. We
+		// deliberately don't map `version` (packageInfo.version, e.g. v0.29.7) to a
+		// tag — those release tags aren't published to the registry (only :latest
+		// and :sha-*), so doing so fails the image pull.
+		const image = resolvePanelImage();
 		const command = getPanelNomadDeployCommand(image, collectPanelEnv());
 		if (serverId) {
 			await execAsyncRemote(serverId, command);
