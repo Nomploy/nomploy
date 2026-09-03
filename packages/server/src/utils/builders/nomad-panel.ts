@@ -146,9 +146,15 @@ ${generateEnvBlock(env)}
 
       kill_timeout = "30s"
 
+      // memory is the scheduling reservation; memory_max is the hard cgroup cap
+      // the panel can burst to (Node's heap grows well past 512 MB under load —
+      // a 1024 MB hard limit OOM-killed it). Bursting above the reservation
+      // needs the cluster's memory oversubscription enabled (install.sh does:
+      // \`nomad operator scheduler set-config -memory-oversubscription=true\`).
       resources {
-        cpu    = 1000
-        memory = 1024
+        cpu        = 1000
+        memory     = 512
+        memory_max = 2048
       }
     }
   }

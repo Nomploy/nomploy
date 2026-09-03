@@ -370,6 +370,12 @@ for _ in $(seq 1 60); do
   sleep 2
 done
 
+# Let allocations burst above their memory reservation up to memory_max, using
+# free host RAM (best-effort, like the old `docker run` panel). The panel job
+# relies on this to reach memory_max=2048 without reserving it all up front —
+# important on small control-plane nodes.
+$SUDO nomad operator scheduler set-config -memory-oversubscription=true >/dev/null 2>&1 || true
+
 $SUDO mkdir -p /etc/nomploy
 $SUDO tee /etc/nomploy/nomploy.nomad.hcl >/dev/null <<PANELHCL
 job "nomploy" {
@@ -426,9 +432,13 @@ job "nomploy" {
 
       kill_timeout = "30s"
 
+      # memory = scheduling reservation; memory_max = hard cgroup cap the panel
+      # bursts to (a 1024 MB hard limit OOM-kills Node under load). Bursting needs
+      # memory oversubscription, enabled just below.
       resources {
-        cpu    = 1000
-        memory = 1024
+        cpu        = 1000
+        memory     = 512
+        memory_max = 2048
       }
     }
   }
