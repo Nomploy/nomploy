@@ -141,24 +141,6 @@ export const Verify = () => {
 											}
 										/>
 										<StatusRow
-											label="Docker Swarm Initialized"
-											isEnabled={data?.isSwarmInstalled}
-											description={
-												data?.isSwarmInstalled
-													? "Initialized"
-													: "Not Initialized"
-											}
-										/>
-										<StatusRow
-											label="Nomploy Network Created"
-											isEnabled={data?.isNomployNetworkInstalled}
-											description={
-												data?.isNomployNetworkInstalled
-													? "Created"
-													: "Not Created"
-											}
-										/>
-										<StatusRow
 											label="Main Directory Created"
 											isEnabled={data?.isMainDirectoryInstalled}
 											description={
