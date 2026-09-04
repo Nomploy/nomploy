@@ -13,7 +13,11 @@ import type { MongoNested } from "../databases/mongo";
 import type { MysqlNested } from "../databases/mysql";
 import type { PostgresNested } from "../databases/postgres";
 import type { RedisNested } from "../databases/redis";
-import { getRunningAllocId } from "../nomad/resolve";
+import {
+	ALLOC_ID_LABEL,
+	getRunningAllocId,
+	getRunningAllocIdForGroup,
+} from "../nomad/resolve";
 import { execAsync, execAsyncRemote } from "../process/execAsync";
 import { spawnAsync } from "../process/spawnAsync";
 import { getRemoteDocker } from "../servers/remote-docker";
@@ -664,10 +668,18 @@ export const getComposeContainer = async (
 		const { appName, composeType, serverId } = compose;
 		// 1. Determine the correct labels based on composeType
 		const labels: string[] = [];
-		if (composeType === "stack") {
-			// Labels for Docker Swarm stack services
-			labels.push(`com.docker.stack.namespace=${appName}`);
-			labels.push(`com.docker.swarm.service.name=${appName}_${serviceName}`);
+		if (composeType === "nomad") {
+			// Nomad: the compose service is a task group; find its running alloc
+			// and match its container by the Nomad alloc-id label.
+			const allocId = await getRunningAllocIdForGroup(
+				appName,
+				serviceName,
+				serverId,
+			);
+			if (!allocId) {
+				return null;
+			}
+			labels.push(`${ALLOC_ID_LABEL}=${allocId}`);
 		} else {
 			// Labels for Docker Compose projects (default)
 			labels.push(`com.docker.compose.project=${appName}`);

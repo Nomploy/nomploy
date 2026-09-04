@@ -52,6 +52,22 @@ export const getRunningAllocId = async (
 	return pickRunning(await getJobAllocations(appName, serverId));
 };
 
+/**
+ * The running allocation id of one task group within a Nomad job (job id =
+ * appName). A compose service maps to a task group, so this finds the specific
+ * service's alloc for logs/exec/backups/schedules. Undefined if none running.
+ */
+export const getRunningAllocIdForGroup = async (
+	appName: string,
+	group: string,
+	serverId?: string | null,
+): Promise<string | undefined> => {
+	const allocs = await getJobAllocations(appName, serverId);
+	return allocs.find(
+		(a) => a.TaskGroup === group && a.ClientStatus === "running",
+	)?.ID;
+};
+
 // Superset of the two legacy container-listing shapes so both callers'
 // consumers keep working: getContainersByAppNameMatch reads `status`, while
 // getServiceContainersByAppName reads `currentState`/`node`/`error`.
@@ -65,7 +81,7 @@ export interface NomadContainerInfo {
 	error: string;
 }
 
-const ALLOC_ID_LABEL = "com.hashicorp.nomad.alloc_id";
+export const ALLOC_ID_LABEL = "com.hashicorp.nomad.alloc_id";
 
 /**
  * The docker containers backing a Nomad job's allocations. Nomad names an
