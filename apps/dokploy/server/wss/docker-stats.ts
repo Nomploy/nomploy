@@ -8,6 +8,10 @@ import {
 	recordAdvancedStats,
 	validateRequest,
 } from "@nomploy/server";
+import {
+	ALLOC_ID_LABEL,
+	getRunningAllocId,
+} from "@nomploy/server/utils/nomad/resolve";
 import { WebSocketServer } from "ws";
 
 export const setupDockerStatsMonitoringSocketServer = (
@@ -42,8 +46,8 @@ export const setupDockerStatsMonitoringSocketServer = (
 		const appName = url.searchParams.get("appName");
 		const appType = (url.searchParams.get("appType") || "application") as
 			| "application"
-			| "stack"
-			| "docker-compose";
+			| "docker-compose"
+			| "nomad";
 		const { user, session } = await validateRequest(req);
 
 		if (!appName) {
@@ -72,15 +76,29 @@ export const setupDockerStatsMonitoringSocketServer = (
 					return;
 				}
 
-				const filter = {
-					status: ["running"],
-					...(appType === "application" && {
-						label: [`com.docker.swarm.service.name=${appName}`],
-					}),
-					...(appType === "docker-compose" && {
-						name: [appName],
-					}),
+				// On Nomad, appName is either the job id (application/database) or a
+				// specific container name (a compose service picked in the UI). Match
+				// the job's running alloc by its alloc-id label; otherwise fall back to
+				// the container name. (The legacy Swarm-label branch is kept for
+				// non-Nomad deployments.)
+				let filter: {
+					status: string[];
+					label?: string[];
+					name?: string[];
 				};
+				if (appType === "nomad") {
+					const allocId = await getRunningAllocId(appName);
+					filter = allocId
+						? { status: ["running"], label: [`${ALLOC_ID_LABEL}=${allocId}`] }
+						: { status: ["running"], name: [appName] };
+				} else if (appType === "docker-compose") {
+					filter = { status: ["running"], name: [appName] };
+				} else {
+					filter = {
+						status: ["running"],
+						label: [`com.docker.swarm.service.name=${appName}`],
+					};
+				}
 
 				const containers = await docker.listContainers({
 					filters: JSON.stringify(filter),
