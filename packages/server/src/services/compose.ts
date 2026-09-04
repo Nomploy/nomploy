@@ -436,11 +436,8 @@ export const removeCompose = async (
 		const { COMPOSE_PATH } = paths(!!compose.serverId);
 		const projectPath = join(COMPOSE_PATH, compose.appName);
 
-		if (compose.composeType === "stack" || compose.composeType === "nomad") {
-			const stopCmd = compose.composeType === "nomad"
-				? `nomad job stop -purge ${compose.appName}`
-				: `docker network disconnect ${compose.appName} nomploy-traefik;
-			docker stack rm ${compose.appName}`;
+		if (compose.composeType === "nomad") {
+			const stopCmd = `nomad job stop -purge ${compose.appName}`;
 			const command = `
 			${stopCmd};
 			rm -rf ${projectPath}`;
@@ -538,10 +535,8 @@ export const stopCompose = async (composeId: string) => {
 			}
 		}
 
-		if (compose.composeType === "stack" || compose.composeType === "nomad") {
-			const stopCmd = compose.composeType === "nomad"
-				? `nomad job stop ${compose.appName}`
-				: `docker stack rm ${compose.appName}`;
+		if (compose.composeType === "nomad") {
+			const stopCmd = `nomad job stop ${compose.appName}`;
 			if (compose.serverId) {
 				await execAsyncRemote(compose.serverId, stopCmd);
 			} else {
