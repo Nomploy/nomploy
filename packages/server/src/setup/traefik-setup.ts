@@ -7,7 +7,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import type { ContainerCreateOptions, CreateServiceOptions } from "dockerode";
+import type { ContainerCreateOptions } from "dockerode";
 import { stringify } from "yaml";
 import { paths } from "../constants";
 import { getRemoteDocker } from "../utils/servers/remote-docker";
@@ -35,51 +35,24 @@ export interface TraefikOptions {
 export const initializeStandaloneTraefik = async ({
 	env,
 	serverId,
-	additionalPorts = [],
 }: TraefikOptions = {}) => {
 	const { MAIN_TRAEFIK_PATH, DYNAMIC_TRAEFIK_PATH } = paths(!!serverId);
 	const imageName = `traefik:v${TRAEFIK_VERSION}`;
 	const containerName = "nomploy-traefik";
 
-	const exposedPorts: Record<string, {}> = {
-		[`${TRAEFIK_PORT}/tcp`]: {},
-		[`${TRAEFIK_SSL_PORT}/tcp`]: {},
-		[`${TRAEFIK_HTTP3_PORT}/udp`]: {},
-	};
-
-	const portBindings: Record<string, Array<{ HostPort: string }>> = {
-		[`${TRAEFIK_PORT}/tcp`]: [{ HostPort: TRAEFIK_PORT.toString() }],
-		[`${TRAEFIK_SSL_PORT}/tcp`]: [{ HostPort: TRAEFIK_SSL_PORT.toString() }],
-		[`${TRAEFIK_HTTP3_PORT}/udp`]: [
-			{ HostPort: TRAEFIK_HTTP3_PORT.toString() },
-		],
-	};
-
-	const enableDashboard = additionalPorts.some(
-		(port) => port.targetPort === 8080,
-	);
-
-	if (enableDashboard) {
-		exposedPorts["8080/tcp"] = {};
-		portBindings["8080/tcp"] = [{ HostPort: "8080" }];
-	}
-
-	for (const port of additionalPorts) {
-		const portKey = `${port.targetPort}/${port.protocol ?? "tcp"}`;
-		exposedPorts[portKey] = {};
-		portBindings[portKey] = [{ HostPort: port.publishedPort.toString() }];
-	}
-
+	// Host networking (matching install.sh): Traefik binds 80/443/8080 (via its
+	// entrypoints + api.insecure) directly on the host, so no docker port
+	// bindings or overlay network are needed — the removed Swarm `nomploy-network`
+	// overlay is gone. `additionalPorts` no longer maps to docker port bindings on
+	// host networking (custom ports need a Traefik entrypoint instead).
+	// ExtraHosts keeps the panel's own domain route (http://nomploy:3000)
+	// resolvable, exactly as install.sh does with --add-host.
 	const settings: ContainerCreateOptions = {
 		name: containerName,
 		Image: imageName,
-		NetworkingConfig: {
-			EndpointsConfig: {
-				"nomploy-network": {},
-			},
-		},
-		ExposedPorts: exposedPorts,
 		HostConfig: {
+			NetworkMode: "host",
+			ExtraHosts: ["nomploy:127.0.0.1"],
 			RestartPolicy: {
 				Name: "always",
 			},
@@ -88,7 +61,6 @@ export const initializeStandaloneTraefik = async ({
 				`${DYNAMIC_TRAEFIK_PATH}:/etc/nomploy/traefik/dynamic`,
 				"/var/run/docker.sock:/var/run/docker.sock",
 			],
-			PortBindings: portBindings,
 		},
 		Env: env,
 	};
