@@ -20,13 +20,7 @@ export const ShowNomadNodes = ({ serverId }: { serverId?: string }) => {
 		isLoading,
 		isError,
 		refetch,
-	} = api.nomad.getNodes.useQuery({ serverId });
-
-	const { data: resources } = api.nomad.getClusterResources.useQuery({
-		serverId,
-	});
-
-	const { data: allocs } = api.nomad.getAllocations.useQuery({ serverId });
+	} = api.nomad.getNodesWithResources.useQuery({ serverId });
 
 	if (isLoading) {
 		return (
@@ -68,26 +62,16 @@ export const ShowNomadNodes = ({ serverId }: { serverId?: string }) => {
 						</TableRow>
 					</TableHeader>
 					<TableBody>
-						{nodes?.map((node: any) => {
-							const nodeAllocs =
-								allocs?.filter(
-									(a: any) =>
-										a.NodeID === node.ID && a.ClientStatus === "running",
-								) || [];
-
-							const cpuTotal = resources?.cpu.total || 1;
-							const memTotal = resources?.memory.total || 1;
+						{nodes?.map((node) => {
+							const cpuTotal = node.cpu.total || 0;
+							const memTotal = node.memory.total || 0;
 							const cpuPercent =
 								cpuTotal > 0
-									? Math.round(
-											((resources?.cpu.allocated || 0) / cpuTotal) * 100,
-										)
+									? Math.round((node.cpu.allocated / cpuTotal) * 100)
 									: 0;
 							const memPercent =
 								memTotal > 0
-									? Math.round(
-											((resources?.memory.allocated || 0) / memTotal) * 100,
-										)
+									? Math.round((node.memory.allocated / memTotal) * 100)
 									: 0;
 
 							return (
@@ -108,7 +92,7 @@ export const ShowNomadNodes = ({ serverId }: { serverId?: string }) => {
 										</Badge>
 									</TableCell>
 									<TableCell>{node.Datacenter}</TableCell>
-									<TableCell>{nodeAllocs.length} running</TableCell>
+									<TableCell>{node.allocCount} running</TableCell>
 									<TableCell>
 										<div className="flex items-center gap-2 min-w-[120px]">
 											<Progress value={cpuPercent} className="h-2 flex-1" />
