@@ -69,6 +69,11 @@ type NomadFormValues = z.infer<typeof nomadSchema>;
 
 type ClusterRole = "server" | "worker";
 
+// Terminal marker the cluster subscriptions stream on any non-success completion
+// (graceful abort or error), so the busy state clears even when there is no
+// success sentinel. Must match OP_ENDED in the nomad router.
+const OP_ENDED = "OP_ENDED";
+
 interface Props {
 	serverId: string;
 }
@@ -101,6 +106,10 @@ export const NomadSettings = ({ serverId }: Props) => {
 					setIsBootstrapping(false);
 					toast.success("Nomad bootstrapped on this server");
 					refetch();
+					return;
+				}
+				if (log.includes(OP_ENDED)) {
+					setIsBootstrapping(false);
 					return;
 				}
 				setBootstrapLogs((prev) => prev + log);
@@ -137,6 +146,10 @@ export const NomadSettings = ({ serverId }: Props) => {
 					refetchMembers();
 					return;
 				}
+				if (log.includes(OP_ENDED)) {
+					setIsJoining(false);
+					return;
+				}
 				setJoinLogs((prev) => prev + log);
 			},
 			onError(error) {
@@ -166,6 +179,10 @@ export const NomadSettings = ({ serverId }: Props) => {
 					toast.success("Server removed from the cluster");
 					refetch();
 					refetchMembers();
+					return;
+				}
+				if (log.includes(OP_ENDED)) {
+					setIsLeaving(false);
 					return;
 				}
 				setLeaveLogs((prev) => prev + log);
