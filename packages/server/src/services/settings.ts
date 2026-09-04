@@ -10,7 +10,6 @@ import { db } from "../db";
 import { compose } from "../db/schema";
 import {
 	initializeStandaloneTraefik,
-	initializeTraefikService,
 	type TraefikOptions,
 } from "../setup/traefik-setup";
 import {
@@ -257,36 +256,19 @@ echo "$json_output"
 	return result;
 };
 
+// Control-plane resources (nomploy-redis, nomploy-traefik, …) run as standalone
+// docker containers on Nomad; the Swarm "service" case is gone (the panel itself
+// is a Nomad job, handled separately in reloadDockerResource).
 export const getDockerResourceType = async (
 	resourceName: string,
 	serverId?: string,
-) => {
+): Promise<"standalone" | "unknown"> => {
 	try {
-		let result = "";
-		const command = `
-RESOURCE_NAME="${resourceName}"
-if docker service inspect "$RESOURCE_NAME" >/dev/null 2>&1; then
-	echo "service"
-elif docker inspect "$RESOURCE_NAME" >/dev/null 2>&1; then
-	echo "standalone"
-else
-	echo "unknown"
-fi`;
-
-		if (serverId) {
-			const { stdout } = await execAsyncRemote(serverId, command);
-			result = stdout.trim();
-		} else {
-			const { stdout } = await execAsync(command);
-			result = stdout.trim();
-		}
-		if (result === "service") {
-			return "service";
-		}
-		if (result === "standalone") {
-			return "standalone";
-		}
-		return "unknown";
+		const command = `docker inspect "${resourceName}" >/dev/null 2>&1 && echo "standalone" || echo "unknown"`;
+		const { stdout } = serverId
+			? await execAsyncRemote(serverId, command)
+			: await execAsync(command);
+		return stdout.trim() === "standalone" ? "standalone" : "unknown";
 	} catch (error) {
 		console.error(error);
 		return "unknown";
@@ -319,14 +301,10 @@ export const reloadDockerResource = async (
 	}
 
 	const resourceType = await getDockerResourceType(resourceName, serverId);
-	let command = "";
-	if (resourceType === "service") {
-		command = `docker service update --force ${resourceName}`;
-	} else if (resourceType === "standalone") {
-		command = `docker restart ${resourceName}`;
-	} else {
+	if (resourceType !== "standalone") {
 		throw new Error("Resource type not found");
 	}
+	const command = `docker restart ${resourceName}`;
 	if (serverId) {
 		await execAsyncRemote(serverId, command);
 	} else {
@@ -339,12 +317,10 @@ export const readEnvironmentVariables = async (
 	serverId?: string,
 ) => {
 	const resourceType = await getDockerResourceType(resourceName, serverId);
-	let command = "";
-	if (resourceType === "service") {
-		command = `docker service inspect ${resourceName} --format '{{json .Spec.TaskTemplate.ContainerSpec.Env}}'`;
-	} else if (resourceType === "standalone") {
-		command = `docker container inspect ${resourceName} --format '{{json .Config.Env}}'`;
+	if (resourceType !== "standalone") {
+		return "";
 	}
+	const command = `docker container inspect ${resourceName} --format '{{json .Config.Env}}'`;
 	let result = "";
 	if (serverId) {
 		const { stdout } = await execAsyncRemote(serverId, command);
@@ -366,14 +342,10 @@ export const readPorts = async (
 	{ targetPort: number; publishedPort: number; protocol?: string }[]
 > => {
 	const resourceType = await getDockerResourceType(resourceName, serverId);
-	let command = "";
-	if (resourceType === "service") {
-		command = `docker service inspect ${resourceName} --format '{{json .Spec.EndpointSpec.Ports}}'`;
-	} else if (resourceType === "standalone") {
-		command = `docker container inspect ${resourceName} --format '{{json .NetworkSettings.Ports}}'`;
-	} else {
+	if (resourceType !== "standalone") {
 		throw new Error("Resource type not found");
 	}
+	const command = `docker container inspect ${resourceName} --format '{{json .NetworkSettings.Ports}}'`;
 	let result = "";
 	if (serverId) {
 		const { stdout } = await execAsyncRemote(serverId, command);
@@ -389,15 +361,6 @@ export const readPorts = async (
 
 	const parsedResult = JSON.parse(result);
 
-	if (resourceType === "service") {
-		return parsedResult
-			.map((port: any) => ({
-				targetPort: port.TargetPort,
-				publishedPort: port.PublishedPort,
-				protocol: port.Protocol,
-			}))
-			.filter((port: any) => port.targetPort !== 80 && port.targetPort !== 443);
-	}
 	const ports: {
 		targetPort: number;
 		publishedPort: number;
@@ -480,24 +443,17 @@ export const writeTraefikSetup = async (input: TraefikOptions) => {
 		input.serverId,
 	);
 
-	if (resourceType === "service") {
-		await initializeTraefikService({
-			env: input.env,
-			additionalPorts: input.additionalPorts,
-			serverId: input.serverId,
-		});
-		await reconnectServicesToTraefik(input.serverId);
-	} else if (resourceType === "standalone") {
-		await initializeStandaloneTraefik({
-			env: input.env,
-			additionalPorts: input.additionalPorts,
-			serverId: input.serverId,
-		});
-
-		await reconnectServicesToTraefik(input.serverId);
-	} else {
+	// Traefik runs as a standalone container (install.sh); the Swarm service
+	// variant is gone.
+	if (resourceType !== "standalone") {
 		throw new Error("Traefik resource type not found");
 	}
+	await initializeStandaloneTraefik({
+		env: input.env,
+		additionalPorts: input.additionalPorts,
+		serverId: input.serverId,
+	});
+	await reconnectServicesToTraefik(input.serverId);
 };
 
 export const reconnectServicesToTraefik = async (serverId?: string) => {
