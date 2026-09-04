@@ -6,6 +6,7 @@ import {
 	RefreshCw,
 	Server as ServerIcon,
 	Terminal,
+	Trash2,
 } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -20,7 +21,6 @@ import {
 	AlertDialogFooter,
 	AlertDialogHeader,
 	AlertDialogTitle,
-	AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -168,15 +168,25 @@ export const NomadSettings = ({ serverId }: Props) => {
 	const [isLeaving, setIsLeaving] = useState(false);
 	const [forceLeave, setForceLeave] = useState(false);
 	const [leaveLogs, setLeaveLogs] = useState<string>("");
+	// The member currently targeted for removal (any row in the table, or this
+	// server). Drives both the confirm dialog and the removeNode subscription, so
+	// you can remove any node from one place without opening its own settings.
+	const [removeTarget, setRemoveTarget] = useState<{
+		serverId: string;
+		name: string;
+		role: ClusterRole;
+	} | null>(null);
 
 	api.nomad.removeNode.useSubscription(
-		{ serverId, force: forceLeave },
+		{ serverId: removeTarget?.serverId ?? serverId, force: forceLeave },
 		{
 			enabled: isLeaving,
 			onData(log) {
 				if (log === "REMOVE_DONE") {
 					setIsLeaving(false);
-					toast.success("Server removed from the cluster");
+					toast.success(
+						`${removeTarget?.name ?? "Node"} removed from the cluster`,
+					);
 					refetch();
 					refetchMembers();
 					return;
@@ -194,10 +204,25 @@ export const NomadSettings = ({ serverId }: Props) => {
 		},
 	);
 
+	// Open the confirm dialog for a given member (reset force + logs each time).
+	const openRemove = (target: {
+		serverId: string;
+		name: string;
+		role: ClusterRole;
+	}) => {
+		setForceLeave(false);
+		setLeaveLogs("");
+		setRemoveTarget(target);
+	};
+
 	const startLeave = () => {
 		setLeaveLogs("");
 		setIsLeaving(true);
 	};
+
+	const serverCount = members?.filter((m) => m.role === "server").length ?? 0;
+	// Raft fault tolerance: how many servers can fail while keeping quorum.
+	const faultTolerance = Math.max(0, Math.floor((serverCount - 1) / 2));
 
 	const isMember = !!server?.clusterRole;
 	const busy = isBootstrapping || isJoining || isLeaving;
@@ -253,66 +278,26 @@ export const NomadSettings = ({ serverId }: Props) => {
 					</Button>
 
 					{isMember ? (
-						<AlertDialog>
-							<AlertDialogTrigger asChild>
-								<Button type="button" variant="destructive" disabled={busy}>
-									{isLeaving ? (
-										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-									) : (
-										<LogOut className="mr-2 h-4 w-4" />
-									)}
-									{isLeaving ? "Leaving…" : "Leave cluster"}
-								</Button>
-							</AlertDialogTrigger>
-							<AlertDialogContent>
-								<AlertDialogHeader>
-									<AlertDialogTitle>
-										Remove “{server?.name}” from the cluster?
-									</AlertDialogTitle>
-									<AlertDialogDescription asChild>
-										<div className="space-y-3">
-											<p>
-												The node is drained, its services stopped, and its
-												WireGuard peer removed from every remaining member. Its
-												overlay IP is freed for reuse.
-											</p>
-											{server?.clusterRole === "server" && (
-												<div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 p-3 text-sm">
-													<p className="font-medium">
-														This is a Nomad/Consul server (raft member).
-													</p>
-													<p className="mt-1">
-														Removing it shrinks the raft. Below 3 servers the
-														cluster loses fault tolerance; the last server
-														cannot be removed. Enable force to proceed anyway.
-													</p>
-													<label
-														htmlFor="force-leave"
-														className="mt-2 flex items-center gap-2"
-													>
-														<Checkbox
-															id="force-leave"
-															checked={forceLeave}
-															onCheckedChange={(v) => setForceLeave(v === true)}
-														/>
-														<span>Force (drop below 3 servers)</span>
-													</label>
-												</div>
-											)}
-										</div>
-									</AlertDialogDescription>
-								</AlertDialogHeader>
-								<AlertDialogFooter>
-									<AlertDialogCancel>Cancel</AlertDialogCancel>
-									<AlertDialogAction
-										onClick={startLeave}
-										className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-									>
-										Remove node
-									</AlertDialogAction>
-								</AlertDialogFooter>
-							</AlertDialogContent>
-						</AlertDialog>
+						<Button
+							type="button"
+							variant="destructive"
+							disabled={busy}
+							onClick={() =>
+								server &&
+								openRemove({
+									serverId,
+									name: server.name,
+									role: (server.clusterRole as ClusterRole) ?? "worker",
+								})
+							}
+						>
+							{isLeaving ? (
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+							) : (
+								<LogOut className="mr-2 h-4 w-4" />
+							)}
+							{isLeaving ? "Leaving…" : "Leave cluster"}
+						</Button>
 					) : (
 						<DropdownMenu>
 							<DropdownMenuTrigger asChild>
@@ -450,17 +435,28 @@ export const NomadSettings = ({ serverId }: Props) => {
 								Nomad/Consul servers and worker nodes on the WireGuard overlay.
 							</p>
 						</div>
-						<Button
-							type="button"
-							variant="ghost"
-							size="sm"
-							onClick={() => refetchMembers()}
-							disabled={isRefetchingMembers}
-						>
-							<RefreshCw
-								className={`h-4 w-4 ${isRefetchingMembers ? "animate-spin" : ""}`}
-							/>
-						</Button>
+						<div className="flex items-center gap-2">
+							{serverCount > 0 && (
+								<Badge
+									variant={faultTolerance > 0 ? "default" : "outline"}
+									title="How many servers can fail while the cluster keeps a quorum"
+								>
+									{serverCount} server{serverCount === 1 ? "" : "s"} · fault
+									tolerance {faultTolerance}
+								</Badge>
+							)}
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								onClick={() => refetchMembers()}
+								disabled={isRefetchingMembers}
+							>
+								<RefreshCw
+									className={`h-4 w-4 ${isRefetchingMembers ? "animate-spin" : ""}`}
+								/>
+							</Button>
+						</div>
 					</div>
 					<div className="rounded-lg border">
 						<Table>
@@ -470,6 +466,7 @@ export const NomadSettings = ({ serverId }: Props) => {
 									<TableHead>Role</TableHead>
 									<TableHead>Overlay IP</TableHead>
 									<TableHead>Status</TableHead>
+									<TableHead className="text-right">Actions</TableHead>
 								</TableRow>
 							</TableHeader>
 							<TableBody>
@@ -478,6 +475,11 @@ export const NomadSettings = ({ serverId }: Props) => {
 										<TableRow key={`${m.role}-${m.wgIp}`}>
 											<TableCell className="font-medium">
 												{m.name}
+												{m.leader && (
+													<Badge variant="outline" className="ml-2">
+														leader
+													</Badge>
+												)}
 												{m.serverId === serverId && (
 													<span className="ml-2 text-muted-foreground text-xs">
 														(this server)
@@ -509,12 +511,36 @@ export const NomadSettings = ({ serverId }: Props) => {
 													{m.status}
 												</Badge>
 											</TableCell>
+											<TableCell className="text-right">
+												{m.serverId ? (
+													<Button
+														type="button"
+														variant="ghost"
+														size="sm"
+														className="text-destructive hover:text-destructive"
+														disabled={busy}
+														onClick={() =>
+															openRemove({
+																serverId: m.serverId as string,
+																name: m.name,
+																role: m.role as ClusterRole,
+															})
+														}
+													>
+														<Trash2 className="h-4 w-4" />
+													</Button>
+												) : (
+													<span className="text-muted-foreground text-xs">
+														hub
+													</span>
+												)}
+											</TableCell>
 										</TableRow>
 									))
 								) : (
 									<TableRow>
 										<TableCell
-											colSpan={4}
+											colSpan={5}
 											className="text-center text-muted-foreground text-sm"
 										>
 											No cluster members yet.
@@ -525,6 +551,61 @@ export const NomadSettings = ({ serverId }: Props) => {
 						</Table>
 					</div>
 				</div>
+				<AlertDialog
+					open={!!removeTarget}
+					onOpenChange={(o) => {
+						if (!o) setRemoveTarget(null);
+					}}
+				>
+					<AlertDialogContent>
+						<AlertDialogHeader>
+							<AlertDialogTitle>
+								Remove “{removeTarget?.name}” from the cluster?
+							</AlertDialogTitle>
+							<AlertDialogDescription asChild>
+								<div className="space-y-3">
+									<p>
+										The node is drained, its services stopped, and its WireGuard
+										peer removed from every remaining member. Its overlay IP is
+										freed for reuse.
+									</p>
+									{removeTarget?.role === "server" && (
+										<div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 p-3 text-sm">
+											<p className="font-medium">
+												This is a Nomad/Consul server (raft member).
+											</p>
+											<p className="mt-1">
+												Removing it shrinks the raft. Below 3 servers the
+												cluster loses fault tolerance; the last server cannot be
+												removed. Enable force to proceed anyway.
+											</p>
+											<label
+												htmlFor="force-leave"
+												className="mt-2 flex items-center gap-2"
+											>
+												<Checkbox
+													id="force-leave"
+													checked={forceLeave}
+													onCheckedChange={(v) => setForceLeave(v === true)}
+												/>
+												<span>Force (drop below 3 servers)</span>
+											</label>
+										</div>
+									)}
+								</div>
+							</AlertDialogDescription>
+						</AlertDialogHeader>
+						<AlertDialogFooter>
+							<AlertDialogCancel>Cancel</AlertDialogCancel>
+							<AlertDialogAction
+								onClick={startLeave}
+								className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+							>
+								Remove node
+							</AlertDialogAction>
+						</AlertDialogFooter>
+					</AlertDialogContent>
+				</AlertDialog>
 			</CardContent>
 		</Card>
 	);
