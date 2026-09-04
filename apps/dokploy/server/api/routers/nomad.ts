@@ -335,6 +335,58 @@ export const nomadRouter = createTRPCRouter({
 			return nomadClient(cfg).get("/nodes");
 		}),
 
+	// Per-node capacity + what's actually allocated ON THAT node. The nodes table
+	// used the cluster-wide totals for every row (so every node showed the same
+	// %); this returns each node's own numbers by reading its /node/:id detail
+	// (NodeResources) and summing only the allocations placed on it.
+	getNodesWithResources: withPermission("server", "read")
+		.input(serverInput)
+		.query(async ({ input, ctx }) => {
+			const cfg = await resolveNomad(ctx, input.serverId);
+			const client = nomadClient(cfg);
+			const nodes: any[] = await client.get("/nodes");
+			const allocs: any[] = await client.get(
+				withNs("/allocations?resources=true", cfg.namespace),
+			);
+
+			return Promise.all(
+				nodes.map(async (node: any) => {
+					let cpuTotal = 0;
+					let memTotal = 0;
+					try {
+						const detail: any = await client.get(`/node/${node.ID}`);
+						const res = detail.NodeResources || {};
+						cpuTotal = res.Cpu?.CpuShares || 0;
+						memTotal = res.Memory?.MemoryMB || 0;
+					} catch {}
+
+					let cpuAllocated = 0;
+					let memAllocated = 0;
+					let allocCount = 0;
+					for (const alloc of allocs) {
+						if (alloc.NodeID !== node.ID) continue;
+						if (alloc.ClientStatus !== "running") continue;
+						allocCount++;
+						const tasks = alloc.AllocatedResources?.Tasks || {};
+						for (const task of Object.values(tasks) as any[]) {
+							cpuAllocated += task?.Cpu?.CpuShares || 0;
+							memAllocated += task?.Memory?.MemoryMB || 0;
+						}
+					}
+
+					return {
+						ID: node.ID as string,
+						Name: node.Name as string,
+						Status: node.Status as string,
+						Datacenter: node.Datacenter as string,
+						allocCount,
+						cpu: { total: cpuTotal, allocated: cpuAllocated },
+						memory: { total: memTotal, allocated: memAllocated },
+					};
+				}),
+			);
+		}),
+
 	getClusterResources: withPermission("server", "read")
 		.input(serverInput)
 		.query(async ({ input, ctx }) => {
