@@ -7,6 +7,32 @@ import {
 	getS3Credentials,
 	normalizeS3Path,
 } from "../backups/utils";
+import { NOMAD_APP_SERVICE_NAME } from "../builders/nomad-application";
+
+/**
+ * Shell snippets that stop a Nomad task group for a consistent volume backup and
+ * restore it afterwards. Captures the group's current desired count from the
+ * Nomad API (falling back to `fallbackCount` when curl/python aren't available),
+ * scales it to 0, and scales back to that count. Replaces the Swarm-era
+ * `docker service update --replicas` scaling, which never matched a Nomad job.
+ */
+const nomadScaleStopStart = (
+	jobId: string,
+	group: string,
+	fallbackCount: number,
+) => {
+	const countVar = "VOLUME_BACKUP_SCALE_COUNT";
+	const capture = `${countVar}=$(curl -s http://127.0.0.1:4646/v1/job/${jobId}/scale 2>/dev/null | python3 -c "import sys,json;print(json.load(sys.stdin).get('TaskGroups',{}).get('${group}',{}).get('Desired',${fallbackCount}))" 2>/dev/null || echo ${fallbackCount})`;
+	return {
+		stop: `
+		${capture}
+		echo "Scaling ${jobId}/${group} to 0 (was $${countVar}) for volume backup"
+		nomad job scale ${jobId} ${group} 0`,
+		start: `
+		echo "Scaling ${jobId}/${group} back to $${countVar}"
+		nomad job scale ${jobId} ${group} $${countVar}`,
+	};
+};
 
 export const getVolumeServiceAppName = (
 	volumeBackup: Awaited<ReturnType<typeof findVolumeBackupById>>,
@@ -116,14 +142,16 @@ export const backupVolume = async (
 	);
 
 	if (serviceType === "application") {
+		// The application is a Nomad job (id = appName) with a single "app" group.
+		const { stop, start } = nomadScaleStopStart(
+			volumeBackup.application?.appName || "",
+			NOMAD_APP_SERVICE_NAME,
+			volumeBackup.application?.replicas ?? 1,
+		);
 		return lockWrapper(`
-		echo "Stopping application to 0 replicas"
-		ACTUAL_REPLICAS=$(docker service inspect ${volumeBackup.application?.appName} --format "{{.Spec.Mode.Replicated.Replicas}}")
-		echo "Actual replicas: $ACTUAL_REPLICAS"
-		docker service update --replicas=0 ${volumeBackup.application?.appName}
+		${stop}
         ${backupCommand}
-		echo "Starting application to $ACTUAL_REPLICAS replicas"
-        docker service update --replicas=$ACTUAL_REPLICAS --with-registry-auth ${volumeBackup.application?.appName}
+		${start}
 		${uploadCommand}
   `);
 	}
@@ -134,18 +162,19 @@ export const backupVolume = async (
 		let stopCommand = "";
 		let startCommand = "";
 
-		if (compose.composeType === "stack") {
-			stopCommand = `
-			echo "Stopping compose to 0 replicas"
-			echo "Service name: ${compose.appName}_${volumeBackup.serviceName}"
-            ACTUAL_REPLICAS=$(docker service inspect ${compose.appName}_${volumeBackup.serviceName} --format "{{.Spec.Mode.Replicated.Replicas}}")
-            echo "Actual replicas: $ACTUAL_REPLICAS"
-            docker service update --replicas=0 ${compose.appName}_${volumeBackup.serviceName}`;
-
-			startCommand = `
-			echo "Starting compose to $ACTUAL_REPLICAS replicas"
-			docker service update --replicas=$ACTUAL_REPLICAS --with-registry-auth ${compose.appName}_${volumeBackup.serviceName}`;
+		if (compose.composeType === "nomad") {
+			// A Nomad compose is one job (id = appName); each service is a task
+			// group, so scale the backed-up service's group down and back up.
+			const { stop, start } = nomadScaleStopStart(
+				compose.appName,
+				volumeBackup.serviceName || "",
+				1,
+			);
+			stopCommand = stop;
+			startCommand = start;
 		} else {
+			// Plain docker-compose: stop the specific service container by its
+			// compose labels.
 			stopCommand = `
 			echo "Stopping compose container"
             ID=$(docker ps -q --filter "label=com.docker.compose.project=${compose.appName}" --filter "label=com.docker.compose.service=${volumeBackup.serviceName}")
