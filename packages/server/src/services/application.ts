@@ -6,6 +6,7 @@ import {
 	buildAppName,
 } from "@nomploy/server/db/schema";
 import { getAdvancedStats } from "@nomploy/server/monitoring/utils";
+import { syncIntentionsForOrg } from "@nomploy/server/setup/nomad-connect";
 import { getBuildCommand } from "@nomploy/server/utils/builders";
 import {
 	getBuildNomadApplicationCommand,
@@ -233,6 +234,13 @@ export const deployApplication = async ({
 		}
 
 		await updateDeploymentStatus(deployment.deploymentId, "done");
+		// Phase B: refresh Connect intentions so this project's mesh services
+		// (isolated) get their allow-rules; no-op for non-isolated orgs.
+		if (application.environment.project.isolated) {
+			await syncIntentionsForOrg(
+				application.environment.project.organizationId,
+			).catch(() => {});
+		}
 		await updateApplicationStatus(applicationId, "done");
 
 		await sendBuildSuccessNotifications({
@@ -331,6 +339,13 @@ export const rebuildApplication = async ({
 			await execAsync(commandWithLog);
 		}
 		await updateDeploymentStatus(deployment.deploymentId, "done");
+		// Phase B: refresh Connect intentions so this project's mesh services
+		// (isolated) get their allow-rules; no-op for non-isolated orgs.
+		if (application.environment.project.isolated) {
+			await syncIntentionsForOrg(
+				application.environment.project.organizationId,
+			).catch(() => {});
+		}
 		await updateApplicationStatus(applicationId, "done");
 
 		await sendBuildSuccessNotifications({
@@ -478,6 +493,13 @@ export const deployPreviewApplication = async ({
 			body: `### Nomploy Preview Deployment\n\n${successComment}`,
 		});
 		await updateDeploymentStatus(deployment.deploymentId, "done");
+		// Phase B: refresh Connect intentions so this project's mesh services
+		// (isolated) get their allow-rules; no-op for non-isolated orgs.
+		if (application.environment.project.isolated) {
+			await syncIntentionsForOrg(
+				application.environment.project.organizationId,
+			).catch(() => {});
+		}
 		await updatePreviewDeployment(previewDeploymentId, {
 			previewStatus: "done",
 		});
@@ -598,6 +620,13 @@ export const rebuildPreviewApplication = async ({
 			body: `### Nomploy Preview Deployment\n\n${successComment}`,
 		});
 		await updateDeploymentStatus(deployment.deploymentId, "done");
+		// Phase B: refresh Connect intentions so this project's mesh services
+		// (isolated) get their allow-rules; no-op for non-isolated orgs.
+		if (application.environment.project.isolated) {
+			await syncIntentionsForOrg(
+				application.environment.project.organizationId,
+			).catch(() => {});
+		}
 		await updatePreviewDeployment(previewDeploymentId, {
 			previewStatus: "done",
 		});

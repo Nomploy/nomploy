@@ -7,6 +7,7 @@ import {
 	cleanAppName,
 	compose,
 } from "@nomploy/server/db/schema";
+import { syncIntentionsForOrg } from "@nomploy/server/setup/nomad-connect";
 import { getBuildComposeCommand } from "@nomploy/server/utils/builders/compose";
 import { getBuildNomadCommand } from "@nomploy/server/utils/builders/nomad";
 import { randomizeSpecificationFile } from "@nomploy/server/utils/docker/compose";
@@ -281,6 +282,13 @@ export const deployCompose = async ({
 		}
 
 		await updateDeploymentStatus(deployment.deploymentId, "done");
+		// Phase B: refresh Connect intentions so this project's mesh services
+		// (isolated) get their allow-rules; no-op for non-isolated orgs.
+		if (compose.environment.project.isolated) {
+			await syncIntentionsForOrg(
+				compose.environment.project.organizationId,
+			).catch(() => {});
+		}
 		await updateCompose(composeId, {
 			composeStatus: "done",
 		});
@@ -399,6 +407,13 @@ export const rebuildCompose = async ({
 		}
 
 		await updateDeploymentStatus(deployment.deploymentId, "done");
+		// Phase B: refresh Connect intentions so this project's mesh services
+		// (isolated) get their allow-rules; no-op for non-isolated orgs.
+		if (compose.environment.project.isolated) {
+			await syncIntentionsForOrg(
+				compose.environment.project.organizationId,
+			).catch(() => {});
+		}
 		await updateCompose(composeId, {
 			composeStatus: "done",
 		});

@@ -5,6 +5,7 @@ import { type ReactElement, useState } from "react";
 import { ShowConsul } from "@/components/dashboard/nomad/consul/show-consul";
 import { ShowNomadJobs } from "@/components/dashboard/nomad/jobs/show-nomad-jobs";
 import { ShowNomadLogs } from "@/components/dashboard/nomad/logs/show-nomad-logs";
+import { ShowNetworkPolicies } from "@/components/dashboard/nomad/network/show-network-policies";
 import { ShowNomadNodes } from "@/components/dashboard/nomad/nodes/show-nomad-nodes";
 import { NomadOverview } from "@/components/dashboard/nomad/overview";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
@@ -53,6 +54,7 @@ const NomadDashboard = () => {
 					<TabsTrigger value="jobs">Jobs</TabsTrigger>
 					<TabsTrigger value="nodes">Nodes</TabsTrigger>
 					<TabsTrigger value="consul">Consul</TabsTrigger>
+					<TabsTrigger value="network">Network</TabsTrigger>
 					<TabsTrigger value="logs">Logs</TabsTrigger>
 				</TabsList>
 				<TabsContent value="jobs">
@@ -63,6 +65,9 @@ const NomadDashboard = () => {
 				</TabsContent>
 				<TabsContent value="consul">
 					<ShowConsul serverId={serverId} />
+				</TabsContent>
+				<TabsContent value="network">
+					<ShowNetworkPolicies />
 				</TabsContent>
 				<TabsContent value="logs">
 					<ShowNomadLogs serverId={serverId} />
