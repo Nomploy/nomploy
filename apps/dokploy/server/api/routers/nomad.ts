@@ -196,6 +196,74 @@ const emitClusterError = (
 	emit.complete();
 };
 
+// Pre-flight before the heavy install: confirm the control plane can SSH in with
+// root/sudo. The most common join failure by far is the node not trusting the
+// panel's SSH key yet ("reachable, not added"). Catching it here — before an IP
+// is allocated or anything is installed — and printing the exact public key plus
+// a one-line authorize command turns a cryptic late failure into a copy-paste
+// fix. Returns true to proceed; on failure it emits guidance, ends the stream,
+// and returns false.
+type PreflightServer = {
+	serverId: string;
+	name: string;
+	ipAddress: string;
+	port: number;
+	sshKey?: { publicKey?: string | null } | null;
+};
+const preflightNode = async (
+	emit: ClusterEmit,
+	server: PreflightServer,
+): Promise<boolean> => {
+	emit.next(`Checking SSH access to "${server.name}" …\n`);
+	try {
+		let sudoMissing = false;
+		await execAsyncRemote(
+			server.serverId,
+			'if [ "$(id -u)" = "0" ] || sudo -n true 2>/dev/null; then echo NOMPLOY_SUDO_OK; else echo NOMPLOY_SUDO_MISSING; fi',
+			(log) => {
+				if (log.includes("NOMPLOY_SUDO_MISSING")) sudoMissing = true;
+			},
+		);
+		if (sudoMissing) {
+			emit.next(
+				'\n❌ Connected, but the login user lacks passwordless sudo.\nUse "root", or grant this user NOPASSWD sudo, then retry.\n',
+			);
+			emit.next(OP_ENDED);
+			emit.complete();
+			return false;
+		}
+		emit.next("SSH + sudo OK ✅\n");
+		return true;
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		// SSH auth failure → the node doesn't trust the panel key. Hand back the
+		// public key + the command to authorize it.
+		if (/auth|denied|publickey|not accepted|invalid.*key/i.test(message)) {
+			const pub = server.sshKey?.publicKey?.trim();
+			emit.next(
+				`\n❌ Could not authenticate to "${server.name}" over SSH (${message}).\n`,
+			);
+			if (pub) {
+				emit.next(
+					"\nThe node doesn't trust this panel's SSH key yet. Run this ON the node\n" +
+						"(as the login user), then click Join again:\n\n" +
+						`  mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n    echo '${pub}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys\n`,
+				);
+			} else {
+				emit.next(
+					"\nThis server has no SSH key set — add one in the server's settings first.\n",
+				);
+			}
+			emit.next(OP_ENDED);
+			emit.complete();
+			return false;
+		}
+		// Anything else (timeout, refused, unreachable) → firewall/reachability hint.
+		emitClusterError(emit, err, server);
+		return false;
+	}
+};
+
 export const nomadRouter = createTRPCRouter({
 	getJobs: withPermission("server", "read")
 		.input(serverInput)
@@ -484,6 +552,9 @@ export const nomadRouter = createTRPCRouter({
 						}
 						const overlayCidr = cluster.overlayCidr || "10.10.0.0/24";
 
+						// Fail fast with actionable guidance if we can't SSH in yet.
+						if (!(await preflightNode(emit, server))) return;
+
 						if (input.role === "server") {
 							const wgIp = allocateWgIp(cluster, "server");
 							emit.next(
@@ -771,6 +842,12 @@ export const nomadRouter = createTRPCRouter({
 				Status: string;
 			}[];
 		} catch {}
+		// Which server IP currently holds the Nomad raft leadership (host:port).
+		let leaderIp = "";
+		try {
+			const leader = (await nomadClient(cfg).get("/status/leader")) as string;
+			leaderIp = (leader || "").split(":")[0] ?? "";
+		} catch {}
 		const statusByIp = new Map(nodes.map((n) => [n.Address, n.Status]));
 		const row = (
 			name: string,
@@ -783,6 +860,7 @@ export const nomadRouter = createTRPCRouter({
 			wgIp,
 			serverId,
 			status: statusByIp.get(wgIp) ?? "unknown",
+			leader: role === "server" && wgIp === leaderIp,
 		});
 		return [
 			row("control-plane", "server", cluster.hubWgIp, null),
