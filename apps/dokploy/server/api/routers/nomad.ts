@@ -158,6 +158,12 @@ const consulGet = async (
 
 const serverInput = z.object({ serverId: z.string().optional() });
 
+// Terminal marker streamed on any non-success completion (graceful abort or
+// error). The client resets its busy state when it sees this; success paths use
+// their own JOIN_DONE / REMOVE_DONE / BOOTSTRAP_DONE sentinels. Without a
+// terminal signal the subscription just completes and the spinner never clears.
+const OP_ENDED = "OP_ENDED";
+
 // Shared error emitter for cluster join/remove: reachability failures (cloud
 // firewall, wrong IP) are by far the most common cause — make the fix actionable.
 type ClusterEmit = { next: (s: string) => void; complete: () => void };
@@ -186,6 +192,7 @@ const emitClusterError = (
 				"    private address — the control plane reaches it there with no public exposure.\n",
 		);
 	}
+	emit.next(OP_ENDED);
 	emit.complete();
 };
 
@@ -441,6 +448,7 @@ export const nomadRouter = createTRPCRouter({
 						const message =
 							err instanceof Error ? err.message : "Bootstrap failed";
 						emit.next(`\n❌ ${message}\n`);
+						emit.next(OP_ENDED);
 						emit.complete();
 					});
 			});
@@ -470,6 +478,7 @@ export const nomadRouter = createTRPCRouter({
 							emit.next(
 								"❌ Cluster not initialized on the control plane (missing /etc/nomploy/cluster.json).\n",
 							);
+							emit.next(OP_ENDED);
 							emit.complete();
 							return;
 						}
@@ -505,6 +514,7 @@ export const nomadRouter = createTRPCRouter({
 							});
 							if (!pubkey) {
 								emit.next("\n❌ Did not receive the server's WireGuard key\n");
+								emit.next(OP_ENDED);
 								emit.complete();
 								return;
 							}
@@ -568,6 +578,7 @@ export const nomadRouter = createTRPCRouter({
 						});
 						if (!pubkey) {
 							emit.next("\n❌ Did not receive the worker's WireGuard key\n");
+							emit.next(OP_ENDED);
 							emit.complete();
 							return;
 						}
@@ -617,6 +628,7 @@ export const nomadRouter = createTRPCRouter({
 						const cluster = readCluster();
 						if (!cluster) {
 							emit.next("❌ Cluster not initialized.\n");
+							emit.next(OP_ENDED);
 							emit.complete();
 							return;
 						}
@@ -629,6 +641,7 @@ export const nomadRouter = createTRPCRouter({
 						const node = worker || srv;
 						if (!node) {
 							emit.next("❌ This server is not a cluster member.\n");
+							emit.next(OP_ENDED);
 							emit.complete();
 							return;
 						}
@@ -637,6 +650,7 @@ export const nomadRouter = createTRPCRouter({
 							const remaining = allServers(cluster).length - 1;
 							if (remaining < 1) {
 								emit.next("❌ Refusing: this is the last Nomad server.\n");
+								emit.next(OP_ENDED);
 								emit.complete();
 								return;
 							}
@@ -644,6 +658,7 @@ export const nomadRouter = createTRPCRouter({
 								emit.next(
 									`⚠ Removing this server leaves ${remaining} server(s) — below the 3 needed for fault tolerance. Re-run with force to proceed.\n`,
 								);
+								emit.next(OP_ENDED);
 								emit.complete();
 								return;
 							}
@@ -691,9 +706,13 @@ export const nomadRouter = createTRPCRouter({
 						}
 
 						emit.next("Stopping services + WireGuard on the node …\n");
+						// Also wipe the Nomad/Consul data dirs. Otherwise the node keeps its
+						// old node ID + drain/eligibility state, so re-joining the same box
+						// (as worker or server) re-attaches to the stale, ineligible
+						// registration instead of coming back fresh.
 						await execAsyncRemote(
 							input.serverId,
-							'SUDO=""; [ "$EUID" -ne 0 ] && SUDO=sudo; $SUDO systemctl stop nomad consul 2>/dev/null || true; $SUDO wg-quick down wg0 2>/dev/null || true; $SUDO systemctl disable wg-quick@wg0 2>/dev/null || true',
+							'SUDO=""; [ "$EUID" -ne 0 ] && SUDO=sudo; $SUDO systemctl stop nomad consul 2>/dev/null || true; $SUDO wg-quick down wg0 2>/dev/null || true; $SUDO systemctl disable wg-quick@wg0 2>/dev/null || true; $SUDO rm -rf /opt/nomad/client /opt/nomad/server /opt/nomad/data /opt/consul/* 2>/dev/null || true',
 						).catch((e) =>
 							emit.next(
 								`⚠ node cleanup: ${e instanceof Error ? e.message : String(e)}\n`,
