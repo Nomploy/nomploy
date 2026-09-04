@@ -9,14 +9,6 @@ import {
 	findServerById,
 	updateServerById,
 } from "@nomploy/server/services/server";
-import {
-	getDefaultMiddlewares,
-	getDefaultServerTraefikConfig,
-	TRAEFIK_HTTP3_PORT,
-	TRAEFIK_PORT,
-	TRAEFIK_SSL_PORT,
-	TRAEFIK_VERSION,
-} from "@nomploy/server/setup/traefik-setup";
 import slug from "slugify";
 import { Client } from "ssh2";
 import { recreateDirectory } from "../utils/filesystem/directory";
@@ -194,43 +186,26 @@ ${
 echo -e "2. Validating ports. "
 ${validatePorts()}
 
-
-
 echo -e "3. Installing RClone. "
 ${installRClone()}
 
 echo -e "4. Installing Docker. "
 ${installDocker()}
 
-echo -e "5. Setting up Docker Swarm"
-${setupSwarm()}
-
-echo -e "6. Setting up Network"
-${setupNetwork()}
-
-echo -e "7. Setting up Directories"
+echo -e "5. Setting up Directories"
 ${setupMainDirectory()}
 ${setupDirectories()}
 
-echo -e "8. Setting up Traefik"
-${createTraefikConfig()}
-
-echo -e "9. Setting up Middlewares"
-${createDefaultMiddlewares()}
-
-echo -e "10. Setting up Traefik Instance"
-${createTraefikInstance()}
-
-echo -e "11. Installing Nixpacks"
+echo -e "6. Installing Nixpacks"
 ${installNixpacks()}
 
-echo -e "12. Installing Buildpacks"
+echo -e "7. Installing Buildpacks"
 ${installBuildpacks()}
 
-echo -e "13. Installing Railpack"
+echo -e "8. Installing Railpack"
 ${installRailpack()}
 
-echo -e "14. Configuring permissions"
+echo -e "9. Configuring permissions"
 ${setupPermissions()}
 `
 		: `
@@ -375,78 +350,6 @@ const setupMainDirectory = () => `
 	# Ensure the current user owns the directory
 	if [ -n "$SUDO_CMD" ]; then
 		$SUDO_CMD chown -R $CURRENT_USER:$CURRENT_USER /etc/nomploy
-	fi
-`;
-
-export const setupSwarm = () => `
-		# Check if the node is already part of a Docker Swarm
-		if $SUDO_CMD docker info | grep -q 'Swarm: active'; then
-			echo "Already part of a Docker Swarm ✅"
-		else
-			# Get IP address
-			get_ip() {
-				local ip=""
-
-				# Try IPv4 with multiple services
-				# First attempt: ifconfig.io
-				ip=\$(curl -4s --connect-timeout 5 https://ifconfig.io 2>/dev/null)
-
-				# Second attempt: icanhazip.com
-				if [ -z "\$ip" ]; then
-					ip=\$(curl -4s --connect-timeout 5 https://icanhazip.com 2>/dev/null)
-				fi
-
-				# Third attempt: ipecho.net
-				if [ -z "\$ip" ]; then
-					ip=\$(curl -4s --connect-timeout 5 https://ipecho.net/plain 2>/dev/null)
-				fi
-
-				# If no IPv4, try IPv6 with multiple services
-				if [ -z "\$ip" ]; then
-					# Try IPv6 with ifconfig.io
-					ip=\$(curl -6s --connect-timeout 5 https://ifconfig.io 2>/dev/null)
-
-					# Try IPv6 with icanhazip.com
-					if [ -z "\$ip" ]; then
-						ip=\$(curl -6s --connect-timeout 5 https://icanhazip.com 2>/dev/null)
-					fi
-
-					# Try IPv6 with ipecho.net
-					if [ -z "\$ip" ]; then
-						ip=\$(curl -6s --connect-timeout 5 https://ipecho.net/plain 2>/dev/null)
-					fi
-				fi
-
-				if [ -z "\$ip" ]; then
-					echo "Error: Could not determine server IP address automatically (neither IPv4 nor IPv6)." >&2
-					echo "Please set the ADVERTISE_ADDR environment variable manually." >&2
-					echo "Example: export ADVERTISE_ADDR=<your-server-ip>" >&2
-					exit 1
-				fi
-
-				echo "\$ip"
-			}
-			advertise_addr=\$(get_ip)
-			echo "Advertise address: \$advertise_addr"
-
-			# Initialize Docker Swarm
-			$SUDO_CMD docker swarm init --advertise-addr \$advertise_addr
-			echo "Swarm initialized ✅"
-		fi
-	`;
-
-const setupNetwork = () => `
-	# Check if the nomploy-network already exists
-	if $SUDO_CMD docker network ls | grep -q 'nomploy-network'; then
-		echo "Network nomploy-network already exists ✅"
-	else
-		# Create the nomploy-network if it doesn't exist
-		if $SUDO_CMD docker network create --driver overlay --attachable nomploy-network; then
-			echo "Network created ✅"
-		else
-			echo "Failed to create nomploy-network ❌" >&2
-			exit 1
-		fi
 	fi
 `;
 
@@ -634,35 +537,6 @@ else
 fi
 `;
 
-const createTraefikConfig = () => {
-	const config = getDefaultServerTraefikConfig();
-
-	const command = `
-	if [ -f "/etc/nomploy/traefik/dynamic/acme.json" ]; then
-		chmod 600 "/etc/nomploy/traefik/dynamic/acme.json"
-	fi
-	if [ -f "/etc/nomploy/traefik/traefik.yml" ]; then
-		echo "Traefik config already exists ✅"
-	else
-		echo "${config}" > /etc/nomploy/traefik/traefik.yml
-	fi
-	`;
-
-	return command;
-};
-
-const createDefaultMiddlewares = () => {
-	const config = getDefaultMiddlewares();
-	const command = `
-	if [ -f "/etc/nomploy/traefik/dynamic/middlewares.yml" ]; then
-		echo "Middlewares config already exists ✅"
-	else
-		echo "${config}" > /etc/nomploy/traefik/dynamic/middlewares.yml
-	fi
-	`;
-	return command;
-};
-
 export const installRClone = () => `
     if command_exists rclone; then
 		echo "RClone already installed ✅"
@@ -672,40 +546,6 @@ export const installRClone = () => `
 		echo "RClone version $RCLONE_VERSION installed ✅"
 	fi
 `;
-
-export const createTraefikInstance = () => {
-	const command = `
-	    # Check if dokpyloy-traefik exists
-		if $SUDO_CMD docker service inspect nomploy-traefik > /dev/null 2>&1; then
-			echo "Migrating Traefik to Standalone..."
-			$SUDO_CMD docker service rm nomploy-traefik
-			sleep 8
-			echo "Traefik migrated to Standalone ✅"
-		fi
-
-		if $SUDO_CMD docker inspect nomploy-traefik > /dev/null 2>&1; then
-			echo "Traefik already exists ✅"
-		else
-			# Create the nomploy-traefik container
-			TRAEFIK_VERSION=${TRAEFIK_VERSION}
-			$SUDO_CMD docker run -d \
-				--name nomploy-traefik \
-				--restart always \
-				-v /etc/nomploy/traefik/traefik.yml:/etc/traefik/traefik.yml \
-				-v /etc/nomploy/traefik/dynamic:/etc/nomploy/traefik/dynamic \
-				-v /var/run/docker.sock:/var/run/docker.sock \
-				-p ${TRAEFIK_SSL_PORT}:${TRAEFIK_SSL_PORT} \
-				-p ${TRAEFIK_PORT}:${TRAEFIK_PORT} \
-				-p ${TRAEFIK_HTTP3_PORT}:${TRAEFIK_HTTP3_PORT}/udp \
-				traefik:v$TRAEFIK_VERSION
-
-			$SUDO_CMD docker network connect nomploy-network nomploy-traefik;
-			echo "Traefik version $TRAEFIK_VERSION installed ✅"
-		fi
-	`;
-
-	return command;
-};
 
 const installNixpacks = () => `
 	if command_exists nixpacks; then
