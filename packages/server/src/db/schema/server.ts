@@ -101,6 +101,12 @@ export const server = pgTable("server", {
 	nomadToken: text("nomadToken"),
 	nomadNamespace: text("nomadNamespace").default("default"),
 	registryUrl: text("registryUrl"),
+	// Cluster membership (set when the server joins the Nomad/WireGuard cluster).
+	// cluster.json remains the source of truth for WireGuard; these mirror it for
+	// convenient querying. "server" = Nomad/Consul server (raft), "worker" = client.
+	clusterRole: text("clusterRole"),
+	wgIp: text("wgIp"),
+	wgPublicKey: text("wgPublicKey"),
 });
 
 export const serverRelations = relations(server, ({ one, many }) => ({
@@ -182,6 +188,9 @@ export const apiUpdateServer = createSchema
 		nomadToken: z.string().nullish(),
 		nomadNamespace: z.string().nullish(),
 		registryUrl: z.string().nullish(),
+		clusterRole: z.string().nullish(),
+		wgIp: z.string().nullish(),
+		wgPublicKey: z.string().nullish(),
 	});
 
 export const apiUpdateServerMonitoring = createSchema

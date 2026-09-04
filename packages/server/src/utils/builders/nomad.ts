@@ -46,6 +46,9 @@ export interface NomadServiceSpec {
 // The control plane's WireGuard IP, where dnsmasq forwards *.service.consul to
 // Consul (and everything else upstream). Every allocation points its DNS here so
 // services and databases resolve each other by name across the cluster.
+// TODO(phase-b): with HA servers this is a DNS SPOF — if the hub dies, name
+// resolution stops even though the raft still schedules. Make dns.servers list
+// all server overlay IPs (readCluster().servers) so allocs fail over.
 const CLUSTER_DNS_IP = "10.10.0.1";
 
 // ─── Main Entry Point ────────────────────────────────────────────────────────

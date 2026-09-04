@@ -1,3 +1,4 @@
+import { getNomadJobContainers } from "@nomploy/server/utils/nomad/resolve";
 import {
 	execAsync,
 	execAsyncRemote,
@@ -106,6 +107,12 @@ export const getContainersByAppNameMatch = async (
 	appType?: "stack" | "docker-compose" | "nomad",
 	serverId?: string,
 ) => {
+	// Services run on Nomad: resolve the app's containers via its allocations
+	// (Swarm-era name matching never matches Nomad's <group>-<allocId> names).
+	// Falls through to the legacy lookup when the app isn't a Nomad job.
+	const nomadContainers = await getNomadJobContainers(appName, serverId);
+	if (nomadContainers.length > 0) return nomadContainers;
+
 	try {
 		let result: string[] = [];
 		const cmd =
@@ -235,6 +242,11 @@ export const getServiceContainersByAppName = async (
 	appName: string,
 	serverId?: string,
 ) => {
+	// Services run on Nomad now; resolve via the job's allocations. Falls through
+	// to the legacy `docker service ps` only if the app isn't a Nomad job.
+	const nomadContainers = await getNomadJobContainers(appName, serverId);
+	if (nomadContainers.length > 0) return nomadContainers;
+
 	try {
 		let result: string[] = [];
 

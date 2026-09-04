@@ -121,6 +121,8 @@ export const generateDatabaseNomadJob = (db: NomadDatabaseInput): string => {
 
     network {
       dns {
+        # TODO(phase-b): multi-server DNS — list all server overlay IPs so DB
+        # allocs still resolve *.service.consul if the hub goes down.
         servers  = ["10.10.0.1"]
         searches = ["service.consul"]
       }

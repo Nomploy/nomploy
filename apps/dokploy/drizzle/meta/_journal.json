@@ -1198,6 +1198,13 @@
       "when": 1780200000000,
       "tag": "0170_add_nomad_support",
       "breakpoints": true
+    },
+    {
+      "idx": 171,
+      "version": "7",
+      "when": 1788515172894,
+      "tag": "0171_add_cluster_membership",
+      "breakpoints": true
     }
   ]
 }
