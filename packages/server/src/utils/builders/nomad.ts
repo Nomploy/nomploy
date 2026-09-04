@@ -206,7 +206,11 @@ const generateTaskGroup = (
 		.join("\n");
 	// Connect (segmentation) requires bridge networking so the Envoy sidecar +
 	// transparent-proxy iptables can live in the alloc's own netns. Flat mode
-	// stays host-networked (default) as before.
+	// stays host-networked (default) as before. Mesh groups keep the Consul DNS
+	// block (so the app resolves *.service.consul + *.virtual.consul) and set
+	// transparent_proxy.no_dns=true — Docker's embedded resolver otherwise short-
+	// circuits the proxy's own DNS redirect, and Nomad forbids network.dns with
+	// transparent proxy unless no_dns is set.
 	const networkModeLine = segmentation ? '\n      mode = "bridge"' : "";
 	const networkBlock = `    network {${networkModeLine}
       dns {
@@ -352,7 +356,9 @@ const generateConsulServices = (
 			? `\n      connect {
         sidecar_service {
           proxy {
-            transparent_proxy {}
+            transparent_proxy {
+              no_dns = true
+            }
           }
         }
       }`
