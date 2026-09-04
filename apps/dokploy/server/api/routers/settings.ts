@@ -167,44 +167,32 @@ export const settingsRouter = createTRPCRouter({
 	toggleDashboard: adminProcedure
 		.input(apiEnableDashboard)
 		.mutation(async ({ input, ctx }) => {
-			const ports = await readPorts("nomploy-traefik", input.serverId);
-			const env = await readEnvironmentVariables(
-				"nomploy-traefik",
-				input.serverId,
-			);
-			const preparedEnv = prepareEnvironmentVariables(env);
-			let newPorts = ports;
-			// If receive true, add 8080 to ports
-			if (input.enableDashboard) {
-				// Check if port 8080 is already in use before enabling dashboard
-				const portCheck = await checkPortInUse(8080, input.serverId);
-				if (portCheck.isInUse) {
-					const conflictInfo = portCheck.conflictingContainer
-						? ` by ${portCheck.conflictingContainer}`
-						: "";
-					throw new TRPCError({
-						code: "CONFLICT",
-						message: `Port 8080 is already in use${conflictInfo}. Please stop the conflicting service or use a different port for the Traefik dashboard.`,
-					});
-				}
-				newPorts.push({
-					targetPort: 8080,
-					publishedPort: 8080,
-					protocol: "tcp",
+			// Traefik runs host-networked on Nomad, so the dashboard isn't a docker
+			// port publish — it's Traefik's `api.insecure` on :8080. Toggle it in
+			// traefik.yml and reload, instead of adding/removing a port binding.
+			const config = readMainConfig();
+			if (!config) {
+				throw new TRPCError({
+					code: "NOT_FOUND",
+					message: "Traefik main config not found",
 				});
-			} else {
-				newPorts = ports.filter((port) => port.targetPort !== 8080);
 			}
+			const parsed = (parse(config) ?? {}) as {
+				api?: { insecure?: boolean; dashboard?: boolean };
+			};
+			parsed.api = {
+				...parsed.api,
+				insecure: input.enableDashboard,
+				dashboard: input.enableDashboard,
+			};
+			writeMainConfig(stringify(parsed));
 
-			// Run in background so the request returns immediately; client polls /api/health.
-			// Avoids proxy timeouts (520) while Traefik is recreated.
-			void writeTraefikSetup({
-				env: preparedEnv,
-				additionalPorts: newPorts,
-				serverId: input.serverId,
-			}).catch((err) => {
-				console.error("toggleDashboard background writeTraefikSetup:", err);
-			});
+			// Reload (restart) Traefik so it picks up the config; returns quickly.
+			void reloadDockerResource("nomploy-traefik", input.serverId).catch(
+				(err) => {
+					console.error("toggleDashboard reload:", err);
+				},
+			);
 			await audit(ctx, {
 				action: "update",
 				resourceType: "settings",
@@ -777,9 +765,13 @@ export const settingsRouter = createTRPCRouter({
 		}),
 	haveTraefikDashboardPortEnabled: adminProcedure
 		.input(apiServerSchema)
-		.query(async ({ input }) => {
-			const ports = await readPorts("nomploy-traefik", input?.serverId);
-			return ports.some((port) => port.targetPort === 8080);
+		.query(async () => {
+			// The dashboard is Traefik's `api.insecure` on :8080 (host networking),
+			// read from traefik.yml — not a docker port publish.
+			const config = readMainConfig();
+			if (!config) return false;
+			const parsed = (parse(config) ?? {}) as { api?: { insecure?: boolean } };
+			return parsed?.api?.insecure === true;
 		}),
 
 	readStatsLogs: protectedProcedure
