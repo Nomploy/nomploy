@@ -105,6 +105,17 @@ if [ ! -f /opt/cni/bin/bridge ]; then
   curl -fsSL "https://github.com/containernetworking/plugins/releases/download/${cniVersion}/cni-plugins-linux-\${CNI_ARCH}-${cniVersion}.tgz" | $SUDO tar -C /opt/cni/bin -xz
 fi
 
+# consul-cni: needed by Consul Connect transparent proxy (Phase B segmentation).
+if [ ! -f /opt/cni/bin/consul-cni ]; then
+  CONSUL_CNI_VERSION="\${CONSUL_CNI_VERSION:-1.6.3}"
+  $SUDO mkdir -p /opt/cni/bin
+  command -v unzip >/dev/null 2>&1 || $SUDO apt-get install -y unzip >/dev/null 2>&1 || true
+  tmpz="$(mktemp)"
+  curl -fsSL "https://releases.hashicorp.com/consul-cni/\${CONSUL_CNI_VERSION}/consul-cni_\${CONSUL_CNI_VERSION}_linux_\${CNI_ARCH}.zip" -o "$tmpz" \
+    && $SUDO unzip -o "$tmpz" -d /opt/cni/bin >/dev/null 2>&1
+  rm -f "$tmpz"
+fi
+
 # Docker auth config (docker driver needs this file to exist, even for public pulls)
 $SUDO mkdir -p /root/.docker
 [ -s /root/.docker/config.json ] || echo '{"auths":{}}' | $SUDO tee /root/.docker/config.json >/dev/null
@@ -171,6 +182,10 @@ datacenter  = "${datacenter}"
 server  = false
 encrypt = "${opts.gossipKey}"
 retry_join = [${consulRetryJoin}]
+# Connect mesh (Phase B): Envoy sidecars on this node reach the local agent's
+# xDS over gRPC (8502, bound to 127.0.0.1 via client_addr).
+connect { enabled = true }
+ports { grpc = 8502 }
 CONSUL
 
 # ── Nomad client ───────────────────────────────────────────────────────────
@@ -253,6 +268,9 @@ server           = true
 bootstrap_expect = ${opts.bootstrapExpect}
 encrypt = "${opts.gossipKey}"
 retry_join = [${consulRetryJoin}]
+# Connect mesh (Phase B): enable service mesh + Envoy xDS gRPC on this server.
+connect { enabled = true }
+ports { grpc = 8502 }
 CONSUL
 
 # ── Nomad server + client ──────────────────────────────────────────────────
