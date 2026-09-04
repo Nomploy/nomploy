@@ -58,6 +58,29 @@ Nomad** button in that server's Nomad settings inside the dashboard.
 | Deploy artifact | Swarm stack / compose | Nomad HCL job (from compose) |
 | Enterprise modules (SSO, audit, custom roles, white-label) | Source-available add-on | Removed; free-tier equivalents |
 
+### Swarm → Nomad migration status
+
+The Docker Swarm backend has been removed from every runtime path:
+
+- **Deploys, reloads, stop/start, scaling and rollbacks** for applications,
+  databases and compose services run as Nomad jobs (`nomad job run` / `scale` /
+  `stop -purge`).
+- **Logs, exec/terminal, volume & database backups, restores, scheduled tasks
+  and container monitoring** resolve a service's container through its Nomad
+  allocation (the `com.hashicorp.nomad.alloc_id` label), not Swarm services.
+- **The panel updates itself** — the UI's *Reload/Update* re-submits nomploy's
+  own Nomad job (the Nomad equivalent of Swarm's `docker service update
+  --image`), and *update available* is detected from the GHCR image digest.
+- **Traefik** routes via the Consul Catalog provider on host networking, and the
+  dashboard is toggled through `api.insecure` in `traefik.yml`.
+- **Adding a server** provisions a Nomad worker over the WireGuard mesh, not a
+  Swarm node; server setup/validation no longer touch `docker swarm` or the
+  overlay network.
+
+A few Swarm-era leftovers remain but are inert or unreachable (GPU node
+labelling, unused `*Swarm` DB columns, the retired `stack` compose type); they
+affect no live path and are being cleaned up.
+
 ## 🤝 Contributing
 
 See the [Contributing Guide](CONTRIBUTING.md).
