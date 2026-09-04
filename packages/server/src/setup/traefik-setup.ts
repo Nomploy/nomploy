@@ -58,6 +58,10 @@ export const initializeStandaloneTraefik = async ({
 			},
 			Binds: [
 				`${MAIN_TRAEFIK_PATH}/traefik.yml:/etc/traefik/traefik.yml`,
+				// Let's Encrypt cert store — must match certificatesResolvers.storage
+				// in traefik.yml (/etc/traefik/acme.json, as install.sh writes it), or
+				// a recreate loses the existing certs and re-issues.
+				`${MAIN_TRAEFIK_PATH}/acme.json:/etc/traefik/acme.json`,
 				`${DYNAMIC_TRAEFIK_PATH}:/etc/nomploy/traefik/dynamic`,
 				"/var/run/docker.sock:/var/run/docker.sock",
 			],
@@ -182,7 +186,7 @@ export const getDefaultTraefikConfig = () => {
 				letsencrypt: {
 					acme: {
 						email: "test@localhost.com",
-						storage: "/etc/nomploy/traefik/dynamic/acme.json",
+						storage: "/etc/traefik/acme.json",
 						httpChallenge: {
 							entryPoint: "web",
 						},
@@ -234,7 +238,7 @@ export const getDefaultServerTraefikConfig = () => {
 			letsencrypt: {
 				acme: {
 					email: "test@localhost.com",
-					storage: "/etc/nomploy/traefik/dynamic/acme.json",
+					storage: "/etc/traefik/acme.json",
 					httpChallenge: {
 						entryPoint: "web",
 					},
@@ -249,9 +253,9 @@ export const getDefaultServerTraefikConfig = () => {
 };
 
 export const createDefaultTraefikConfig = () => {
-	const { MAIN_TRAEFIK_PATH, DYNAMIC_TRAEFIK_PATH } = paths();
+	const { MAIN_TRAEFIK_PATH } = paths();
 	const mainConfig = path.join(MAIN_TRAEFIK_PATH, "traefik.yml");
-	const acmeJsonPath = path.join(DYNAMIC_TRAEFIK_PATH, "acme.json");
+	const acmeJsonPath = path.join(MAIN_TRAEFIK_PATH, "acme.json");
 
 	if (existsSync(acmeJsonPath)) {
 		chmodSync(acmeJsonPath, "600");
