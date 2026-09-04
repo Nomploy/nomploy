@@ -171,14 +171,12 @@ export const getDefaultTraefikConfig = () => {
 						},
 					}
 				: {
-						swarm: {
+						// Nomad: services register in Consul; Traefik routes via the
+						// Consul Catalog provider (not Swarm/Docker). Matches install.sh.
+						consulCatalog: {
+							endpoint: { address: "http://127.0.0.1:8500" },
 							exposedByDefault: false,
-							watch: true,
-						},
-						docker: {
-							exposedByDefault: false,
-							watch: true,
-							network: "nomploy-network",
+							prefix: "traefik",
 						},
 					}),
 			file: {
@@ -230,14 +228,11 @@ export const getDefaultTraefikConfig = () => {
 export const getDefaultServerTraefikConfig = () => {
 	const configObject: MainTraefikConfig = {
 		providers: {
-			swarm: {
+			// Nomad: route via the Consul Catalog provider, not Swarm/Docker.
+			consulCatalog: {
+				endpoint: { address: "http://127.0.0.1:8500" },
 				exposedByDefault: false,
-				watch: true,
-			},
-			docker: {
-				exposedByDefault: false,
-				watch: true,
-				network: "nomploy-network",
+				prefix: "traefik",
 			},
 			file: {
 				directory: "/etc/nomploy/traefik/dynamic",
