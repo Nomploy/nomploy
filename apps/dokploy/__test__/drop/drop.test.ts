@@ -86,6 +86,7 @@ const baseApp: ApplicationNested = {
 			description: "",
 			createdAt: "",
 			projectId: "",
+			isolated: false,
 		},
 	},
 	buildArgs: null,

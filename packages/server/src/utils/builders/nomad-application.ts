@@ -104,6 +104,10 @@ export const generateApplicationNomadJob = (
 		application.appName,
 		[applicationToNomadSpec(application, domains, imageOverride)],
 		domains,
+		// Isolated projects join the Connect mesh (Phase B segmentation).
+		application.environment?.project?.isolated
+			? { projectId: application.environment.projectId }
+			: undefined,
 	);
 
 /**

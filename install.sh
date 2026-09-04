@@ -14,6 +14,7 @@ set -e
 NOMPLOY_IMAGE="${NOMPLOY_IMAGE:-ghcr.io/nomploy/nomploy:latest}"
 NOMPLOY_PORT="${NOMPLOY_PORT:-3000}"
 CNI_VERSION="${CNI_VERSION:-v1.5.1}"
+CONSUL_CNI_VERSION="${CONSUL_CNI_VERSION:-1.6.3}"
 
 # ── privilege + platform detection ─────────────────────────────────────────
 if [ "$(id -u)" -eq 0 ]; then
@@ -87,6 +88,19 @@ if [ ! -f /opt/cni/bin/bridge ]; then
   curl -fsSL "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-${CNI_ARCH}-${CNI_VERSION}.tgz" \
     | $SUDO tar -C /opt/cni/bin -xz
 fi
+# consul-cni: required by Consul Connect transparent proxy (Phase B). It writes
+# the iptables redirect inside each mesh alloc so the app keeps using normal
+# service names while the Envoy sidecar transparently enforces intentions.
+if [ ! -f /opt/cni/bin/consul-cni ]; then
+  echo "==> Installing consul-cni"
+  $SUDO mkdir -p /opt/cni/bin
+  tmpz="$(mktemp)"
+  if curl -fsSL "https://releases.hashicorp.com/consul-cni/${CONSUL_CNI_VERSION}/consul-cni_${CONSUL_CNI_VERSION}_linux_${CNI_ARCH}.zip" -o "$tmpz"; then
+    $SUDO unzip -o "$tmpz" -d /opt/cni/bin >/dev/null 2>&1 || \
+      { command -v unzip >/dev/null 2>&1 || { $SUDO apt-get install -y unzip >/dev/null 2>&1 || true; }; $SUDO unzip -o "$tmpz" -d /opt/cni/bin >/dev/null 2>&1; }
+  fi
+  rm -f "$tmpz"
+fi
 echo 1 | $SUDO tee /proc/sys/net/bridge/bridge-nf-call-iptables >/dev/null 2>&1 || true
 
 # ── Consul + Nomad config (single node: server + client) ─────────────────────
@@ -139,6 +153,11 @@ server           = true
 bootstrap_expect = 1
 encrypt = "$GOSSIP"
 ui_config { enabled = true }
+# Consul Connect service mesh (Phase B segmentation): lets isolated projects run
+# their services behind an Envoy sidecar and enforces "who can talk to what" via
+# intentions. gRPC (8502) is Envoy's xDS channel to the local agent.
+connect { enabled = true }
+ports { grpc = 8502 }
 CONSULHCL
 
 $SUDO tee /etc/nomad.d/nomad.hcl >/dev/null <<NOMADHCL

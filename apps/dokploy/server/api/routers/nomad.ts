@@ -1,9 +1,15 @@
 import { findServerById, updateServerById } from "@nomploy/server";
+import { db } from "@nomploy/server/db";
+import { networkPolicies, projects } from "@nomploy/server/db/schema";
 import { getNomadBootstrapCommand } from "@nomploy/server/setup/nomad-bootstrap";
 import {
 	getClusterServerJoinCommand,
 	getClusterWorkerJoinCommand,
 } from "@nomploy/server/setup/nomad-cluster";
+import {
+	meshServicesFromCatalog,
+	syncIntentionsForOrg,
+} from "@nomploy/server/setup/nomad-connect";
 import {
 	addPeerEverywhere,
 	allMeshMembers,
@@ -20,8 +26,9 @@ import {
 } from "@nomploy/server/utils/process/execAsync";
 import { TRPCError } from "@trpc/server";
 import { observable } from "@trpc/server/observable";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { createTRPCRouter, withPermission } from "../trpc";
+import { createTRPCRouter, protectedProcedure, withPermission } from "../trpc";
 
 // Control-plane-local Nomad (used when no serverId is given).
 const DEFAULT_ADDRESS = process.env.NOMAD_ADDRESS || "http://127.0.0.1:4646";
@@ -154,6 +161,11 @@ const consulGet = async (
 		});
 	}
 	return res.json();
+};
+
+const DEFAULT_CONSUL = {
+	address: DEFAULT_CONSUL_ADDRESS,
+	token: DEFAULT_CONSUL_TOKEN,
 };
 
 const serverInput = z.object({ serverId: z.string().optional() });
@@ -921,5 +933,134 @@ export const nomadRouter = createTRPCRouter({
 			),
 			...cluster.peers.map((p) => row(p.name, "worker", p.wgIp, p.serverId)),
 		];
+	}),
+
+	// ── Phase B: network segmentation (Consul Connect) ──────────────────────
+	// Toggle a project's mesh isolation, then reconcile intentions. Services
+	// pick up the sidecar/mesh on their next deploy.
+	setProjectIsolation: protectedProcedure
+		.input(z.object({ projectId: z.string(), isolated: z.boolean() }))
+		.mutation(async ({ input, ctx }) => {
+			const org = ctx.session?.activeOrganizationId;
+			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+			const project = await db.query.projects.findFirst({
+				where: and(
+					eq(projects.projectId, input.projectId),
+					eq(projects.organizationId, org),
+				),
+				columns: { projectId: true },
+			});
+			if (!project) throw new TRPCError({ code: "NOT_FOUND" });
+			await db
+				.update(projects)
+				.set({ isolated: input.isolated })
+				.where(eq(projects.projectId, input.projectId));
+			await syncIntentionsForOrg(org).catch(() => ({ applied: 0, pruned: 0 }));
+			return { success: true };
+		}),
+
+	getNetworkPolicies: protectedProcedure.query(async ({ ctx }) => {
+		const org = ctx.session?.activeOrganizationId;
+		if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+		return db.query.networkPolicies.findMany({
+			where: eq(networkPolicies.organizationId, org),
+			with: {
+				sourceProject: { columns: { projectId: true, name: true } },
+				targetProject: { columns: { projectId: true, name: true } },
+			},
+		});
+	}),
+
+	createNetworkPolicy: protectedProcedure
+		.input(
+			z.object({ sourceProjectId: z.string(), targetProjectId: z.string() }),
+		)
+		.mutation(async ({ input, ctx }) => {
+			const org = ctx.session?.activeOrganizationId;
+			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+			if (input.sourceProjectId === input.targetProjectId) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "A project can always reach itself.",
+				});
+			}
+			// Both projects must belong to the caller's org.
+			const owned = await db.query.projects.findMany({
+				where: eq(projects.organizationId, org),
+				columns: { projectId: true },
+			});
+			const ids = new Set(owned.map((p) => p.projectId));
+			if (!ids.has(input.sourceProjectId) || !ids.has(input.targetProjectId)) {
+				throw new TRPCError({ code: "NOT_FOUND" });
+			}
+			await db
+				.insert(networkPolicies)
+				.values({
+					organizationId: org,
+					sourceProjectId: input.sourceProjectId,
+					targetProjectId: input.targetProjectId,
+				})
+				.onConflictDoNothing();
+			await syncIntentionsForOrg(org).catch(() => ({ applied: 0, pruned: 0 }));
+			return { success: true };
+		}),
+
+	removeNetworkPolicy: protectedProcedure
+		.input(z.object({ networkPolicyId: z.string() }))
+		.mutation(async ({ input, ctx }) => {
+			const org = ctx.session?.activeOrganizationId;
+			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+			await db
+				.delete(networkPolicies)
+				.where(
+					and(
+						eq(networkPolicies.networkPolicyId, input.networkPolicyId),
+						eq(networkPolicies.organizationId, org),
+					),
+				);
+			await syncIntentionsForOrg(org).catch(() => ({ applied: 0, pruned: 0 }));
+			return { success: true };
+		}),
+
+	// Force a reconcile (e.g. after deploys) — returns how many entries changed.
+	applyNetworkPolicies: protectedProcedure.mutation(async ({ ctx }) => {
+		const org = ctx.session?.activeOrganizationId;
+		if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+		return syncIntentionsForOrg(org);
+	}),
+
+	// Everything the Network Policies UI needs: projects (+ isolation), the mesh
+	// services live in the cluster grouped by project, and the allow-rules.
+	getNetworkTopology: protectedProcedure.query(async ({ ctx }) => {
+		const org = ctx.session?.activeOrganizationId;
+		if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+		const orgProjects = await db.query.projects.findMany({
+			where: eq(projects.organizationId, org),
+			columns: { projectId: true, name: true, isolated: true },
+		});
+		const policies = await db.query.networkPolicies.findMany({
+			where: eq(networkPolicies.organizationId, org),
+			columns: {
+				networkPolicyId: true,
+				sourceProjectId: true,
+				targetProjectId: true,
+			},
+		});
+		let meshByProject: Record<string, string[]> = {};
+		try {
+			const catalog = (await consulGet(
+				DEFAULT_CONSUL,
+				"/catalog/services",
+			)) as Record<string, string[]>;
+			for (const s of meshServicesFromCatalog(catalog)) {
+				meshByProject[s.projectId] = [
+					...(meshByProject[s.projectId] ?? []),
+					s.name,
+				];
+			}
+		} catch {
+			meshByProject = {};
+		}
+		return { projects: orgProjects, policies, meshByProject };
 	}),
 });

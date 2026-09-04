@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { pgTable, text } from "drizzle-orm/pg-core";
+import { boolean, pgTable, text } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -22,6 +22,11 @@ export const projects = pgTable("project", {
 		.notNull()
 		.references(() => organization.id, { onDelete: "cascade" }),
 	env: text("env").notNull().default(""),
+	// Phase B network segmentation: when true, this project's Nomad allocations
+	// are pinned to nodes dedicated to it (meta.nomploy_project=<projectId>) and an
+	// nftables policy on the overlay denies traffic from other projects unless a
+	// network_policy allow-rule exists. Off = shared pool (flat networking).
+	isolated: boolean("isolated").notNull().default(false),
 });
 
 export const projectRelations = relations(projects, ({ many, one }) => ({

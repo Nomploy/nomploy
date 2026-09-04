@@ -71,8 +71,16 @@ export const getBuildNomadCommand = async (
 	// Parse compose file into Nomad services
 	const services = parseComposeToNomadServices(composeFile, envVars);
 
-	// Generate Nomad HCL job spec
-	const jobSpec = generateNomadJobSpec(appName, services, domains);
+	// Generate Nomad HCL job spec. Isolated projects join the Connect mesh.
+	const segmentation = compose.environment?.project?.isolated
+		? { projectId: compose.environment.projectId }
+		: undefined;
+	const jobSpec = generateNomadJobSpec(
+		appName,
+		services,
+		domains,
+		segmentation,
+	);
 	const encodedJobSpec = encodeBase64(jobSpec);
 
 	return `
@@ -123,13 +131,32 @@ export const resolveNomadEnvVars = (
 /**
  * Generate a complete Nomad job HCL file
  */
+/**
+ * Phase B segmentation. When present, the job's services join the Consul Connect
+ * mesh: each group runs in bridge mode, the primary service gets an Envoy sidecar
+ * with transparent proxy, and every mesh service is tagged with
+ * meta.nomploy_project so the intentions engine can group it by project and
+ * enforce "who can talk to what". Absent = today's flat, host-networked behavior.
+ */
+export interface NomadSegmentation {
+	projectId: string;
+}
+
+// Consul tag that marks a mesh service's project. The intentions engine groups
+// services by this tag (catalog listings return tags, not meta) to enforce
+// project-level segmentation. Value: `${NOMPLOY_PROJECT_TAG}<projectId>`.
+export const NOMPLOY_PROJECT_TAG = "nomploy-project=";
+
 export const generateNomadJobSpec = (
 	appName: string,
 	services: NomadServiceSpec[],
 	domains: Domain[],
+	segmentation?: NomadSegmentation,
 ): string => {
 	const taskGroups = services
-		.map((service) => generateTaskGroup(appName, service, domains))
+		.map((service) =>
+			generateTaskGroup(appName, service, domains, segmentation),
+		)
 		.join("\n\n");
 
 	return `job "${appName}" {
@@ -153,9 +180,15 @@ const generateTaskGroup = (
 	appName: string,
 	service: NomadServiceSpec,
 	domains: Domain[],
+	segmentation?: NomadSegmentation,
 ): string => {
 	const envBlock = generateEnvBlock(service.env);
-	const consulServices = generateConsulServices(appName, service, domains);
+	const consulServices = generateConsulServices(
+		appName,
+		service,
+		domains,
+		segmentation,
+	);
 	const resourcesBlock = generateResourcesBlock(service.resources);
 	const scalingBlock = generateScalingBlock(service.scaling);
 	const entrypointLine = service.entrypoint
@@ -171,7 +204,11 @@ const generateTaskGroup = (
 	const portLines = service.ports
 		.map((p) => `      port "${p.label}" {\n        to = ${p.to}\n      }`)
 		.join("\n");
-	const networkBlock = `    network {
+	// Connect (segmentation) requires bridge networking so the Envoy sidecar +
+	// transparent-proxy iptables can live in the alloc's own netns. Flat mode
+	// stays host-networked (default) as before.
+	const networkModeLine = segmentation ? '\n      mode = "bridge"' : "";
+	const networkBlock = `    network {${networkModeLine}
       dns {
         servers  = ["${CLUSTER_DNS_IP}"]
         searches = ["service.consul"]
@@ -300,21 +337,42 @@ const generateConsulServices = (
 	appName: string,
 	service: NomadServiceSpec,
 	domains: Domain[],
+	segmentation?: NomadSegmentation,
 ): string => {
 	if (service.ports.length === 0) return "";
 
 	const blocks = service.ports.map((port) => {
 		const serviceName = `${appName}-${service.name}-${port.to}`;
+		const isPrimary = port === service.ports[0];
+		const inMesh = !!segmentation && isPrimary;
+		// Mesh membership goes on the primary port only: transparent proxy protects
+		// the whole alloc, and one sidecar per group keeps intentions keyed to a
+		// single service identity.
+		const connectBlock = inMesh
+			? `\n      connect {
+        sidecar_service {
+          proxy {
+            transparent_proxy {}
+          }
+        }
+      }`
+			: "";
 		const portDomains = domains.filter(
 			(d) =>
 				d.serviceName === service.name &&
 				(d.port === port.to || (!d.port && port === service.ports[0])),
 		);
 
-		const tags = generateConsulTags(appName, service.name, port, portDomains);
+		const tags = generateConsulTags(appName, service.name, portDomains);
+		// Tag the mesh service with its project so the intentions engine can group
+		// services by project from a single Consul catalog listing (catalog returns
+		// tags, not meta). Harmless to Traefik, which ignores non-traefik tags.
+		const allTags = inMesh
+			? [...tags, `${NOMPLOY_PROJECT_TAG}${segmentation.projectId}`]
+			: tags;
 		const tagsStr =
-			tags.length > 0
-				? `\n      tags = [\n${tags.map((t) => `        ${JSON.stringify(t)},`).join("\n")}\n      ]`
+			allTags.length > 0
+				? `\n      tags = [\n${allTags.map((t) => `        ${JSON.stringify(t)},`).join("\n")}\n      ]`
 				: "";
 
 		const checkBlock =
@@ -334,7 +392,7 @@ const generateConsulServices = (
 		return `    service {
       name     = "${serviceName}"
       port     = "${port.label}"
-      provider = "consul"${tagsStr}${checkBlock}
+      provider = "consul"${connectBlock}${tagsStr}${checkBlock}
     }`;
 	});
 
@@ -347,7 +405,6 @@ const generateConsulServices = (
 const generateConsulTags = (
 	appName: string,
 	serviceName: string,
-	port: NomadPort,
 	domains: Domain[],
 ): string[] => {
 	if (domains.length === 0) return [];
