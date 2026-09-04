@@ -1,22 +1,35 @@
 /**
- * nomploy — multi-node cluster (WireGuard mesh).
+ * nomploy — multi-node cluster (WireGuard mesh, HA-capable).
  *
- * The control plane is a WireGuard "hub" (wg0 = 10.10.0.1/24, UDP 51820) running
- * the Consul + Nomad servers, bound to their WireGuard IP. Worker nodes get a
- * WireGuard IP on the same overlay, peer with the hub, and run Consul + Nomad as
- * clients that join over the encrypted overlay.
+ * The control plane is the WireGuard hub (wg0 = 10.10.0.1/24, UDP 51820). Nodes
+ * join over the encrypted overlay:
+ *  - WORKERS run Consul + Nomad as clients. They peer every server (the hub as
+ *    the /24 overlay gateway, other servers /32) so they fail over to a surviving
+ *    server if the hub dies, and retry-join all servers.
+ *  - SERVERS run Consul + Nomad as servers (raft quorum) AND a client. They
+ *    full-mesh with the other servers, forward the overlay (like the hub), and
+ *    retry-join the whole server set. They are NOT panel hosts (no
+ *    nomploy_control_plane meta).
  *
- * `getClusterWorkerJoinCommand` produces a single script (run over SSH on a
- * fresh worker) that installs Docker + Consul + Nomad + CNI + WireGuard, brings
- * up the overlay, prints its WireGuard public key (the caller then registers it
- * as a peer on the hub with `wg set wg0 peer <key> allowed-ips <ip>/32`), and
- * starts Consul + Nomad as clients that retry-join the hub. Consul/Nomad keep
- * retrying, so they connect as soon as the hub adds the peer.
- *
- * The worker's public key is emitted on its own line as:
- *     WORKER_WG_PUBKEY=<base64>
- * so the orchestrator can parse it from the streamed output.
+ * Each join script installs Docker + Consul + Nomad + CNI + WireGuard, brings up
+ * the overlay, and prints its WireGuard public key on its own line
+ * (`WORKER_WG_PUBKEY=<b64>` / `SERVER_WG_PUBKEY=<b64>`) so the orchestrator can
+ * register it as a peer on the existing members. Consul/Nomad keep retrying, so
+ * the node connects as soon as the peers are added.
  */
+
+/** A server this node must dial (full mesh / worker→server): needs an endpoint. */
+export interface MeshServerPeer {
+	wgIp: string;
+	publicKey: string;
+	endpoint: string;
+}
+
+/** A worker peer a server routes to: learned passively, no endpoint. */
+export interface MeshWorkerPeer {
+	wgIp: string;
+	publicKey: string;
+}
 
 export interface ClusterWorkerJoinOptions {
 	/** WireGuard public key of the hub (control plane). */
@@ -25,25 +38,38 @@ export interface ClusterWorkerJoinOptions {
 	hubEndpoint: string;
 	/** Shared Consul/Nomad gossip encryption key (base64, from `consul keygen`). */
 	gossipKey: string;
-	/** WireGuard overlay IP assigned to this worker, e.g. "10.10.0.2". */
+	/** WireGuard overlay IP assigned to this worker, e.g. "10.10.0.11". */
 	workerWgIp: string;
-	/** Hub's WireGuard overlay IP (Consul/Nomad servers), default "10.10.0.1". */
+	/** Hub's WireGuard overlay IP (Consul/Nomad server), default "10.10.0.1". */
 	hubWgIp?: string;
 	/** WireGuard overlay CIDR, default "10.10.0.0/24". */
+	overlayCidr?: string;
+	/** Extra servers (besides the hub) to also peer + retry-join, for HA. */
+	servers?: MeshServerPeer[];
+	datacenter?: string;
+	cniVersion?: string;
+}
+
+export interface ClusterServerJoinOptions {
+	/** WireGuard overlay IP assigned to this server, e.g. "10.10.0.2". */
+	ownWgIp: string;
+	/** Shared Consul/Nomad gossip encryption key. */
+	gossipKey: string;
+	/** Target server count for bootstrap_expect (min(currentCount, 3)). */
+	bootstrapExpect: number;
+	/** All server overlay IPs (incl. hub and this new one) for retry_join. */
+	serverWgIps: string[];
+	/** The other servers (incl. hub) to full-mesh with — need endpoints. */
+	otherServers: MeshServerPeer[];
+	/** Existing workers to route to (added as /32 peers, no endpoint). */
+	existingWorkers?: MeshWorkerPeer[];
 	overlayCidr?: string;
 	datacenter?: string;
 	cniVersion?: string;
 }
 
-export const getClusterWorkerJoinCommand = (
-	opts: ClusterWorkerJoinOptions,
-): string => {
-	const hubWgIp = opts.hubWgIp || "10.10.0.1";
-	const overlayCidr = opts.overlayCidr || "10.10.0.0/24";
-	const datacenter = opts.datacenter || "dc1";
-	const cniVersion = opts.cniVersion || "v1.5.1";
-
-	return `
+/** Shared install steps (Docker + Consul + Nomad + CNI + WireGuard + docker auth). */
+const installPreamble = (cniVersion: string): string => `
 set -e
 if [ "$EUID" -ne 0 ] && ! sudo -n true 2>/dev/null; then
   echo "Error: needs root or passwordless sudo. ❌"; exit 1
@@ -82,8 +108,40 @@ fi
 # Docker auth config (docker driver needs this file to exist, even for public pulls)
 $SUDO mkdir -p /root/.docker
 [ -s /root/.docker/config.json ] || echo '{"auths":{}}' | $SUDO tee /root/.docker/config.json >/dev/null
+`;
 
-# ── WireGuard: join the overlay, peer with the hub ─────────────────────────
+/** wg [Peer] block with an endpoint (a server we dial). */
+const serverPeerBlock = (p: MeshServerPeer): string => `
+[Peer]
+PublicKey = ${p.publicKey}
+Endpoint = ${p.endpoint}
+AllowedIPs = ${p.wgIp}/32
+PersistentKeepalive = 25`;
+
+/** wg [Peer] block for a worker (learned passively, no endpoint). */
+const workerPeerBlock = (p: MeshWorkerPeer): string => `
+[Peer]
+PublicKey = ${p.publicKey}
+AllowedIPs = ${p.wgIp}/32`;
+
+export const getClusterWorkerJoinCommand = (
+	opts: ClusterWorkerJoinOptions,
+): string => {
+	const hubWgIp = opts.hubWgIp || "10.10.0.1";
+	const overlayCidr = opts.overlayCidr || "10.10.0.0/24";
+	const datacenter = opts.datacenter || "dc1";
+	const cniVersion = opts.cniVersion || "v1.5.1";
+	const extraServers = opts.servers ?? [];
+
+	// Nomad client + Consul join every server, so a worker survives losing one.
+	const serverIps = [hubWgIp, ...extraServers.map((s) => s.wgIp)];
+	const nomadServers = serverIps.map((ip) => `"${ip}:4647"`).join(", ");
+	const consulRetryJoin = serverIps.map((ip) => `"${ip}"`).join(", ");
+	// The hub is the overlay gateway (/24); other servers are direct (/32).
+	const extraServerPeers = extraServers.map(serverPeerBlock).join("\n");
+
+	return `${installPreamble(cniVersion)}
+# ── WireGuard: join the overlay, peer with every server ────────────────────
 $SUDO mkdir -p /etc/wireguard && $SUDO chmod 700 /etc/wireguard
 $SUDO rm -f /etc/wireguard/w_priv /etc/wireguard/w_pub
 $SUDO sh -c 'wg genkey > /etc/wireguard/w_priv && chmod 600 /etc/wireguard/w_priv && wg pubkey < /etc/wireguard/w_priv > /etc/wireguard/w_pub'
@@ -95,7 +153,7 @@ PrivateKey = $($SUDO cat /etc/wireguard/w_priv)
 PublicKey = ${opts.hubPublicKey}
 Endpoint = ${opts.hubEndpoint}
 AllowedIPs = ${overlayCidr}
-PersistentKeepalive = 25
+PersistentKeepalive = 25${extraServerPeers}
 WG
 $SUDO chmod 600 /etc/wireguard/wg0.conf
 $SUDO wg-quick down wg0 >/dev/null 2>&1 || true
@@ -112,7 +170,7 @@ client_addr = "127.0.0.1"
 datacenter  = "${datacenter}"
 server  = false
 encrypt = "${opts.gossipKey}"
-retry_join = ["${hubWgIp}"]
+retry_join = [${consulRetryJoin}]
 CONSUL
 
 # ── Nomad client ───────────────────────────────────────────────────────────
@@ -128,7 +186,7 @@ advertise {
 server { enabled = false }
 client {
   enabled = true
-  servers = ["${hubWgIp}:4647"]
+  servers = [${nomadServers}]
   # Bind & register allocation ports on the WireGuard overlay, not the public
   # NIC, so Traefik on the control plane can reach services here (and ports are
   # never exposed publicly). Without this, Consul registers the node's public IP
@@ -149,6 +207,90 @@ $SUDO systemctl enable consul nomad >/dev/null 2>&1 || true
 $SUDO systemctl restart --no-block consul
 sleep 3
 $SUDO systemctl restart --no-block nomad
-echo "==> Worker join complete. It will register once the hub adds its WireGuard peer."
+echo "==> Worker join complete. It will register once the servers add its WireGuard peer."
+`;
+};
+
+export const getClusterServerJoinCommand = (
+	opts: ClusterServerJoinOptions,
+): string => {
+	const overlayCidr = opts.overlayCidr || "10.10.0.0/24";
+	const datacenter = opts.datacenter || "dc1";
+	const cniVersion = opts.cniVersion || "v1.5.1";
+	const consulRetryJoin = opts.serverWgIps.map((ip) => `"${ip}"`).join(", ");
+	const serverPeers = opts.otherServers.map(serverPeerBlock).join("\n");
+	const workerPeers = (opts.existingWorkers ?? [])
+		.map(workerPeerBlock)
+		.join("\n");
+
+	return `${installPreamble(cniVersion)}
+# ── WireGuard: full-mesh server, forward the overlay ───────────────────────
+$SUDO mkdir -p /etc/wireguard && $SUDO chmod 700 /etc/wireguard
+$SUDO rm -f /etc/wireguard/srv_priv /etc/wireguard/srv_pub
+$SUDO sh -c 'wg genkey > /etc/wireguard/srv_priv && chmod 600 /etc/wireguard/srv_priv && wg pubkey < /etc/wireguard/srv_priv > /etc/wireguard/srv_pub'
+$SUDO tee /etc/wireguard/wg0.conf >/dev/null <<WG
+[Interface]
+Address = ${opts.ownWgIp}/24
+ListenPort = 51820
+PrivateKey = $($SUDO cat /etc/wireguard/srv_priv)
+PostUp = sysctl -w net.ipv4.ip_forward=1; iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o wg0 -j ACCEPT
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o wg0 -j ACCEPT${serverPeers}${workerPeers}
+WG
+$SUDO chmod 600 /etc/wireguard/wg0.conf
+$SUDO wg-quick down wg0 >/dev/null 2>&1 || true
+$SUDO wg-quick up wg0
+$SUDO systemctl enable wg-quick@wg0 >/dev/null 2>&1 || true
+echo "SERVER_WG_PUBKEY=$($SUDO cat /etc/wireguard/srv_pub)"
+
+# ── Consul server ──────────────────────────────────────────────────────────
+$SUDO mkdir -p /etc/consul.d /opt/consul /etc/nomad.d /opt/nomad
+$SUDO tee /etc/consul.d/consul.hcl >/dev/null <<CONSUL
+data_dir    = "/opt/consul"
+bind_addr   = "${opts.ownWgIp}"
+client_addr = "127.0.0.1"
+datacenter  = "${datacenter}"
+server           = true
+bootstrap_expect = ${opts.bootstrapExpect}
+encrypt = "${opts.gossipKey}"
+retry_join = [${consulRetryJoin}]
+CONSUL
+
+# ── Nomad server + client ──────────────────────────────────────────────────
+$SUDO tee /etc/nomad.d/nomad.hcl >/dev/null <<NOMAD
+data_dir   = "/opt/nomad"
+bind_addr  = "0.0.0.0"
+datacenter = "${datacenter}"
+advertise {
+  http = "${opts.ownWgIp}"
+  rpc  = "${opts.ownWgIp}"
+  serf = "${opts.ownWgIp}"
+}
+server {
+  enabled          = true
+  bootstrap_expect = ${opts.bootstrapExpect}
+  encrypt          = "${opts.gossipKey}"
+  server_join {
+    retry_join = [${consulRetryJoin}]
+  }
+}
+client {
+  enabled = true
+  network_interface = "wg0"
+}
+consul { address = "127.0.0.1:8500" }
+plugin "docker" {
+  config {
+    allow_privileged = true
+    auth { config = "/root/.docker/config.json" }
+  }
+}
+NOMAD
+
+echo "==> Starting Consul + Nomad servers"
+$SUDO systemctl enable consul nomad >/dev/null 2>&1 || true
+$SUDO systemctl restart --no-block consul
+sleep 3
+$SUDO systemctl restart --no-block nomad
+echo "==> Server join complete. It will join raft once the other servers add its WireGuard peer."
 `;
 };

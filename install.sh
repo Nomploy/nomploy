@@ -133,6 +133,9 @@ bind_addr   = "10.10.0.1"
 client_addr = "0.0.0.0"
 datacenter  = "dc1"
 server           = true
+# A fresh install is a single Nomad/Consul server. When servers join later
+# (nomad.joinCluster role=server) the join flow reconciles this toward 3 for
+# true HA; the hub itself is never un-bootstrapped.
 bootstrap_expect = 1
 encrypt = "$GOSSIP"
 ui_config { enabled = true }
@@ -189,7 +192,9 @@ plugin "docker" {
 }
 NOMADHCL
 
-# Cluster descriptor read by the app to add worker nodes (nomad.joinCluster).
+# Cluster descriptor read by the app to add servers (HA) + worker nodes
+# (nomad.joinCluster). `servers[]` = extra Nomad/Consul raft members beyond this
+# hub; `peers[]` = worker (client) nodes. Both start empty on a fresh install.
 $SUDO tee /etc/nomploy/cluster.json >/dev/null <<CJSON
 {
   "hubPublicKey": "$HUB_PUB",
@@ -197,6 +202,7 @@ $SUDO tee /etc/nomploy/cluster.json >/dev/null <<CJSON
   "hubWgIp": "10.10.0.1",
   "hubEndpoint": "$WG_ENDPOINT",
   "overlayCidr": "10.10.0.0/24",
+  "servers": [],
   "peers": []
 }
 CJSON

@@ -1,7 +1,19 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { findServerById, updateServerById } from "@nomploy/server";
 import { getNomadBootstrapCommand } from "@nomploy/server/setup/nomad-bootstrap";
-import { getClusterWorkerJoinCommand } from "@nomploy/server/setup/nomad-cluster";
+import {
+	getClusterServerJoinCommand,
+	getClusterWorkerJoinCommand,
+} from "@nomploy/server/setup/nomad-cluster";
+import {
+	addPeerEverywhere,
+	allMeshMembers,
+	allocateWgIp,
+	allServers,
+	readCluster,
+	removePeerEverywhere,
+	serverMeshMembers,
+	writeCluster,
+} from "@nomploy/server/setup/nomad-mesh";
 import {
 	execAsync,
 	execAsyncRemote,
@@ -10,17 +22,6 @@ import { TRPCError } from "@trpc/server";
 import { observable } from "@trpc/server/observable";
 import { z } from "zod";
 import { createTRPCRouter, withPermission } from "../trpc";
-
-// Cluster state written by the installer's hub setup and updated as nodes join.
-const CLUSTER_FILE = "/etc/nomploy/cluster.json";
-interface ClusterState {
-	hubPublicKey: string;
-	gossipKey: string;
-	hubWgIp: string;
-	hubEndpoint: string;
-	overlayCidr?: string;
-	peers: { wgIp: string; publicKey: string; serverId: string; name: string }[];
-}
 
 // Control-plane-local Nomad (used when no serverId is given).
 const DEFAULT_ADDRESS = process.env.NOMAD_ADDRESS || "http://127.0.0.1:4646";
@@ -156,6 +157,37 @@ const consulGet = async (
 };
 
 const serverInput = z.object({ serverId: z.string().optional() });
+
+// Shared error emitter for cluster join/remove: reachability failures (cloud
+// firewall, wrong IP) are by far the most common cause — make the fix actionable.
+type ClusterEmit = { next: (s: string) => void; complete: () => void };
+const emitClusterError = (
+	emit: ClusterEmit,
+	err: unknown,
+	server: { ipAddress: string; port: number },
+) => {
+	const message =
+		err instanceof Error ? err.message : "Cluster operation failed";
+	emit.next(`\n❌ ${message}\n`);
+	if (
+		/handshake|timed?\s*out|ETIMEDOUT|ECONNREFUSED|EHOSTUNREACH|connect/i.test(
+			message,
+		)
+	) {
+		const hubHost = readCluster()?.hubEndpoint?.replace(/:\d+$/, "");
+		emit.next(
+			`\nThe control plane could not open an SSH connection to ${server.ipAddress}:${server.port}.\n` +
+				"This is almost always network reachability, not a bad key:\n" +
+				"  • If this node is behind a cloud firewall (Hetzner, AWS SG, …), allow inbound\n" +
+				`    TCP/${server.port} (SSH) and UDP/51820 (WireGuard) from the control-plane IP${
+					hubHost ? ` (${hubHost})` : ""
+				}.\n` +
+				"  • If both machines share a private network, set this server's IP to its\n" +
+				"    private address — the control plane reaches it there with no public exposure.\n",
+		);
+	}
+	emit.complete();
+};
 
 export const nomadRouter = createTRPCRouter({
 	getJobs: withPermission("server", "read")
@@ -414,11 +446,16 @@ export const nomadRouter = createTRPCRouter({
 			});
 		}),
 
-	// Join a server to the Nomad cluster over the WireGuard mesh: install +
-	// configure it as a Consul/Nomad client, then register its WireGuard peer on
-	// the hub (this control plane). Streams progress.
+	// Join a node to the cluster over the WireGuard mesh as a worker (Nomad/Consul
+	// client) or a server (adds Nomad/Consul raft quorum). Installs + configures
+	// it, then registers its WireGuard peer on the existing members. Streams logs.
 	joinCluster: withPermission("server", "create")
-		.input(z.object({ serverId: z.string() }))
+		.input(
+			z.object({
+				serverId: z.string(),
+				role: z.enum(["server", "worker"]).default("worker"),
+			}),
+		)
 		.subscription(async ({ input, ctx }) => {
 			const server = await findServerById(input.serverId);
 			if (server.organizationId !== ctx.session?.activeOrganizationId) {
@@ -428,38 +465,101 @@ export const nomadRouter = createTRPCRouter({
 			return observable<string>((emit) => {
 				(async () => {
 					try {
-						if (!existsSync(CLUSTER_FILE)) {
+						const cluster = readCluster();
+						if (!cluster) {
 							emit.next(
 								"❌ Cluster not initialized on the control plane (missing /etc/nomploy/cluster.json).\n",
 							);
 							emit.complete();
 							return;
 						}
-						const cluster: ClusterState = JSON.parse(
-							readFileSync(CLUSTER_FILE, "utf8"),
+						const overlayCidr = cluster.overlayCidr || "10.10.0.0/24";
+
+						if (input.role === "server") {
+							const wgIp = allocateWgIp(cluster, "server");
+							emit.next(
+								`Assigning server overlay IP ${wgIp} to "${server.name}"\n`,
+							);
+							const servers = allServers(cluster);
+							const script = getClusterServerJoinCommand({
+								ownWgIp: wgIp,
+								gossipKey: cluster.gossipKey,
+								bootstrapExpect: Math.min(servers.length + 1, 3),
+								serverWgIps: [...servers.map((s) => s.wgIp), wgIp],
+								otherServers: servers.map((s) => ({
+									wgIp: s.wgIp,
+									publicKey: s.publicKey,
+									endpoint: s.endpoint,
+								})),
+								existingWorkers: cluster.peers.map((p) => ({
+									wgIp: p.wgIp,
+									publicKey: p.publicKey,
+								})),
+								overlayCidr,
+							});
+							let pubkey = "";
+							await execAsyncRemote(input.serverId, script, (log) => {
+								emit.next(log);
+								const cap = log.match(/SERVER_WG_PUBKEY=(\S+)/)?.[1];
+								if (cap) pubkey = cap.trim();
+							});
+							if (!pubkey) {
+								emit.next("\n❌ Did not receive the server's WireGuard key\n");
+								emit.complete();
+								return;
+							}
+							const endpoint = `${server.ipAddress}:51820`;
+							emit.next(
+								`\nRegistering WireGuard peer on all members (${wgIp})\n`,
+							);
+							await addPeerEverywhere(
+								{ wgIp, publicKey: pubkey, endpoint },
+								allMeshMembers(cluster).filter(
+									(m) => m.serverId !== input.serverId,
+								),
+								(l) => emit.next(l),
+							);
+							cluster.servers = cluster.servers || [];
+							cluster.servers.push({
+								wgIp,
+								publicKey: pubkey,
+								serverId: input.serverId,
+								name: server.name,
+								endpoint,
+							});
+							writeCluster(cluster);
+							await updateServerById(input.serverId, {
+								nomadAddress: `http://${wgIp}:4646`,
+								clusterRole: "server",
+								wgIp,
+								wgPublicKey: pubkey,
+							});
+							emit.next(
+								"\nServer joined. Raft grows via retry_join; peers persist in raft state across restarts.\n",
+							);
+							emit.next("JOIN_DONE");
+							emit.complete();
+							return;
+						}
+
+						// worker
+						const wgIp = allocateWgIp(cluster, "worker");
+						emit.next(
+							`Assigning worker overlay IP ${wgIp} to "${server.name}"\n`,
 						);
-						cluster.peers = cluster.peers || [];
-
-						// Allocate the next free overlay IP (hub keeps .1).
-						const prefix = cluster.hubWgIp.replace(/\.\d+$/, "");
-						const used = new Set([
-							cluster.hubWgIp,
-							...cluster.peers.map((p) => p.wgIp),
-						]);
-						let n = 2;
-						while (used.has(`${prefix}.${n}`)) n++;
-						const wgIp = `${prefix}.${n}`;
-						emit.next(`Assigning overlay IP ${wgIp} to "${server.name}"\n`);
-
 						const script = getClusterWorkerJoinCommand({
 							hubPublicKey: cluster.hubPublicKey,
 							hubEndpoint: cluster.hubEndpoint,
 							gossipKey: cluster.gossipKey,
 							workerWgIp: wgIp,
 							hubWgIp: cluster.hubWgIp,
-							overlayCidr: cluster.overlayCidr,
+							overlayCidr,
+							servers: (cluster.servers || []).map((s) => ({
+								wgIp: s.wgIp,
+								publicKey: s.publicKey,
+								endpoint: s.endpoint,
+							})),
 						});
-
 						let pubkey = "";
 						await execAsyncRemote(input.serverId, script, (log) => {
 							emit.next(log);
@@ -471,57 +571,206 @@ export const nomadRouter = createTRPCRouter({
 							emit.complete();
 							return;
 						}
-
-						emit.next(`\nRegistering WireGuard peer on the hub (${wgIp})\n`);
-						await execAsync(
-							`wg set wg0 peer ${pubkey} allowed-ips ${wgIp}/32 && wg-quick save wg0`,
+						emit.next(
+							`\nRegistering WireGuard peer on all servers (${wgIp})\n`,
 						);
-
+						await addPeerEverywhere(
+							{ wgIp, publicKey: pubkey },
+							serverMeshMembers(cluster),
+							(l) => emit.next(l),
+						);
 						cluster.peers.push({
 							wgIp,
 							publicKey: pubkey,
 							serverId: input.serverId,
 							name: server.name,
 						});
-						writeFileSync(CLUSTER_FILE, JSON.stringify(cluster, null, 2));
+						writeCluster(cluster);
 						await updateServerById(input.serverId, {
 							nomadAddress: `http://${wgIp}:4646`,
+							clusterRole: "worker",
+							wgIp,
+							wgPublicKey: pubkey,
 						});
-
 						emit.next("JOIN_DONE");
 						emit.complete();
 					} catch (err: unknown) {
-						const message =
-							err instanceof Error ? err.message : "Cluster join failed";
-						emit.next(`\n❌ ${message}\n`);
-						// Reachability failures (cloud firewall, wrong IP) are by far the
-						// most common cause — make the fix actionable instead of leaving the
-						// operator with a bare "handshake timeout".
-						if (
-							/handshake|timed?\s*out|ETIMEDOUT|ECONNREFUSED|EHOSTUNREACH|connect/i.test(
-								message,
-							)
-						) {
-							const hubHost = existsSync(CLUSTER_FILE)
-								? (
-										JSON.parse(readFileSync(CLUSTER_FILE, "utf8"))
-											.hubEndpoint as string
-									)?.replace(/:\d+$/, "")
-								: undefined;
-							emit.next(
-								`\nThe control plane could not open an SSH connection to ${server.ipAddress}:${server.port}.\n` +
-									"This is almost always network reachability, not a bad key:\n" +
-									"  • If this node is behind a cloud firewall (Hetzner, AWS SG, …), allow inbound\n" +
-									`    TCP/${server.port} (SSH) and UDP/51820 (WireGuard) from the control-plane IP${
-										hubHost ? ` (${hubHost})` : ""
-									}.\n` +
-									`  • If both machines share a private network, set this server's IP to its\n` +
-									"    private address — the control plane reaches it there with no public exposure.\n",
-							);
-						}
-						emit.complete();
+						emitClusterError(emit, err, server);
 					}
 				})();
 			});
 		}),
+
+	// Remove a node: drain it, leave Nomad/Consul (quorum-safe for servers),
+	// remove its WireGuard peer from every remaining member, free its overlay IP.
+	removeNode: withPermission("server", "delete")
+		.input(z.object({ serverId: z.string(), force: z.boolean().optional() }))
+		.subscription(async ({ input, ctx }) => {
+			const server = await findServerById(input.serverId);
+			if (server.organizationId !== ctx.session?.activeOrganizationId) {
+				throw new TRPCError({ code: "UNAUTHORIZED" });
+			}
+
+			return observable<string>((emit) => {
+				(async () => {
+					try {
+						const cluster = readCluster();
+						if (!cluster) {
+							emit.next("❌ Cluster not initialized.\n");
+							emit.complete();
+							return;
+						}
+						const worker = cluster.peers.find(
+							(p) => p.serverId === input.serverId,
+						);
+						const srv = (cluster.servers || []).find(
+							(s) => s.serverId === input.serverId,
+						);
+						const node = worker || srv;
+						if (!node) {
+							emit.next("❌ This server is not a cluster member.\n");
+							emit.complete();
+							return;
+						}
+
+						if (srv) {
+							const remaining = allServers(cluster).length - 1;
+							if (remaining < 1) {
+								emit.next("❌ Refusing: this is the last Nomad server.\n");
+								emit.complete();
+								return;
+							}
+							if (remaining < 3 && !input.force) {
+								emit.next(
+									`⚠ Removing this server leaves ${remaining} server(s) — below the 3 needed for fault tolerance. Re-run with force to proceed.\n`,
+								);
+								emit.complete();
+								return;
+							}
+						}
+
+						const cfg = {
+							address: DEFAULT_ADDRESS,
+							token: DEFAULT_TOKEN,
+							namespace: "default",
+						};
+						let nomadNode: { ID: string; Name: string } | undefined;
+						try {
+							const nodes = (await nomadClient(cfg).get("/nodes")) as {
+								ID: string;
+								Name: string;
+								Address: string;
+							}[];
+							nomadNode = nodes.find((n) => n.Address === node.wgIp);
+						} catch {}
+
+						if (nomadNode) {
+							emit.next(`Draining node ${nomadNode.Name} …\n`);
+							await execAsync(
+								`nomad node drain -enable -yes -deadline 5m ${nomadNode.ID}`,
+							).catch((e) =>
+								emit.next(
+									`⚠ drain: ${e instanceof Error ? e.message : String(e)}\n`,
+								),
+							);
+						}
+
+						if (srv) {
+							emit.next(`Removing Nomad/Consul server ${srv.name} …\n`);
+							const memberName = nomadNode?.Name ?? srv.name;
+							await execAsync(`nomad server force-leave ${memberName}`).catch(
+								() => {},
+							);
+							await execAsync(`consul force-leave ${srv.name}`).catch(() => {});
+							await execAsync(
+								`nomad operator raft remove-peer -peer-address=${srv.wgIp}:4647`,
+							).catch(() => {});
+							await execAsync(
+								`consul operator raft remove-peer -address=${srv.wgIp}:8300`,
+							).catch(() => {});
+						}
+
+						emit.next("Stopping services + WireGuard on the node …\n");
+						await execAsyncRemote(
+							input.serverId,
+							'SUDO=""; [ "$EUID" -ne 0 ] && SUDO=sudo; $SUDO systemctl stop nomad consul 2>/dev/null || true; $SUDO wg-quick down wg0 2>/dev/null || true; $SUDO systemctl disable wg-quick@wg0 2>/dev/null || true',
+						).catch((e) =>
+							emit.next(
+								`⚠ node cleanup: ${e instanceof Error ? e.message : String(e)}\n`,
+							),
+						);
+						await execAsync("nomad system gc").catch(() => {});
+						if (worker) {
+							await execAsync(`consul force-leave ${worker.name}`).catch(
+								() => {},
+							);
+						}
+
+						emit.next("Removing WireGuard peer from all members …\n");
+						const members = (srv ? allMeshMembers : serverMeshMembers)(
+							cluster,
+						).filter((m) => m.serverId !== input.serverId);
+						await removePeerEverywhere(node.publicKey, members, (l) =>
+							emit.next(l),
+						);
+
+						cluster.peers = cluster.peers.filter(
+							(p) => p.serverId !== input.serverId,
+						);
+						cluster.servers = (cluster.servers || []).filter(
+							(s) => s.serverId !== input.serverId,
+						);
+						writeCluster(cluster);
+						await updateServerById(input.serverId, {
+							nomadAddress: null,
+							clusterRole: null,
+							wgIp: null,
+							wgPublicKey: null,
+						});
+						emit.next("REMOVE_DONE");
+						emit.complete();
+					} catch (err: unknown) {
+						emitClusterError(emit, err, server);
+					}
+				})();
+			});
+		}),
+
+	// List cluster members (hub + servers + workers) with live Nomad status.
+	getClusterMembers: withPermission("server", "read").query(async () => {
+		const cluster = readCluster();
+		if (!cluster) return [];
+		const cfg = {
+			address: DEFAULT_ADDRESS,
+			token: DEFAULT_TOKEN,
+			namespace: "default",
+		};
+		let nodes: { Address: string; Status: string }[] = [];
+		try {
+			nodes = (await nomadClient(cfg).get("/nodes")) as {
+				Address: string;
+				Status: string;
+			}[];
+		} catch {}
+		const statusByIp = new Map(nodes.map((n) => [n.Address, n.Status]));
+		const row = (
+			name: string,
+			role: "server" | "worker",
+			wgIp: string,
+			serverId: string | null,
+		) => ({
+			name,
+			role,
+			wgIp,
+			serverId,
+			status: statusByIp.get(wgIp) ?? "unknown",
+		});
+		return [
+			row("control-plane", "server", cluster.hubWgIp, null),
+			...(cluster.servers || []).map((s) =>
+				row(s.name, "server", s.wgIp, s.serverId),
+			),
+			...cluster.peers.map((p) => row(p.name, "worker", p.wgIp, p.serverId)),
+		];
+	}),
 });

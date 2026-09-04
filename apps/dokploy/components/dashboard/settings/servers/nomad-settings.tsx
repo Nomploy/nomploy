@@ -1,9 +1,28 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Loader2, Network, Terminal } from "lucide-react";
+import {
+	Loader2,
+	LogOut,
+	Network,
+	RefreshCw,
+	Server as ServerIcon,
+	Terminal,
+} from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+	AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -12,6 +31,13 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
 	Form,
 	FormControl,
@@ -22,6 +48,14 @@ import {
 	FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
 import { api } from "@/utils/api";
 
 const nomadSchema = z.object({
@@ -32,6 +66,8 @@ const nomadSchema = z.object({
 });
 
 type NomadFormValues = z.infer<typeof nomadSchema>;
+
+type ClusterRole = "server" | "worker";
 
 interface Props {
 	serverId: string;
@@ -44,6 +80,14 @@ export const NomadSettings = ({ serverId }: Props) => {
 	);
 
 	const { mutateAsync, isPending } = api.server.update.useMutation();
+
+	const {
+		data: members,
+		refetch: refetchMembers,
+		isRefetching: isRefetchingMembers,
+	} = api.nomad.getClusterMembers.useQuery(undefined, {
+		refetchOnWindowFocus: false,
+	});
 
 	const [isBootstrapping, setIsBootstrapping] = useState(false);
 	const [bootstrapLogs, setBootstrapLogs] = useState<string>("");
@@ -74,17 +118,23 @@ export const NomadSettings = ({ serverId }: Props) => {
 	};
 
 	const [isJoining, setIsJoining] = useState(false);
+	const [joinRole, setJoinRole] = useState<ClusterRole>("worker");
 	const [joinLogs, setJoinLogs] = useState<string>("");
 
 	api.nomad.joinCluster.useSubscription(
-		{ serverId },
+		{ serverId, role: joinRole },
 		{
 			enabled: isJoining,
 			onData(log) {
 				if (log === "JOIN_DONE") {
 					setIsJoining(false);
-					toast.success("Server joined the Nomad cluster");
+					toast.success(
+						joinRole === "server"
+							? "Server joined the cluster (Nomad/Consul raft)"
+							: "Worker joined the cluster",
+					);
 					refetch();
+					refetchMembers();
 					return;
 				}
 				setJoinLogs((prev) => prev + log);
@@ -96,10 +146,44 @@ export const NomadSettings = ({ serverId }: Props) => {
 		},
 	);
 
-	const startJoin = () => {
+	const startJoin = (role: ClusterRole) => {
+		setJoinRole(role);
 		setJoinLogs("");
 		setIsJoining(true);
 	};
+
+	const [isLeaving, setIsLeaving] = useState(false);
+	const [forceLeave, setForceLeave] = useState(false);
+	const [leaveLogs, setLeaveLogs] = useState<string>("");
+
+	api.nomad.removeNode.useSubscription(
+		{ serverId, force: forceLeave },
+		{
+			enabled: isLeaving,
+			onData(log) {
+				if (log === "REMOVE_DONE") {
+					setIsLeaving(false);
+					toast.success("Server removed from the cluster");
+					refetch();
+					refetchMembers();
+					return;
+				}
+				setLeaveLogs((prev) => prev + log);
+			},
+			onError(error) {
+				setIsLeaving(false);
+				toast.error(error.message || "Leave failed");
+			},
+		},
+	);
+
+	const startLeave = () => {
+		setLeaveLogs("");
+		setIsLeaving(true);
+	};
+
+	const isMember = !!server?.clusterRole;
+	const busy = isBootstrapping || isJoining || isLeaving;
 
 	const form = useForm<NomadFormValues>({
 		resolver: zodResolver(nomadSchema),
@@ -140,7 +224,7 @@ export const NomadSettings = ({ serverId }: Props) => {
 						type="button"
 						variant="secondary"
 						onClick={startBootstrap}
-						disabled={isBootstrapping || isJoining}
+						disabled={busy}
 						title="Install a standalone Docker + Consul + Nomad + CNI on this server over SSH"
 					>
 						{isBootstrapping ? (
@@ -150,19 +234,98 @@ export const NomadSettings = ({ serverId }: Props) => {
 						)}
 						{isBootstrapping ? "Bootstrapping…" : "Bootstrap Nomad"}
 					</Button>
-					<Button
-						type="button"
-						onClick={startJoin}
-						disabled={isBootstrapping || isJoining}
-						title="Install Nomad on this server and join it to the control plane's cluster over WireGuard"
-					>
-						{isJoining ? (
-							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-						) : (
-							<Network className="mr-2 h-4 w-4" />
-						)}
-						{isJoining ? "Joining cluster…" : "Join cluster"}
-					</Button>
+
+					{isMember ? (
+						<AlertDialog>
+							<AlertDialogTrigger asChild>
+								<Button type="button" variant="destructive" disabled={busy}>
+									{isLeaving ? (
+										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+									) : (
+										<LogOut className="mr-2 h-4 w-4" />
+									)}
+									{isLeaving ? "Leaving…" : "Leave cluster"}
+								</Button>
+							</AlertDialogTrigger>
+							<AlertDialogContent>
+								<AlertDialogHeader>
+									<AlertDialogTitle>
+										Remove “{server?.name}” from the cluster?
+									</AlertDialogTitle>
+									<AlertDialogDescription asChild>
+										<div className="space-y-3">
+											<p>
+												The node is drained, its services stopped, and its
+												WireGuard peer removed from every remaining member. Its
+												overlay IP is freed for reuse.
+											</p>
+											{server?.clusterRole === "server" && (
+												<div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 p-3 text-sm">
+													<p className="font-medium">
+														This is a Nomad/Consul server (raft member).
+													</p>
+													<p className="mt-1">
+														Removing it shrinks the raft. Below 3 servers the
+														cluster loses fault tolerance; the last server
+														cannot be removed. Enable force to proceed anyway.
+													</p>
+													<label
+														htmlFor="force-leave"
+														className="mt-2 flex items-center gap-2"
+													>
+														<Checkbox
+															id="force-leave"
+															checked={forceLeave}
+															onCheckedChange={(v) => setForceLeave(v === true)}
+														/>
+														<span>Force (drop below 3 servers)</span>
+													</label>
+												</div>
+											)}
+										</div>
+									</AlertDialogDescription>
+								</AlertDialogHeader>
+								<AlertDialogFooter>
+									<AlertDialogCancel>Cancel</AlertDialogCancel>
+									<AlertDialogAction
+										onClick={startLeave}
+										className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+									>
+										Remove node
+									</AlertDialogAction>
+								</AlertDialogFooter>
+							</AlertDialogContent>
+						</AlertDialog>
+					) : (
+						<DropdownMenu>
+							<DropdownMenuTrigger asChild>
+								<Button type="button" disabled={busy}>
+									{isJoining ? (
+										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+									) : (
+										<Network className="mr-2 h-4 w-4" />
+									)}
+									{isJoining ? "Joining…" : "Join cluster"}
+								</Button>
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="end">
+								<DropdownMenuItem onClick={() => startJoin("worker")}>
+									<Network className="mr-2 h-4 w-4" />
+									Join as worker
+									<span className="ml-2 text-xs text-muted-foreground">
+										runs workloads
+									</span>
+								</DropdownMenuItem>
+								<DropdownMenuItem onClick={() => startJoin("server")}>
+									<ServerIcon className="mr-2 h-4 w-4" />
+									Join as server
+									<span className="ml-2 text-xs text-muted-foreground">
+										adds HA raft
+									</span>
+								</DropdownMenuItem>
+							</DropdownMenuContent>
+						</DropdownMenu>
+					)}
 				</div>
 			</CardHeader>
 			<CardContent>
@@ -256,6 +419,95 @@ export const NomadSettings = ({ serverId }: Props) => {
 						{joinLogs || "Joining cluster…"}
 					</pre>
 				)}
+				{(isLeaving || leaveLogs) && (
+					<pre className="mt-4 max-h-[400px] overflow-auto whitespace-pre-wrap rounded-lg bg-black p-4 font-mono text-xs text-green-400">
+						{leaveLogs || "Removing node…"}
+					</pre>
+				)}
+
+				<div className="mt-8">
+					<div className="mb-2 flex items-center justify-between">
+						<div>
+							<h3 className="font-medium text-sm">Cluster members</h3>
+							<p className="text-muted-foreground text-xs">
+								Nomad/Consul servers and worker nodes on the WireGuard overlay.
+							</p>
+						</div>
+						<Button
+							type="button"
+							variant="ghost"
+							size="sm"
+							onClick={() => refetchMembers()}
+							disabled={isRefetchingMembers}
+						>
+							<RefreshCw
+								className={`h-4 w-4 ${isRefetchingMembers ? "animate-spin" : ""}`}
+							/>
+						</Button>
+					</div>
+					<div className="rounded-lg border">
+						<Table>
+							<TableHeader>
+								<TableRow>
+									<TableHead>Name</TableHead>
+									<TableHead>Role</TableHead>
+									<TableHead>Overlay IP</TableHead>
+									<TableHead>Status</TableHead>
+								</TableRow>
+							</TableHeader>
+							<TableBody>
+								{members && members.length > 0 ? (
+									members.map((m) => (
+										<TableRow key={`${m.role}-${m.wgIp}`}>
+											<TableCell className="font-medium">
+												{m.name}
+												{m.serverId === serverId && (
+													<span className="ml-2 text-muted-foreground text-xs">
+														(this server)
+													</span>
+												)}
+											</TableCell>
+											<TableCell>
+												<Badge
+													variant={
+														m.role === "server" ? "default" : "secondary"
+													}
+												>
+													{m.role}
+												</Badge>
+											</TableCell>
+											<TableCell className="font-mono text-xs">
+												{m.wgIp}
+											</TableCell>
+											<TableCell>
+												<Badge
+													variant={
+														m.status === "ready"
+															? "default"
+															: m.status === "unknown"
+																? "outline"
+																: "destructive"
+													}
+												>
+													{m.status}
+												</Badge>
+											</TableCell>
+										</TableRow>
+									))
+								) : (
+									<TableRow>
+										<TableCell
+											colSpan={4}
+											className="text-center text-muted-foreground text-sm"
+										>
+											No cluster members yet.
+										</TableCell>
+									</TableRow>
+								)}
+							</TableBody>
+						</Table>
+					</div>
+				</div>
 			</CardContent>
 		</Card>
 	);
