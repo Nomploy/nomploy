@@ -77,9 +77,6 @@ export const setupDockerStatsMonitoringSocketServer = (
 					...(appType === "application" && {
 						label: [`com.docker.swarm.service.name=${appName}`],
 					}),
-					...(appType === "stack" && {
-						label: [`com.docker.swarm.task.name=${appName}`],
-					}),
 					...(appType === "docker-compose" && {
 						name: [appName],
 					}),
