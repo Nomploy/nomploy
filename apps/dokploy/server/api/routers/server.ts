@@ -288,8 +288,6 @@ export const serverRouter = createTRPCRouter({
 						enabled: boolean;
 						version: string;
 					};
-					isNomployNetworkInstalled: boolean;
-					isSwarmInstalled: boolean;
 					isMainDirectoryInstalled: boolean;
 					privilegeMode: string;
 					dockerGroupMember: boolean;

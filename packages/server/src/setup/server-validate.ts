@@ -17,14 +17,6 @@ export const validateRClone = () => `
   fi
 `;
 
-export const validateSwarm = () => `
-  if docker info --format '{{.Swarm.LocalNodeState}}' | grep -q 'active'; then
-    echo true
-  else
-    echo false
-  fi
-`;
-
 export const validateNixpacks = () => `
   if command_exists nixpacks; then
 	version=$(nixpacks --version | awk '{print $2}')
@@ -65,14 +57,6 @@ export const validateBuildpacks = () => `
 
 export const validateMainDirectory = () => `
   if [ -d "/etc/nomploy" ]; then
-	echo true
-  else
-	echo false
-  fi
-`;
-
-export const validateNomployNetwork = () => `
-  if docker network ls | grep -q 'nomploy-network'; then
 	echo true
   else
 	echo false
@@ -132,15 +116,13 @@ export const serverValidate = async (serverId: string) => {
           buildpacksVersion=$(echo $buildpacksVersionEnabled | awk '{print $1}')
           buildpacksEnabled=$(echo $buildpacksVersionEnabled | awk '{print $2}')
 
-          isNomployNetworkInstalled=$(${validateNomployNetwork()})
-          isSwarmInstalled=$(${validateSwarm()})
           isMainDirectoryInstalled=$(${validateMainDirectory()})
 
           sudoAccessResult=$(${validateSudoAccess()})
           privilegeMode=$(echo $sudoAccessResult | awk '{print $1}')
           isDockerGroupMember=$(${validateDockerGroup()})
 
-  echo "{\\"docker\\": {\\"version\\": \\"$dockerVersion\\", \\"enabled\\": $dockerEnabled}, \\"rclone\\": {\\"version\\": \\"$rcloneVersion\\", \\"enabled\\": $rcloneEnabled}, \\"nixpacks\\": {\\"version\\": \\"$nixpacksVersion\\", \\"enabled\\": $nixpacksEnabled}, \\"buildpacks\\": {\\"version\\": \\"$buildpacksVersion\\", \\"enabled\\": $buildpacksEnabled}, \\"railpack\\": {\\"version\\": \\"$railpackVersion\\", \\"enabled\\": $railpackEnabled}, \\"isNomployNetworkInstalled\\": $isNomployNetworkInstalled, \\"isSwarmInstalled\\": $isSwarmInstalled, \\"isMainDirectoryInstalled\\": $isMainDirectoryInstalled, \\"privilegeMode\\": \\"$privilegeMode\\", \\"dockerGroupMember\\": $isDockerGroupMember}"
+  echo "{\\"docker\\": {\\"version\\": \\"$dockerVersion\\", \\"enabled\\": $dockerEnabled}, \\"rclone\\": {\\"version\\": \\"$rcloneVersion\\", \\"enabled\\": $rcloneEnabled}, \\"nixpacks\\": {\\"version\\": \\"$nixpacksVersion\\", \\"enabled\\": $nixpacksEnabled}, \\"buildpacks\\": {\\"version\\": \\"$buildpacksVersion\\", \\"enabled\\": $buildpacksEnabled}, \\"railpack\\": {\\"version\\": \\"$railpackVersion\\", \\"enabled\\": $railpackEnabled}, \\"isMainDirectoryInstalled\\": $isMainDirectoryInstalled, \\"privilegeMode\\": \\"$privilegeMode\\", \\"dockerGroupMember\\": $isDockerGroupMember}"
         `;
 				client.exec(bashCommand, (err, stream) => {
 					if (err) {
