@@ -1,6 +1,16 @@
 import { findServerById, updateServerById } from "@nomploy/server";
 import { db } from "@nomploy/server/db";
-import { networkPolicies, projects } from "@nomploy/server/db/schema";
+import {
+	apiUpdateClusterAutoscaler,
+	clusterAutoscaler,
+	networkPolicies,
+	projects,
+	server as serverTable,
+} from "@nomploy/server/db/schema";
+import {
+	evaluateCluster,
+	reconcileAutoscaler,
+} from "@nomploy/server/setup/autoscale/reconcile";
 import { getNomadBootstrapCommand } from "@nomploy/server/setup/nomad-bootstrap";
 import {
 	getClusterServerJoinCommand,
@@ -1062,5 +1072,83 @@ export const nomadRouter = createTRPCRouter({
 			meshByProject = {};
 		}
 		return { projects: orgProjects, policies, meshByProject };
+	}),
+
+	// ── Phase C: cluster autoscaling ────────────────────────────────────────
+	// Config for the org (token never returned — only whether one is set).
+	getAutoscalerConfig: protectedProcedure.query(async ({ ctx }) => {
+		const org = ctx.session?.activeOrganizationId;
+		if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+		const cfg = await db.query.clusterAutoscaler.findFirst({
+			where: eq(clusterAutoscaler.organizationId, org),
+		});
+		if (!cfg) return null;
+		const { token, ...rest } = cfg;
+		return { ...rest, hasToken: !!token };
+	}),
+
+	updateAutoscalerConfig: protectedProcedure
+		.input(apiUpdateClusterAutoscaler)
+		.mutation(async ({ input, ctx }) => {
+			const org = ctx.session?.activeOrganizationId;
+			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+			// Only overwrite the token when a non-empty one is provided.
+			const { token, ...rest } = input;
+			const setToken = token && token.length > 0 ? { token } : {};
+			const existing = await db.query.clusterAutoscaler.findFirst({
+				where: eq(clusterAutoscaler.organizationId, org),
+				columns: { autoscalerId: true },
+			});
+			if (existing) {
+				await db
+					.update(clusterAutoscaler)
+					.set({ ...rest, ...setToken })
+					.where(eq(clusterAutoscaler.organizationId, org));
+			} else {
+				await db
+					.insert(clusterAutoscaler)
+					.values({ organizationId: org, ...rest, ...setToken });
+			}
+			return { success: true };
+		}),
+
+	// Current cluster pressure + the autoscaled nodes we manage (for the UI).
+	getAutoscalerStatus: protectedProcedure.query(async ({ ctx }) => {
+		const org = ctx.session?.activeOrganizationId;
+		if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+		const cfg = await db.query.clusterAutoscaler.findFirst({
+			where: eq(clusterAutoscaler.organizationId, org),
+		});
+		const nodes = await db.query.server.findMany({
+			where: and(
+				eq(serverTable.organizationId, org),
+				eq(serverTable.autoscaled, true),
+			),
+			columns: {
+				serverId: true,
+				name: true,
+				ipAddress: true,
+				wgIp: true,
+				clusterRole: true,
+			},
+		});
+		let decision: Awaited<ReturnType<typeof evaluateCluster>> | null = null;
+		if (cfg) {
+			try {
+				decision = await evaluateCluster(cfg);
+			} catch {}
+		}
+		return { enabled: !!cfg?.enabled, decision, nodes };
+	}),
+
+	// Manual reconcile trigger. Runs in the background (a scale-up can take
+	// minutes); returns the current decision immediately.
+	reconcileAutoscalerNow: protectedProcedure.mutation(async ({ ctx }) => {
+		const org = ctx.session?.activeOrganizationId;
+		if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+		void reconcileAutoscaler(org, (l) =>
+			console.log(`[autoscaler:${org}] ${l.trimEnd()}`),
+		).catch((e) => console.error(`[autoscaler:${org}]`, e));
+		return { started: true };
 	}),
 });

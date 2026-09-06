@@ -107,6 +107,10 @@ export const server = pgTable("server", {
 	clusterRole: text("clusterRole"),
 	wgIp: text("wgIp"),
 	wgPublicKey: text("wgPublicKey"),
+	// Phase C autoscaling: set on worker nodes the cluster autoscaler created, so
+	// it only ever destroys its own VMs. providerNodeId is the cloud VM id.
+	autoscaled: boolean("autoscaled").notNull().default(false),
+	providerNodeId: text("providerNodeId"),
 });
 
 export const serverRelations = relations(server, ({ one, many }) => ({
@@ -191,6 +195,8 @@ export const apiUpdateServer = createSchema
 		clusterRole: z.string().nullish(),
 		wgIp: z.string().nullish(),
 		wgPublicKey: z.string().nullish(),
+		autoscaled: z.boolean().optional(),
+		providerNodeId: z.string().nullish(),
 	});
 
 export const apiUpdateServerMonitoring = createSchema
