@@ -68,6 +68,11 @@ void app.prepare().then(async () => {
 			await initCancelDeployments();
 			await initVolumeBackupsCronJobs();
 			await sendNomployRestartNotifications();
+			// Phase C: cluster autoscaler loop (reconciles orgs that enabled it).
+			const { startAutoscalerLoop } = await import(
+				"@nomploy/server/setup/autoscale/reconcile"
+			);
+			startAutoscalerLoop(60);
 		}
 		await initEnterpriseBackupCronJobs();
 

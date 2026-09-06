@@ -2,6 +2,7 @@ import { IS_CLOUD } from "@nomploy/server/constants";
 import { validateRequest } from "@nomploy/server/lib/auth";
 import type { GetServerSidePropsContext } from "next";
 import { type ReactElement, useState } from "react";
+import { ShowAutoscaler } from "@/components/dashboard/nomad/autoscale/show-autoscaler";
 import { ShowConsul } from "@/components/dashboard/nomad/consul/show-consul";
 import { ShowNomadJobs } from "@/components/dashboard/nomad/jobs/show-nomad-jobs";
 import { ShowNomadLogs } from "@/components/dashboard/nomad/logs/show-nomad-logs";
@@ -55,6 +56,7 @@ const NomadDashboard = () => {
 					<TabsTrigger value="nodes">Nodes</TabsTrigger>
 					<TabsTrigger value="consul">Consul</TabsTrigger>
 					<TabsTrigger value="network">Network</TabsTrigger>
+					<TabsTrigger value="autoscale">Autoscaling</TabsTrigger>
 					<TabsTrigger value="logs">Logs</TabsTrigger>
 				</TabsList>
 				<TabsContent value="jobs">
@@ -68,6 +70,9 @@ const NomadDashboard = () => {
 				</TabsContent>
 				<TabsContent value="network">
 					<ShowNetworkPolicies />
+				</TabsContent>
+				<TabsContent value="autoscale">
+					<ShowAutoscaler />
 				</TabsContent>
 				<TabsContent value="logs">
 					<ShowNomadLogs serverId={serverId} />
