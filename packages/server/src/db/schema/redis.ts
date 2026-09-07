@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { bigint, integer, json, pgTable, text } from "drizzle-orm/pg-core";
+import { integer, json, pgTable, text } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -8,24 +8,8 @@ import { mounts } from "./mount";
 import { server } from "./server";
 import {
 	applicationStatus,
-	type EndpointSpecSwarm,
-	EndpointSpecSwarmSchema,
-	type HealthCheckSwarm,
-	HealthCheckSwarmSchema,
-	type LabelsSwarm,
-	LabelsSwarmSchema,
-	type NetworkSwarm,
-	NetworkSwarmSchema,
-	type PlacementSwarm,
-	PlacementSwarmSchema,
-	type RestartPolicySwarm,
-	RestartPolicySwarmSchema,
-	type ServiceModeSwarm,
-	ServiceModeSwarmSchema,
 	type UlimitsSwarm,
 	UlimitsSwarmSchema,
-	type UpdateConfigSwarm,
-	UpdateConfigSwarmSchema,
 } from "./shared";
 import { APP_NAME_MESSAGE, APP_NAME_REGEX, generateAppName } from "./utils";
 
@@ -56,16 +40,6 @@ export const redis = pgTable("redis", {
 	applicationStatus: applicationStatus("applicationStatus")
 		.notNull()
 		.default("idle"),
-	healthCheckSwarm: json("healthCheckSwarm").$type<HealthCheckSwarm>(),
-	restartPolicySwarm: json("restartPolicySwarm").$type<RestartPolicySwarm>(),
-	placementSwarm: json("placementSwarm").$type<PlacementSwarm>(),
-	updateConfigSwarm: json("updateConfigSwarm").$type<UpdateConfigSwarm>(),
-	rollbackConfigSwarm: json("rollbackConfigSwarm").$type<UpdateConfigSwarm>(),
-	modeSwarm: json("modeSwarm").$type<ServiceModeSwarm>(),
-	labelsSwarm: json("labelsSwarm").$type<LabelsSwarm>(),
-	networkSwarm: json("networkSwarm").$type<NetworkSwarm[]>(),
-	stopGracePeriodSwarm: bigint("stopGracePeriodSwarm", { mode: "number" }),
-	endpointSpecSwarm: json("endpointSpecSwarm").$type<EndpointSpecSwarm>(),
 	ulimitsSwarm: json("ulimitsSwarm").$type<UlimitsSwarm>(),
 	replicas: integer("replicas").default(1).notNull(),
 
@@ -113,16 +87,6 @@ const createSchema = createInsertSchema(redis, {
 	externalPort: z.number(),
 	description: z.string().optional(),
 	serverId: z.string().optional(),
-	healthCheckSwarm: HealthCheckSwarmSchema.nullable(),
-	restartPolicySwarm: RestartPolicySwarmSchema.nullable(),
-	placementSwarm: PlacementSwarmSchema.nullable(),
-	updateConfigSwarm: UpdateConfigSwarmSchema.nullable(),
-	rollbackConfigSwarm: UpdateConfigSwarmSchema.nullable(),
-	modeSwarm: ServiceModeSwarmSchema.nullable(),
-	labelsSwarm: LabelsSwarmSchema.nullable(),
-	networkSwarm: NetworkSwarmSchema.nullable(),
-	stopGracePeriodSwarm: z.number().nullable(),
-	endpointSpecSwarm: EndpointSpecSwarmSchema.nullable(),
 	ulimitsSwarm: UlimitsSwarmSchema.nullable(),
 });
 
