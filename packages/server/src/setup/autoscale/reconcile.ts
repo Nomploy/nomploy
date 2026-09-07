@@ -89,7 +89,9 @@ export const evaluateCluster = async (cfg: {
 		blockedEvals = evals.filter((e) => e.Status === "blocked").length;
 	} catch {}
 
-	// Autoscaled worker nodes we currently manage.
+	// Autoscaled nodes we currently manage. Count ALL of them (a VM that is
+	// provisioned but not yet joined still has a server row with clusterRole=null)
+	// so a slow join never causes us to provision duplicates on the next tick.
 	const autoscaled = await db.query.server.findMany({
 		where: and(
 			eq(serverTable.organizationId, cfg.organizationId),
@@ -97,9 +99,7 @@ export const evaluateCluster = async (cfg: {
 		),
 		columns: { serverId: true, clusterRole: true },
 	});
-	const autoscaledCount = autoscaled.filter(
-		(s) => s.clusterRole === "worker",
-	).length;
+	const autoscaledCount = autoscaled.length;
 
 	const base = { utilization, blockedEvals, autoscaledCount };
 	// Floor first: always keep at least minNodes autoscaled workers, even with no
@@ -144,8 +144,13 @@ const waitForSsh = async (serverId: string, onLog: Log) => {
 	for (let i = 0; i < 40; i++) {
 		try {
 			await execAsyncRemote(serverId, "echo nomploy-ssh-ok");
+			onLog("SSH ready ✅\n");
 			return true;
-		} catch {
+		} catch (e) {
+			if (i % 4 === 0)
+				onLog(
+					`waiting for SSH (attempt ${i + 1})… ${e instanceof Error ? e.message.split("\n")[0] : ""}\n`,
+				);
 			await new Promise((r) => setTimeout(r, 5000));
 		}
 	}
@@ -232,16 +237,28 @@ export const reconcileAutoscaler = async (
 			.returning();
 		if (!row) throw new Error("Failed to create server record");
 
-		const ok = await waitForSsh(row.serverId, onLog);
-		if (!ok) {
-			// Roll back: destroy the VM + row so we don't leak.
+		// Roll back the VM + row if the node never becomes reachable or the join
+		// fails, so a failure never leaves an orphaned VM or half-joined row.
+		const rollback = async () => {
 			await provisioner.destroyNode(node.providerId).catch(() => {});
 			await db
 				.delete(serverTable)
 				.where(eq(serverTable.serverId, row.serverId));
+		};
+		const ok = await waitForSsh(row.serverId, onLog);
+		if (!ok) {
+			await rollback();
 			throw new Error("New node never became SSH-reachable; rolled back");
 		}
-		await joinWorkerNode(row.serverId, onLog);
+		try {
+			await joinWorkerNode(row.serverId, onLog);
+		} catch (e) {
+			onLog(
+				`❌ join failed: ${e instanceof Error ? e.message : String(e)} — rolling back\n`,
+			);
+			await rollback();
+			throw e;
+		}
 		await stamp();
 		return `scaled up: +${name}`;
 	}
