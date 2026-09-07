@@ -1,4 +1,5 @@
 import { encodeBase64, getEnvironmentVariablesObject } from "../docker/utils";
+import { clusterDnsServers } from "./nomad";
 
 /**
  * Normalized input for a stateful database → Nomad job. Every Dokploy database
@@ -121,9 +122,11 @@ export const generateDatabaseNomadJob = (db: NomadDatabaseInput): string => {
 
     network {
       dns {
-        # TODO(phase-b): multi-server DNS — list all server overlay IPs so DB
-        # allocs still resolve *.service.consul if the hub goes down.
-        servers  = ["10.10.0.1"]
+        # All server overlay IPs (hub + HA servers), so a DB alloc still resolves
+        # *.service.consul if the hub goes down. See clusterDnsServers().
+        servers  = [${clusterDnsServers()
+					.map((ip) => `"${ip}"`)
+					.join(", ")}]
         searches = ["service.consul"]
       }
 ${ports.join("\n")}

@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { paths } from "@nomploy/server/constants";
 import type { Domain } from "@nomploy/server/services/domain";
 import type { InferResultType } from "@nomploy/server/types/with";
+import { allServers, readCluster } from "../../setup/nomad-mesh";
 import { encodeBase64, getEnvironmentVariablesObject } from "../docker/utils";
 import { parseComposeToNomadServices } from "./nomad-parser";
 
@@ -45,13 +46,25 @@ export interface NomadServiceSpec {
 	};
 }
 
-// The control plane's WireGuard IP, where dnsmasq forwards *.service.consul to
-// Consul (and everything else upstream). Every allocation points its DNS here so
-// services and databases resolve each other by name across the cluster.
-// TODO(phase-b): with HA servers this is a DNS SPOF — if the hub dies, name
-// resolution stops even though the raft still schedules. Make dns.servers list
-// all server overlay IPs (readCluster().servers) so allocs fail over.
-const CLUSTER_DNS_IP = "10.10.0.1";
+// Allocation DNS servers: every server node (hub + HA servers) runs a dnsmasq on
+// its own WireGuard IP that forwards *.service.consul to its local Consul and
+// everything else upstream. Listing them ALL means name resolution fails over if
+// the hub dies — the raft keeps scheduling and allocs keep resolving via a
+// surviving server. Falls back to the hub IP when cluster.json isn't readable
+// (e.g. unit tests / a fresh single-node install before it's written).
+const HUB_DNS_IP = "10.10.0.1";
+export const clusterDnsServers = (): string[] => {
+	try {
+		const cluster = readCluster();
+		if (!cluster) return [HUB_DNS_IP];
+		const ips = allServers(cluster)
+			.map((s) => s.wgIp)
+			.filter(Boolean);
+		return ips.length > 0 ? ips : [HUB_DNS_IP];
+	} catch {
+		return [HUB_DNS_IP];
+	}
+};
 
 // ─── Main Entry Point ────────────────────────────────────────────────────────
 
@@ -214,9 +227,12 @@ const generateTaskGroup = (
 	// circuits the proxy's own DNS redirect, and Nomad forbids network.dns with
 	// transparent proxy unless no_dns is set.
 	const networkModeLine = segmentation ? '\n      mode = "bridge"' : "";
+	const dnsServers = clusterDnsServers()
+		.map((ip) => `"${ip}"`)
+		.join(", ");
 	const networkBlock = `    network {${networkModeLine}
       dns {
-        servers  = ["${CLUSTER_DNS_IP}"]
+        servers  = [${dnsServers}]
         searches = ["service.consul"]
       }
 ${portLines}
