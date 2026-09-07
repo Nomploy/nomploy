@@ -1,7 +1,6 @@
 import { VALID_BRANCH_REGEX } from "@nomploy/server/utils/git-branch-validation";
 import { relations } from "drizzle-orm";
 import {
-	bigint,
 	boolean,
 	integer,
 	json,
@@ -30,25 +29,9 @@ import { server } from "./server";
 import {
 	applicationStatus,
 	certificateType,
-	type EndpointSpecSwarm,
-	EndpointSpecSwarmSchema,
-	type HealthCheckSwarm,
-	HealthCheckSwarmSchema,
-	type LabelsSwarm,
-	LabelsSwarmSchema,
-	type NetworkSwarm,
-	NetworkSwarmSchema,
-	type PlacementSwarm,
-	PlacementSwarmSchema,
-	type RestartPolicySwarm,
-	RestartPolicySwarmSchema,
-	type ServiceModeSwarm,
-	ServiceModeSwarmSchema,
 	triggerType,
 	type UlimitsSwarm,
 	UlimitsSwarmSchema,
-	type UpdateConfigSwarm,
-	UpdateConfigSwarmSchema,
 } from "./shared";
 import { sshKeys } from "./ssh-key";
 import { APP_NAME_MESSAGE, APP_NAME_REGEX, generateAppName } from "./utils";
@@ -167,16 +150,6 @@ export const applications = pgTable("application", {
 	// Drop
 	dropBuildPath: text("dropBuildPath"),
 	// Docker swarm json
-	healthCheckSwarm: json("healthCheckSwarm").$type<HealthCheckSwarm>(),
-	restartPolicySwarm: json("restartPolicySwarm").$type<RestartPolicySwarm>(),
-	placementSwarm: json("placementSwarm").$type<PlacementSwarm>(),
-	updateConfigSwarm: json("updateConfigSwarm").$type<UpdateConfigSwarm>(),
-	rollbackConfigSwarm: json("rollbackConfigSwarm").$type<UpdateConfigSwarm>(),
-	modeSwarm: json("modeSwarm").$type<ServiceModeSwarm>(),
-	labelsSwarm: json("labelsSwarm").$type<LabelsSwarm>(),
-	networkSwarm: json("networkSwarm").$type<NetworkSwarm[]>(),
-	stopGracePeriodSwarm: bigint("stopGracePeriodSwarm", { mode: "number" }),
-	endpointSpecSwarm: json("endpointSpecSwarm").$type<EndpointSpecSwarm>(),
 	ulimitsSwarm: json("ulimitsSwarm").$type<UlimitsSwarm>(),
 	//
 	replicas: integer("replicas").default(1).notNull(),
@@ -349,14 +322,6 @@ const createSchema = createInsertSchema(applications, {
 	isStaticSpa: z.boolean().optional(),
 	createEnvFile: z.boolean().optional(),
 	owner: z.string(),
-	healthCheckSwarm: HealthCheckSwarmSchema.nullable(),
-	restartPolicySwarm: RestartPolicySwarmSchema.nullable(),
-	placementSwarm: PlacementSwarmSchema.nullable(),
-	updateConfigSwarm: UpdateConfigSwarmSchema.nullable(),
-	rollbackConfigSwarm: UpdateConfigSwarmSchema.nullable(),
-	modeSwarm: ServiceModeSwarmSchema.nullable(),
-	labelsSwarm: LabelsSwarmSchema.nullable(),
-	networkSwarm: NetworkSwarmSchema.nullable(),
 	previewPort: z.number().optional(),
 	previewEnv: z.string().optional(),
 	previewBuildArgs: z.string().optional(),
@@ -370,8 +335,6 @@ const createSchema = createInsertSchema(applications, {
 	watchPaths: z.array(z.string()).optional().optional(),
 	previewLabels: z.array(z.string()).optional(),
 	cleanCache: z.boolean().optional(),
-	stopGracePeriodSwarm: z.number().nullable(),
-	endpointSpecSwarm: EndpointSpecSwarmSchema.nullable(),
 	ulimitsSwarm: UlimitsSwarmSchema.nullable(),
 	enableSubmodules: z.boolean().optional(),
 	icon: z

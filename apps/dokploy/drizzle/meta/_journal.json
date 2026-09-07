@@ -1233,6 +1233,13 @@
       "when": 1788768444110,
       "tag": "0175_lonely_human_cannonball",
       "breakpoints": true
+    },
+    {
+      "idx": 176,
+      "version": "7",
+      "when": 1788782279508,
+      "tag": "0176_overjoyed_silverclaw",
+      "breakpoints": true
     }
   ]
 }
