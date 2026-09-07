@@ -133,6 +133,13 @@ export const ShowCluster = () => {
 		refetchInterval: 20000,
 	});
 	const { data: autoscaler } = api.nomad.getAutoscalerConfig.useQuery();
+	const { data: dnsHealth } = api.nomad.getClusterDnsHealth.useQuery(
+		undefined,
+		{
+			refetchOnWindowFocus: false,
+			refetchInterval: 30000,
+		},
+	);
 
 	// One-click cloud provisioning is available only once a provider token + SSH
 	// key are configured (in the Autoscaling tab).
@@ -468,6 +475,36 @@ export const ShowCluster = () => {
 								Settings → Servers → Nomad
 							</span>
 							.
+						</div>
+					)}
+
+					{dnsHealth && dnsHealth.length > 0 && (
+						<div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border p-3 text-xs">
+							<span className="font-medium">Cluster DNS</span>
+							<span className="text-muted-foreground">
+								{dnsHealth.filter((d) => d.ok).length}/{dnsHealth.length}{" "}
+								resolvers healthy
+							</span>
+							<div className="flex flex-wrap items-center gap-2">
+								{dnsHealth.map((d) => (
+									<span
+										key={d.wgIp}
+										className="flex items-center gap-1"
+										title={`${d.wgIp}:53 ${d.ok ? "resolving" : "not resolving"}`}
+									>
+										<span
+											className={`h-2 w-2 rounded-full ${d.ok ? "bg-emerald-500" : "bg-destructive"}`}
+										/>
+										{d.name}
+									</span>
+								))}
+							</div>
+							{dnsHealth.some((d) => !d.ok) && (
+								<span className="text-amber-600">
+									— a down resolver won't serve DNS failover; a server joined
+									before HA-DNS needs its dnsmasq backfill.
+								</span>
+							)}
 						</div>
 					)}
 

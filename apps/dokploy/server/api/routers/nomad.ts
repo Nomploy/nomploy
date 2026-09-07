@@ -1036,6 +1036,33 @@ export const nomadRouter = createTRPCRouter({
 		];
 	}),
 
+	// Per-server cluster-DNS health: probe each server's overlay :53 resolver
+	// (hub + HA servers run dnsmasq → local Consul). Surfaces whether HA DNS
+	// failover is actually in place — e.g. a server joined before the HA-DNS
+	// change that still needs its dnsmasq backfill shows up as down here.
+	getClusterDnsHealth: withPermission("server", "read").query(async () => {
+		const cluster = readCluster();
+		if (!cluster) return [];
+		const { Resolver } = await import("node:dns/promises");
+		const probe = async (ip: string): Promise<boolean> => {
+			try {
+				const r = new Resolver({ timeout: 2000, tries: 1 });
+				r.setServers([ip]);
+				const res = await r.resolve4("consul.service.consul");
+				return res.length > 0;
+			} catch {
+				return false;
+			}
+		};
+		return Promise.all(
+			allServers(cluster).map(async (s) => ({
+				name: s.name,
+				wgIp: s.wgIp,
+				ok: await probe(s.wgIp),
+			})),
+		);
+	}),
+
 	// ── Phase B: network segmentation (Consul Connect) ──────────────────────
 	// Toggle a project's mesh isolation, then reconcile intentions. Services
 	// pick up the sidecar/mesh on their next deploy.
