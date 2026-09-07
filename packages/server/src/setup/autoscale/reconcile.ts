@@ -102,6 +102,16 @@ export const evaluateCluster = async (cfg: {
 	).length;
 
 	const base = { utilization, blockedEvals, autoscaledCount };
+	// Floor first: always keep at least minNodes autoscaled workers, even with no
+	// pressure. (Also caps runaway scale-up from a permanently-unplaceable alloc,
+	// since the pressure branch below still respects maxNodes.)
+	if (autoscaledCount < cfg.minNodes) {
+		return {
+			action: "up",
+			reason: `below min nodes (${autoscaledCount} < ${cfg.minNodes})`,
+			...base,
+		};
+	}
 	if (
 		(blockedEvals > 0 || utilization >= cfg.scaleUpThreshold) &&
 		autoscaledCount < cfg.maxNodes
