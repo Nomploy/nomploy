@@ -1,8 +1,11 @@
 import {
+	Ban,
 	CloudCog,
 	Crown,
 	Loader2,
+	MoreHorizontal,
 	Network,
+	Play,
 	Plus,
 	RefreshCw,
 	ServerCog,
@@ -254,6 +257,19 @@ export const ShowCluster = () => {
 			},
 		},
 	);
+
+	// Maintenance: drain (cordon + migrate allocs) / un-drain a node in place.
+	const setNodeDrain = api.nomad.setNodeDrain.useMutation({
+		onSuccess: (_res, vars) => {
+			toast.success(
+				vars.enable
+					? "Node draining — allocations are migrating off"
+					: "Node resumed — scheduling re-enabled",
+			);
+			refetchMembers();
+		},
+		onError: (error) => toast.error(error.message || "Drain change failed"),
+	});
 
 	const busy = isProvisioning || isLeaving || isJoining;
 	const serverCount = members?.filter((m) => m.role === "server").length ?? 0;
@@ -559,39 +575,87 @@ export const ShowCluster = () => {
 													{m.wgIp}
 												</TableCell>
 												<TableCell>
-													<Badge
-														variant={
-															m.status === "ready"
-																? "default"
-																: m.status === "unknown"
-																	? "outline"
-																	: "destructive"
-														}
-													>
-														{m.status}
-													</Badge>
+													<div className="flex flex-wrap items-center gap-1.5">
+														<Badge
+															variant={
+																m.status === "ready"
+																	? "default"
+																	: m.status === "unknown"
+																		? "outline"
+																		: "destructive"
+															}
+														>
+															{m.status}
+														</Badge>
+														{m.draining ? (
+															<Badge className="border-amber-500/50 bg-amber-500/10 text-amber-600">
+																draining
+															</Badge>
+														) : (
+															!m.eligible && (
+																<Badge variant="outline">cordoned</Badge>
+															)
+														)}
+													</div>
 												</TableCell>
 												<TableCell className="text-right">
 													{m.serverId ? (
-														<Button
-															type="button"
-															variant="ghost"
-															size="sm"
-															className="text-destructive hover:text-destructive"
-															disabled={busy}
-															onClick={() => {
-																setForceLeave(false);
-																setLeaveLogs("");
-																setRemoveTarget({
-																	serverId: m.serverId as string,
-																	name: m.name,
-																	role: m.role as ClusterRole,
-																	hasVm: m.hasVm,
-																});
-															}}
-														>
-															<Trash2 className="h-4 w-4" />
-														</Button>
+														<DropdownMenu>
+															<DropdownMenuTrigger asChild>
+																<Button
+																	type="button"
+																	variant="ghost"
+																	size="sm"
+																	disabled={busy}
+																>
+																	<MoreHorizontal className="h-4 w-4" />
+																</Button>
+															</DropdownMenuTrigger>
+															<DropdownMenuContent align="end">
+																{m.draining || !m.eligible ? (
+																	<DropdownMenuItem
+																		onClick={() =>
+																			setNodeDrain.mutate({
+																				serverId: m.serverId as string,
+																				enable: false,
+																			})
+																		}
+																	>
+																		<Play className="mr-2 h-4 w-4" />
+																		Resume (un-drain)
+																	</DropdownMenuItem>
+																) : (
+																	<DropdownMenuItem
+																		onClick={() =>
+																			setNodeDrain.mutate({
+																				serverId: m.serverId as string,
+																				enable: true,
+																			})
+																		}
+																	>
+																		<Ban className="mr-2 h-4 w-4" />
+																		Drain (maintenance)
+																	</DropdownMenuItem>
+																)}
+																<DropdownMenuSeparator />
+																<DropdownMenuItem
+																	className="text-destructive focus:text-destructive"
+																	onClick={() => {
+																		setForceLeave(false);
+																		setLeaveLogs("");
+																		setRemoveTarget({
+																			serverId: m.serverId as string,
+																			name: m.name,
+																			role: m.role as ClusterRole,
+																			hasVm: m.hasVm,
+																		});
+																	}}
+																>
+																	<Trash2 className="mr-2 h-4 w-4" />
+																	Remove from cluster
+																</DropdownMenuItem>
+															</DropdownMenuContent>
+														</DropdownMenu>
 													) : (
 														<span className="text-muted-foreground text-xs">
 															control plane
