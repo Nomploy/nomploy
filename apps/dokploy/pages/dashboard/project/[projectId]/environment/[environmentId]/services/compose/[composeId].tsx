@@ -23,15 +23,14 @@ import { ShowVolumeBackups } from "@/components/dashboard/application/volume-bac
 import { AddCommandCompose } from "@/components/dashboard/compose/advanced/add-command";
 import { IsolatedDeploymentTab } from "@/components/dashboard/compose/advanced/add-isolation";
 import { ShowComposeContainers } from "@/components/dashboard/compose/containers/show-compose-containers";
-import { ShowNomadAllocations } from "@/components/dashboard/nomad/allocations/show-nomad-allocations";
 import { DeleteService } from "@/components/dashboard/compose/delete-service";
 import { ShowGeneralCompose } from "@/components/dashboard/compose/general/show";
 import { ShowDockerLogsCompose } from "@/components/dashboard/compose/logs/show";
-import { ShowDockerLogsStack } from "@/components/dashboard/compose/logs/show-stack";
 import { UpdateCompose } from "@/components/dashboard/compose/update-compose";
 import { ShowBackups } from "@/components/dashboard/database/backups/show-backups";
 import { ComposeFreeMonitoring } from "@/components/dashboard/monitoring/free/container/show-free-compose-monitoring";
 import { ComposePaidMonitoring } from "@/components/dashboard/monitoring/paid/container/show-paid-compose-monitoring";
+import { ShowNomadAllocations } from "@/components/dashboard/nomad/allocations/show-nomad-allocations";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
 import { AdvanceBreadcrumb } from "@/components/shared/advance-breadcrumb";
 import { StatusTooltip } from "@/components/shared/status-tooltip";
@@ -310,9 +309,7 @@ const Service = (
 										<TabsContent value="containers">
 											<div className="flex flex-col gap-4 pt-2.5">
 												{data?.composeType === "nomad" ? (
-													<ShowNomadAllocations
-														appName={data?.appName || ""}
-													/>
+													<ShowNomadAllocations appName={data?.appName || ""} />
 												) : (
 													<ShowComposeContainers
 														serverId={data?.serverId || undefined}
@@ -382,20 +379,13 @@ const Service = (
 									{permissions?.logs.read && (
 										<TabsContent value="logs">
 											<div className="flex flex-col gap-4 pt-2.5">
-												{data?.composeType === "docker-compose" ? (
+												{data?.composeType === "nomad" ? (
+													<ShowNomadAllocations appName={data?.appName || ""} />
+												) : (
 													<ShowDockerLogsCompose
 														serverId={data?.serverId || ""}
 														appName={data?.appName || ""}
 														appType={data?.composeType || "docker-compose"}
-													/>
-												) : data?.composeType === "nomad" ? (
-													<ShowNomadAllocations
-														appName={data?.appName || ""}
-													/>
-												) : (
-													<ShowDockerLogsStack
-														serverId={data?.serverId || ""}
-														appName={data?.appName || ""}
 													/>
 												)}
 											</div>
