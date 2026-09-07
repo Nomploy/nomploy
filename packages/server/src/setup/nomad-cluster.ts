@@ -304,6 +304,25 @@ plugin "docker" {
 }
 NOMAD
 
+# Cluster DNS (dnsmasq) on this server's overlay IP — mirrors the hub's resolver
+# so allocations that list this server in their dns.servers can resolve
+# *.service.consul via the local Consul (and everything else upstream). Listing
+# every server's resolver in a job's dns block (clusterDnsServers) is what makes
+# name resolution survive the hub going down.
+echo "==> Configuring cluster DNS (dnsmasq) on ${opts.ownWgIp}"
+$SUDO apt-get install -y dnsmasq >/dev/null 2>&1 || $SUDO yum -y install dnsmasq >/dev/null 2>&1 || true
+$SUDO tee /etc/dnsmasq.d/nomploy-consul.conf >/dev/null <<DNSMASQ
+bind-interfaces
+listen-address=${opts.ownWgIp}
+port=53
+no-resolv
+server=/consul/127.0.0.1#8600
+server=1.1.1.1
+server=8.8.8.8
+DNSMASQ
+$SUDO systemctl enable dnsmasq >/dev/null 2>&1 || true
+$SUDO systemctl restart dnsmasq >/dev/null 2>&1 || true
+
 echo "==> Starting Consul + Nomad servers"
 $SUDO systemctl enable consul nomad >/dev/null 2>&1 || true
 $SUDO systemctl restart --no-block consul
