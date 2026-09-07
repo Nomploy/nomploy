@@ -71,14 +71,23 @@ RUN curl -fsSL https://get.docker.com -o get-docker.sh && sh get-docker.sh --ver
 # | VERBOSE=1 VERSION=1.21.0 bash
 
 ARG NIXPACKS_VERSION=1.41.0
-RUN curl -sSL https://nixpacks.com/install.sh -o install.sh \
-    && chmod +x install.sh \
-    && ./install.sh \
-    && pnpm install -g tsx
+# Retry: install.sh downloads a release tarball from GitHub, which intermittently
+# 4xx/5xx's and would otherwise fail the whole multi-arch build (curl exit 22).
+# The trailing `[ "$ok" = 1 ]` fails the layer if all attempts fail (no silent skip).
+RUN ok=0; for i in 1 2 3; do \
+      if curl -sSL https://nixpacks.com/install.sh -o install.sh \
+         && chmod +x install.sh && ./install.sh; then ok=1; break; fi; \
+      echo "nixpacks install attempt $i failed; retrying in 5s"; sleep 5; \
+    done; \
+    [ "$ok" = 1 ] && pnpm install -g tsx
 
-# Install Railpack
+# Install Railpack (same transient-download hardening as nixpacks)
 ARG RAILPACK_VERSION=0.15.4
-RUN curl -sSL https://railpack.com/install.sh | bash
+RUN ok=0; for i in 1 2 3; do \
+      if curl -sSL https://railpack.com/install.sh | bash; then ok=1; break; fi; \
+      echo "railpack install attempt $i failed; retrying in 5s"; sleep 5; \
+    done; \
+    [ "$ok" = 1 ]
 
 # Install buildpacks
 COPY --from=buildpacksio/pack:0.39.1 /usr/local/bin/pack /usr/local/bin/pack
