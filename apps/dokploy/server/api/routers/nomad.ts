@@ -980,13 +980,16 @@ export const nomadRouter = createTRPCRouter({
 			token: DEFAULT_TOKEN,
 			namespace: "default",
 		};
-		let nodes: { Address: string; Status: string }[] = [];
+		let nodes: {
+			Address: string;
+			Status: string;
+			SchedulingEligibility?: string;
+			Drain?: boolean;
+		}[] = [];
 		try {
-			nodes = (await nomadClient(cfg).get("/nodes")) as {
-				Address: string;
-				Status: string;
-			}[];
+			nodes = (await nomadClient(cfg).get("/nodes")) as typeof nodes;
 		} catch {}
+		const nodeByIp = new Map(nodes.map((n) => [n.Address, n]));
 		// Which server IP currently holds the Nomad raft leadership (host:port).
 		let leaderIp = "";
 		try {
@@ -1015,6 +1018,7 @@ export const nomadRouter = createTRPCRouter({
 						: prov?.providerNodeId
 							? "provisioned"
 							: "manual";
+			const node = nodeByIp.get(wgIp);
 			return {
 				name,
 				role,
@@ -1025,6 +1029,11 @@ export const nomadRouter = createTRPCRouter({
 				source,
 				// True when the node has a cloud VM behind it (removal can destroy it).
 				hasVm: !!prov?.providerNodeId,
+				// Maintenance state: draining = actively migrating allocs off;
+				// ineligible = cordoned (no new allocs). Undefined when the Nomad node
+				// isn't found (not yet joined).
+				draining: node ? !!node.Drain : false,
+				eligible: node ? node.SchedulingEligibility !== "ineligible" : true,
 			};
 		};
 		return [
@@ -1035,6 +1044,54 @@ export const nomadRouter = createTRPCRouter({
 			...cluster.peers.map((p) => row(p.name, "worker", p.wgIp, p.serverId)),
 		];
 	}),
+
+	// Maintenance mode: drain (cordon + migrate allocs off) or un-drain a node
+	// WITHOUT removing it from the cluster. Enable → node becomes ineligible and
+	// its allocations reschedule elsewhere; disable → node is eligible again.
+	// The control plane (hub) has serverId=null and is never a target (it runs the
+	// panel + DB), so it can't be drained through here.
+	setNodeDrain: withPermission("server", "create")
+		.input(z.object({ serverId: z.string(), enable: z.boolean() }))
+		.mutation(async ({ input, ctx }) => {
+			const server = await findServerById(input.serverId);
+			if (server.organizationId !== ctx.session?.activeOrganizationId) {
+				throw new TRPCError({ code: "UNAUTHORIZED" });
+			}
+			const cluster = readCluster();
+			if (!cluster) throw new TRPCError({ code: "NOT_FOUND" });
+			const member =
+				cluster.peers.find((p) => p.serverId === input.serverId) ||
+				(cluster.servers || []).find((s) => s.serverId === input.serverId);
+			if (!member)
+				throw new TRPCError({
+					code: "NOT_FOUND",
+					message: "This server is not a cluster member.",
+				});
+
+			const cfg = {
+				address: DEFAULT_ADDRESS,
+				token: DEFAULT_TOKEN,
+				namespace: "default",
+			};
+			const nodes = (await nomadClient(cfg).get("/nodes")) as {
+				ID: string;
+				Address: string;
+			}[];
+			const node = nodes.find((n) => n.Address === member.wgIp);
+			if (!node)
+				throw new TRPCError({
+					code: "NOT_FOUND",
+					message: "No matching Nomad node (is it joined + ready?).",
+				});
+
+			// -detach returns as soon as the drain starts (the UI polls status); the
+			// deadline bounds how long Nomad waits before force-evicting allocs.
+			const cmd = input.enable
+				? `nomad node drain -enable -yes -detach -deadline 5m ${node.ID}`
+				: `nomad node drain -disable -yes ${node.ID}`;
+			await execAsync(cmd);
+			return { success: true };
+		}),
 
 	// Per-server cluster-DNS health: probe each server's overlay :53 resolver
 	// (hub + HA servers run dnsmasq → local Consul). Surfaces whether HA DNS
