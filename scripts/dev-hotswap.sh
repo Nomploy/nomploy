@@ -1,31 +1,57 @@
 #!/usr/bin/env bash
 #
 # Fast dev loop for the hub: build the changed package(s) locally (native, so no
-# QEMU), then swap just the built JS into the already-running container and
-# restart it. ~1-2 min vs the ~11 min GHCR CI + 4.7 GB image pull.
+# QEMU), swap just the built JS into the running panel container, then bake that
+# into a local image and re-run the panel's Nomad job so the change persists.
+# ~2 min vs the ~11 min GHCR CI + multi-GB image pull.
 #
 # Why this works: the build output (.next / dist) is portable JS — not
 # arch-specific — so an arm64 Mac can produce exactly what the amd64 hub runs.
 # Only native node_modules are arch-specific, and those are already baked into
 # the container's image and never change unless package.json/lockfile change.
 #
-# Use the full CI image build (push to nomad -> :latest, or workflow_dispatch)
-# when: dependencies changed, or you're cutting a real release.
+# IMPORTANT — the panel runs as a Nomad JOB, not `docker run`. A plain
+# `docker restart` makes Nomad treat the task as failed and RESCHEDULE it,
+# recreating the container from the image and discarding every `docker cp`'d
+# file (you'd silently get the old code back). So instead we `docker commit` the
+# hot-swapped container to a local `:hotswap` tag and re-register the job at that
+# tag with force_pull=false — the new code is now baked into the image the alloc
+# runs, and survives reschedules.
+#
+# CAVEAT: this repoints the panel job to the local `:hotswap` image. Clicking
+# Reload/Update in the UI (or any re-submit of the job with the real image)
+# reverts to ghcr.io/nomploy/nomploy:latest with force_pull — i.e. back to the
+# released code. That's the intended release path; use the full CI build (push
+# to main, or workflow_dispatch) when you actually want to ship.
 #
 # Usage:
 #   scripts/dev-hotswap.sh              # build+swap both packages
 #   scripts/dev-hotswap.sh server       # only @nomploy/server (packages/server)
 #   scripts/dev-hotswap.sh dokploy      # only apps/dokploy (UI + app server)
 #
-# Env overrides: HUB=root@host  CONTAINER=nomploy
+# Env overrides:
+#   HUB=root@host          ssh target (default root@2.29.43.0)
+#   CONTAINER=name         panel container (default: auto-detected nomploy-<allocId>)
+#   JOB=nomploy            Nomad job name (default nomploy)
+#   HOTSWAP_TAG=…          local image tag to commit to (default :hotswap)
 set -euo pipefail
 
 HUB="${HUB:-root@2.29.43.0}"
-CONTAINER="${CONTAINER:-nomploy}"
+JOB="${JOB:-nomploy}"
+HOTSWAP_TAG="${HOTSWAP_TAG:-ghcr.io/nomploy/nomploy:hotswap}"
 WHAT="${1:-all}"
 cd "$(dirname "$0")/.."
 
-sshh() { ssh -o BatchMode=yes -o ConnectTimeout=20 "$HUB" "$@"; }
+sshh() { ssh -o BatchMode=yes -o ConnectTimeout=25 "$HUB" "$@"; }
+
+# The panel container is nomploy-<allocId> (a Nomad alloc), not "nomploy".
+# Auto-detect the running one unless the caller pinned CONTAINER explicitly.
+CONTAINER="${CONTAINER:-}"
+if [[ -z "$CONTAINER" ]]; then
+  CONTAINER="$(sshh "docker ps --format '{{.Names}}' | grep -E '^nomploy-[0-9a-f]{8}' | head -1")"
+  [[ -z "$CONTAINER" ]] && { echo "✖ no running nomploy-<allocId> container found on $HUB" >&2; exit 1; }
+fi
+echo "▶ panel container: $CONTAINER"
 
 # The build script flips @nomploy/server's exports to ./dist (switch:prod);
 # always flip them back to ./src so local typecheck/dev keeps working.
@@ -44,14 +70,22 @@ if [[ "$WHAT" == "all" || "$WHAT" == "dokploy" ]]; then
 fi
 
 # Replace a directory inside the container with a fresh local copy.
-#   swap_dir <local-parent> <dir-name> <container-parent>
+#   swap_dir <local-parent> <dir-name> <container-parent> [tar-excludes…]
 # Streams a tar over ssh; removes the stale target first so deleted files don't
 # linger (docker cp merges, it doesn't prune).
 swap_dir() {
   local lparent="$1" name="$2" cparent="$3"
+  shift 3
+  local excludes=()
+  local e
+  for e in "$@"; do excludes+=(--exclude "$e"); done
   echo "  ↳ $name → $cparent/$name"
   sshh "docker exec '$CONTAINER' rm -rf '$cparent/$name'"
-  tar -C "$lparent" -cf - "$name" | sshh "docker cp - '$CONTAINER:$cparent/'"
+  # --no-xattrs / --no-mac-metadata: macOS bsdtar otherwise embeds the
+  # com.apple.provenance xattr, which `docker cp -` rejects (lsetxattr … not
+  # supported) on the Linux hub.
+  tar --no-xattrs --no-mac-metadata "${excludes[@]}" -C "$lparent" -cf - "$name" \
+    | sshh "docker cp - '$CONTAINER:$cparent/'"
 }
 
 # Resolve the (hashed) @nomploy/server package dir inside the container.
@@ -62,13 +96,35 @@ if [[ "$WHAT" == "all" || "$WHAT" == "server" ]]; then
 fi
 if [[ "$WHAT" == "all" || "$WHAT" == "dokploy" ]]; then
   echo "▶ swap dokploy build…"
-  swap_dir apps/dokploy .next /app
+  # .next/cache (webpack/build cache) and .next/dev (dev-server artifacts left by
+  # `pnpm dev`, can be 2+ GB) are NOT needed by the production server — only
+  # .next/server, .next/static and the manifests are. Skipping them cuts the
+  # upload from gigabytes to tens of MB (critical on a slow uplink / small hub).
+  swap_dir apps/dokploy .next /app cache dev
   swap_dir apps/dokploy dist  /app
 fi
 
-echo "▶ restart + wait for health…"
-sshh "docker restart '$CONTAINER' >/dev/null
-  until [ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3000/api/trpc/settings.health)\" = 200 ]; do sleep 3; done
+echo "▶ commit $CONTAINER → $HOTSWAP_TAG + re-run Nomad job '$JOB'…"
+sshh "docker commit '$CONTAINER' '$HOTSWAP_TAG' >/dev/null"
+# Re-register the job at the local :hotswap tag with force_pull=false (so Nomad
+# uses the committed image instead of pulling), bumping meta to force a new alloc.
+sshh "JOB='$JOB' HOTSWAP_TAG='$HOTSWAP_TAG' python3 - <<'PY'
+import json, os, time, urllib.request
+base = os.environ.get('NOMAD_ADDR', 'http://127.0.0.1:4646') + '/v1'
+job = json.load(urllib.request.urlopen(base + '/job/' + os.environ['JOB']))
+task = job['TaskGroups'][0]['Tasks'][0]
+task['Config']['image'] = os.environ['HOTSWAP_TAG']
+task['Config']['force_pull'] = False
+job.setdefault('Meta', {})['deployed_at'] = 'hotswap-' + str(int(time.time()))
+req = urllib.request.Request(base + '/jobs',
+    data=json.dumps({'Job': job}).encode(),
+    headers={'Content-Type': 'application/json'}, method='POST')
+print('  eval', json.load(urllib.request.urlopen(req)).get('EvalID', '?'))
+PY"
+
+echo "▶ wait for health…"
+sshh "until [ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3000/api/trpc/settings.health)\" = 200 ]; do sleep 3; done
   echo '  ✅ healthy'"
 
 echo "done in $(( $(date +%s) - t0 ))s"
+echo "note: panel now runs $HOTSWAP_TAG; UI Reload/Update reverts it to :latest."

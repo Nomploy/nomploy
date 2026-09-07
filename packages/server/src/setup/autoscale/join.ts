@@ -1,9 +1,14 @@
 import { findServerById, updateServerById } from "../../services/server";
 import { execAsync, execAsyncRemote } from "../../utils/process/execAsync";
-import { getClusterWorkerJoinCommand } from "../nomad-cluster";
+import {
+	getClusterServerJoinCommand,
+	getClusterWorkerJoinCommand,
+} from "../nomad-cluster";
 import {
 	addPeerEverywhere,
+	allMeshMembers,
 	allocateWgIp,
+	allServers,
 	readCluster,
 	removePeerEverywhere,
 	serverMeshMembers,
@@ -65,6 +70,76 @@ export const joinWorkerNode = async (
 	await updateServerById(serverId, {
 		nomadAddress: `http://${wgIp}:4646`,
 		clusterRole: "worker",
+		wgIp,
+		wgPublicKey: pubkey,
+	});
+	return { wgIp, publicKey: pubkey };
+};
+
+/**
+ * Join a server (by id) to the cluster as a Nomad/Consul SERVER (raft member)
+ * over the WireGuard mesh — the HA path. Full-mesh with the other servers, adds
+ * its WireGuard peer to every member, and records membership. Returns the
+ * assigned overlay IP + public key.
+ */
+export const joinServerNode = async (
+	serverId: string,
+	onLog: Log = () => {},
+): Promise<{ wgIp: string; publicKey: string }> => {
+	const server = await findServerById(serverId);
+	const cluster = readCluster();
+	if (!cluster) throw new Error("Cluster not initialized on the control plane");
+	const overlayCidr = cluster.overlayCidr || "10.10.0.0/24";
+
+	const wgIp = allocateWgIp(cluster, "server");
+	onLog(`Assigning server overlay IP ${wgIp} to "${server.name}"\n`);
+	const servers = allServers(cluster);
+
+	const script = getClusterServerJoinCommand({
+		ownWgIp: wgIp,
+		gossipKey: cluster.gossipKey,
+		bootstrapExpect: Math.min(servers.length + 1, 3),
+		serverWgIps: [...servers.map((s) => s.wgIp), wgIp],
+		otherServers: servers.map((s) => ({
+			wgIp: s.wgIp,
+			publicKey: s.publicKey,
+			endpoint: s.endpoint,
+		})),
+		existingWorkers: cluster.peers.map((p) => ({
+			wgIp: p.wgIp,
+			publicKey: p.publicKey,
+		})),
+		overlayCidr,
+	});
+
+	let pubkey = "";
+	await execAsyncRemote(serverId, script, (log) => {
+		onLog(log);
+		const cap = log.match(/SERVER_WG_PUBKEY=(\S+)/)?.[1];
+		if (cap) pubkey = cap.trim();
+	});
+	if (!pubkey) throw new Error("Did not receive the server's WireGuard key");
+
+	const endpoint = `${server.ipAddress}:51820`;
+	onLog(`\nRegistering WireGuard peer on all members (${wgIp})\n`);
+	await addPeerEverywhere(
+		{ wgIp, publicKey: pubkey, endpoint },
+		allMeshMembers(cluster).filter((m) => m.serverId !== serverId),
+		onLog,
+	);
+
+	cluster.servers = cluster.servers || [];
+	cluster.servers.push({
+		wgIp,
+		publicKey: pubkey,
+		serverId,
+		name: server.name,
+		endpoint,
+	});
+	writeCluster(cluster);
+	await updateServerById(serverId, {
+		nomadAddress: `http://${wgIp}:4646`,
+		clusterRole: "server",
 		wgIp,
 		wgPublicKey: pubkey,
 	});

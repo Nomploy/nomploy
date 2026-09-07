@@ -1,8 +1,10 @@
 import { IS_CLOUD } from "@nomploy/server/constants";
 import { validateRequest } from "@nomploy/server/lib/auth";
 import type { GetServerSidePropsContext } from "next";
+import { useRouter } from "next/router";
 import { type ReactElement, useState } from "react";
 import { ShowAutoscaler } from "@/components/dashboard/nomad/autoscale/show-autoscaler";
+import { ShowCluster } from "@/components/dashboard/nomad/cluster/show-cluster";
 import { ShowConsul } from "@/components/dashboard/nomad/consul/show-consul";
 import { ShowNomadJobs } from "@/components/dashboard/nomad/jobs/show-nomad-jobs";
 import { ShowNomadLogs } from "@/components/dashboard/nomad/logs/show-nomad-logs";
@@ -26,8 +28,17 @@ const LOCAL = "local";
 const NomadDashboard = () => {
 	const [selected, setSelected] = useState<string>(LOCAL);
 	const { data: servers } = api.server.all.useQuery();
+	const router = useRouter();
 
 	const serverId = selected === LOCAL ? undefined : selected;
+
+	// Tab is URL-driven so deep links (e.g. the "Autoscaling tab" hint) work.
+	const tab = (router.query.tab as string) || "cluster";
+	const setTab = (value: string) => {
+		router.replace({ query: { ...router.query, tab: value } }, undefined, {
+			shallow: true,
+		});
+	};
 
 	return (
 		<div className="space-y-4">
@@ -50,8 +61,9 @@ const NomadDashboard = () => {
 			</div>
 
 			<NomadOverview serverId={serverId} />
-			<Tabs defaultValue="jobs">
+			<Tabs value={tab} onValueChange={setTab}>
 				<TabsList>
+					<TabsTrigger value="cluster">Cluster</TabsTrigger>
 					<TabsTrigger value="jobs">Jobs</TabsTrigger>
 					<TabsTrigger value="nodes">Nodes</TabsTrigger>
 					<TabsTrigger value="consul">Consul</TabsTrigger>
@@ -59,6 +71,9 @@ const NomadDashboard = () => {
 					<TabsTrigger value="autoscale">Autoscaling</TabsTrigger>
 					<TabsTrigger value="logs">Logs</TabsTrigger>
 				</TabsList>
+				<TabsContent value="cluster">
+					<ShowCluster />
+				</TabsContent>
 				<TabsContent value="jobs">
 					<ShowNomadJobs serverId={serverId} />
 				</TabsContent>
