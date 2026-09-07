@@ -27,7 +27,7 @@ export const clusterAutoscaler = pgTable("cluster_autoscaler", {
 	// Cloud API token. Stored like the other provider secrets in this schema
 	// (plaintext at rest); never returned by read APIs (masked in the UI).
 	token: text("token").notNull().default(""),
-	serverType: text("serverType").notNull().default("cx22"),
+	serverType: text("serverType").notNull().default("cpx22"),
 	location: text("location").notNull().default("nbg1"),
 	image: text("image").notNull().default("ubuntu-24.04"),
 	// Cloud private-network id to attach new VMs to (so they get a private IP the
@@ -39,9 +39,16 @@ export const clusterAutoscaler = pgTable("cluster_autoscaler", {
 	}),
 	minNodes: integer("minNodes").notNull().default(0),
 	maxNodes: integer("maxNodes").notNull().default(3),
-	// Cluster utilisation % that triggers scale up / scale down.
+	// Reservation-based scaling, evaluated per resource (two independent checks).
+	// "Reservation" = sum of allocs' requested CPU/mem over cluster capacity (what
+	// Nomad schedules on), NOT live usage. Scale UP if EITHER resource's reserved
+	// % is at/above its up-threshold; scale DOWN only if BOTH are at/below their
+	// down-thresholds. These two are the CPU-reservation policy:
 	scaleUpThreshold: integer("scaleUpThreshold").notNull().default(80),
 	scaleDownThreshold: integer("scaleDownThreshold").notNull().default(25),
+	// …and these the memory-reservation policy (memory usually binds first):
+	memScaleUpThreshold: integer("memScaleUpThreshold").notNull().default(75),
+	memScaleDownThreshold: integer("memScaleDownThreshold").notNull().default(25),
 	// Minimum seconds between scaling actions (both directions).
 	cooldownSeconds: integer("cooldownSeconds").notNull().default(300),
 	// ISO timestamp of the last scaling action (for cooldown).
@@ -78,6 +85,8 @@ export const apiUpdateClusterAutoscaler = createSchema
 		maxNodes: true,
 		scaleUpThreshold: true,
 		scaleDownThreshold: true,
+		memScaleUpThreshold: true,
+		memScaleDownThreshold: true,
 		cooldownSeconds: true,
 	})
 	.partial()
