@@ -1,11 +1,8 @@
-import { parse } from "yaml";
 import type { Domain } from "@nomploy/server/services/domain";
-import type {
-	ComposeSpecification,
-	DefinitionsService,
-} from "../docker/types";
-import type { NomadComposeNested, NomadServiceSpec, NomadPort } from "./nomad";
+import { parse } from "yaml";
+import type { ComposeSpecification, DefinitionsService } from "../docker/types";
 import { getEnvironmentVariablesObject } from "../docker/utils";
+import type { NomadComposeNested, NomadPort, NomadServiceSpec } from "./nomad";
 
 /**
  * Parse a docker-compose YAML string into Nomad service specs.
@@ -17,7 +14,9 @@ export const parseComposeToNomadServices = (
 ): NomadServiceSpec[] => {
 	// Substitute ${VAR} in the YAML before parsing
 	const substituted = substituteEnvVars(composeFile, envVars);
-	const spec = parse(substituted, { maxAliasCount: 10000 }) as ComposeSpecification;
+	const spec = parse(substituted, {
+		maxAliasCount: 10000,
+	}) as ComposeSpecification;
 
 	if (!spec?.services) {
 		throw new Error("No services found in compose file");
@@ -114,13 +113,16 @@ const extractPorts = (service: DefinitionsService): NomadPort[] => {
 				// "80", "8080:80", "80/tcp", "80/udp"
 				const match = port.match(/(?:.*:)?(\d+)(?:\/(tcp|udp))?/);
 				if (match?.[1]) {
-					const num = parseInt(match[1], 10);
+					const num = Number.parseInt(match[1], 10);
 					const protocol = match[2] as "tcp" | "udp" | undefined;
 					ports.push({ label: `port-${num}`, to: num, protocol });
 				}
 			} else if (typeof port === "object" && "target" in port) {
 				const target = port.target as number;
-				const protocol = (port as Record<string, unknown>).protocol as "tcp" | "udp" | undefined;
+				const protocol = (port as Record<string, unknown>).protocol as
+					| "tcp"
+					| "udp"
+					| undefined;
 				ports.push({ label: `port-${target}`, to: target, protocol });
 			}
 		}
@@ -128,7 +130,8 @@ const extractPorts = (service: DefinitionsService): NomadPort[] => {
 
 	if (ports.length === 0 && service.expose) {
 		for (const exp of service.expose) {
-			const num = typeof exp === "number" ? exp : parseInt(String(exp), 10);
+			const num =
+				typeof exp === "number" ? exp : Number.parseInt(String(exp), 10);
 			if (!isNaN(num)) {
 				ports.push({ label: `port-${num}`, to: num });
 			}
@@ -141,7 +144,9 @@ const extractPorts = (service: DefinitionsService): NomadPort[] => {
 /**
  * Extract entrypoint as string array
  */
-const extractEntrypoint = (service: DefinitionsService): string[] | undefined => {
+const extractEntrypoint = (
+	service: DefinitionsService,
+): string[] | undefined => {
 	if (!service.entrypoint) return undefined;
 	if (typeof service.entrypoint === "string") {
 		return service.entrypoint.split(/\s+/);
@@ -193,23 +198,54 @@ const extractResources = (
 	const resources = deploy.resources;
 	if (!resources) return undefined;
 
-	const limits = resources.limits;
-	if (!limits) return undefined;
-
 	let cpu: number | undefined;
 	let memory: number | undefined;
 
-	if (limits.cpus) {
+	const limits = resources.limits;
+	if (limits?.cpus) {
 		// Docker uses fractional CPUs (e.g., "0.5"), Nomad uses MHz
-		cpu = Math.round(parseFloat(String(limits.cpus)) * 1000);
+		cpu = Math.round(Number.parseFloat(String(limits.cpus)) * 1000);
 	}
-
-	if (limits.memory) {
+	if (limits?.memory) {
 		// Docker uses "512M", "1G" etc, Nomad uses MB
 		memory = parseMemoryToMB(String(limits.memory));
 	}
 
-	return { cpu, memory };
+	// GPUs use the standard compose syntax under reservations.devices:
+	//   reservations: { devices: [{ driver: nvidia, count: 1, capabilities: [gpu] }] }
+	// Nomad schedules them via nomad-device-nvidia (device "nvidia/gpu").
+	const gpus = extractGpuCount(resources.reservations);
+
+	if (cpu === undefined && memory === undefined && gpus === undefined) {
+		return undefined;
+	}
+	return { cpu, memory, gpus };
+};
+
+/**
+ * Sum NVIDIA GPU counts from compose `reservations.devices`. `count: "all"` (or a
+ * missing count) maps to 1 — Nomad's device stanza needs a concrete number, and
+ * the operator can request more with an explicit count.
+ */
+const extractGpuCount = (reservations: unknown): number | undefined => {
+	const devices = (reservations as { devices?: unknown[] } | undefined)
+		?.devices;
+	if (!Array.isArray(devices)) return undefined;
+
+	let total = 0;
+	for (const dev of devices) {
+		const d = dev as {
+			driver?: string;
+			count?: number | string;
+			capabilities?: string[];
+		};
+		const isGpu =
+			d?.driver === "nvidia" ||
+			(Array.isArray(d?.capabilities) && d.capabilities.includes("gpu"));
+		if (!isGpu) continue;
+		total += typeof d.count === "number" && d.count > 0 ? d.count : 1; // "all"/unset → 1
+	}
+	return total > 0 ? total : undefined;
 };
 
 /**
@@ -227,7 +263,14 @@ const extractScaling = (
 	service: DefinitionsService,
 ): NomadServiceSpec["scaling"] => {
 	const scaling = (service as Record<string, unknown>)["x-nomad-scaling"] as
-		| { min?: number; max?: number; cpu_target?: number; memory_target?: number; cooldown?: string; evaluation_interval?: string }
+		| {
+				min?: number;
+				max?: number;
+				cpu_target?: number;
+				memory_target?: number;
+				cooldown?: string;
+				evaluation_interval?: string;
+		  }
 		| undefined;
 	if (!scaling) return undefined;
 
@@ -248,7 +291,7 @@ const parseMemoryToMB = (mem: string): number => {
 	const match = mem.match(/^(\d+(?:\.\d+)?)\s*([gmkGMK])?[bB]?$/);
 	if (!match?.[1]) return 512;
 
-	const value = parseFloat(match[1]);
+	const value = Number.parseFloat(match[1]);
 	const unit = (match[2] || "m").toLowerCase();
 
 	switch (unit) {

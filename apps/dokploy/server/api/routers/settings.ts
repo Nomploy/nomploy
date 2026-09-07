@@ -969,14 +969,14 @@ export const settingsRouter = createTRPCRouter({
 					driverInstalled: false,
 					driverVersion: undefined,
 					gpuModel: undefined,
-					runtimeInstalled: false,
-					runtimeConfigured: false,
-					cudaSupport: undefined,
-					cudaVersion: undefined,
 					memoryInfo: undefined,
 					availableGPUs: 0,
-					swarmEnabled: false,
-					gpuResources: 0,
+					cudaSupport: false,
+					cudaVersion: undefined,
+					toolkitInstalled: false,
+					dockerRuntimeConfigured: false,
+					nomadPluginInstalled: false,
+					nomadGpuCount: 0,
 				};
 			}
 

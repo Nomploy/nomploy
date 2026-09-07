@@ -69,7 +69,11 @@ describe("nomad builder — compose → HCL (live)", () => {
 		const hcl = Buffer.from(match?.[1] ?? "", "base64").toString("utf8");
 
 		// Print it so the translation is visible when running the test.
-		console.log("\n===== generated Nomad HCL =====\n" + hcl + "\n===============================\n");
+		console.log(
+			"\n===== generated Nomad HCL =====\n" +
+				hcl +
+				"\n===============================\n",
+		);
 
 		// Job + both task groups
 		expect(hcl).toContain('job "myapp"');
@@ -108,5 +112,40 @@ describe("nomad builder — compose → HCL (live)", () => {
 		// HTTP health check derived from the compose healthcheck
 		expect(hcl).toContain('type     = "http"');
 		expect(hcl).toContain('path     = "/health"');
+	});
+
+	it("translates a GPU reservation into a Nomad device stanza", async () => {
+		const gpuCompose = {
+			...compose,
+			appName: "gpuapp",
+			composeFile: `
+services:
+  trainer:
+    image: myregistry/trainer:latest
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 2
+              capabilities: [gpu]
+`,
+			domains: [],
+		};
+
+		const cmd = await getBuildNomadCommand(gpuCompose);
+		const match = cmd.match(/echo "([A-Za-z0-9+/=]+)" \| base64 -d/);
+		const hcl = Buffer.from(match?.[1] ?? "", "base64").toString("utf8");
+
+		// GPU request → nomad-device-nvidia device stanza with the requested count,
+		// nested inside the task's resources block.
+		expect(hcl).toContain('device "nvidia/gpu"');
+		expect(hcl).toContain("count = 2");
+		// CPU/memory limits still translate alongside the GPU request.
+		expect(hcl).toContain("cpu    = 2000");
+		expect(hcl).toContain("memory = 4096");
 	});
 });
