@@ -47,9 +47,8 @@ export class HetznerProvisioner implements NodeProvisioner {
 		// forces a root password change on first login, which blocks every SSH
 		// command (even with key auth) and hangs the worker join.
 		const userData = `#cloud-config\nssh_authorized_keys:\n  - ${opts.sshPublicKey}\nchpasswd:\n  expire: false\n`;
-		const body: Record<string, unknown> = {
+		const baseBody: Record<string, unknown> = {
 			name: opts.name,
-			server_type: this.cfg.serverType,
 			image: this.cfg.image,
 			location: this.cfg.location,
 			start_after_create: true,
@@ -57,13 +56,38 @@ export class HetznerProvisioner implements NodeProvisioner {
 			labels: { "nomploy-autoscaled": "true", ...(opts.labels || {}) },
 			public_net: { enable_ipv4: true, enable_ipv6: false },
 		};
-		if (this.cfg.networkId) body.networks = [Number(this.cfg.networkId)];
+		if (this.cfg.networkId) baseBody.networks = [Number(this.cfg.networkId)];
 
-		const created = (await this.api("/servers", {
-			method: "POST",
-			body: JSON.stringify(body),
-		})) as { server: { id: number } };
-		const id = created.server.id;
+		// Try each configured server type in order; skip a type that's deprecated
+		// or not available in this location and fall back to the next.
+		const types = this.cfg.serverTypes.filter(Boolean);
+		if (types.length === 0) throw new Error("No server types configured");
+		let id: number | undefined;
+		let lastErr = "";
+		for (const t of types) {
+			try {
+				const created = (await this.api("/servers", {
+					method: "POST",
+					body: JSON.stringify({ ...baseBody, server_type: t }),
+				})) as { server: { id: number } };
+				id = created.server.id;
+				break;
+			} catch (e) {
+				lastErr = e instanceof Error ? e.message : String(e);
+				// Only fall through on availability/deprecation errors.
+				if (
+					!/deprecated|unsupported location|resource_unavailable|not available/i.test(
+						lastErr,
+					)
+				) {
+					throw e;
+				}
+			}
+		}
+		if (id === undefined)
+			throw new Error(
+				`No configured server type could be created in ${this.cfg.location}: ${lastErr}`,
+			);
 
 		// Poll until running + (if a network was requested) a private IP is assigned.
 		const wantPrivate = !!this.cfg.networkId;
@@ -86,6 +110,50 @@ export class HetznerProvisioner implements NodeProvisioner {
 		// Timed out — clean up the half-created VM so we don't leak it.
 		await this.destroyNode(String(id)).catch(() => {});
 		throw new Error(`Hetzner server ${id} did not become ready in time`);
+	}
+
+	async listOptions() {
+		const [locs, nets, types] = await Promise.all([
+			this.api("/locations") as Promise<{
+				locations: { name: string; description: string }[];
+			}>,
+			this.api("/networks?per_page=100") as Promise<{
+				networks: {
+					id: number;
+					name: string;
+					subnets: { network_zone: string }[];
+				}[];
+			}>,
+			this.api("/server_types?per_page=100") as Promise<{
+				server_types: {
+					name: string;
+					cores: number;
+					memory: number;
+					architecture: string;
+					deprecated: boolean;
+					cpu_type: string;
+				}[];
+			}>,
+		]);
+		return {
+			locations: locs.locations.map((l) => ({
+				name: l.name,
+				description: l.description,
+			})),
+			networks: nets.networks.map((n) => ({
+				id: String(n.id),
+				name: n.name,
+				zone: n.subnets?.[0]?.network_zone ?? "",
+			})),
+			serverTypes: types.server_types
+				.filter((t) => !t.deprecated)
+				.map((t) => ({
+					name: t.name,
+					cores: t.cores,
+					memory: t.memory,
+					architecture: t.architecture,
+				})),
+		};
 	}
 
 	async destroyNode(providerId: string): Promise<void> {

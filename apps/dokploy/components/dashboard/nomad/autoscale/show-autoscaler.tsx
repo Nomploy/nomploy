@@ -73,11 +73,30 @@ export const ShowAutoscaler = () => {
 			refetchInterval: 15000,
 		});
 	const { data: sshKeys } = api.sshKey.all.useQuery();
+	const { data: events } = api.nomad.getAutoscalerEvents.useQuery(undefined, {
+		refetchInterval: 15000,
+	});
 	const update = api.nomad.updateAutoscalerConfig.useMutation();
 	const reconcile = api.nomad.reconcileAutoscalerNow.useMutation();
+	const loadOptions = api.nomad.listProviderOptions.useMutation();
 
 	const [form, setForm] = useState<Form>(DEFAULTS);
 	const [hasToken, setHasToken] = useState(false);
+	const [options, setOptions] = useState<{
+		locations: { name: string; description: string }[];
+		networks: { id: string; name: string; zone: string }[];
+		serverTypes: { name: string; cores: number; memory: number }[];
+	} | null>(null);
+
+	const fetchOptions = async () => {
+		try {
+			const o = await loadOptions.mutateAsync();
+			setOptions(o);
+			toast.success("Loaded locations, networks + server types");
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : "Failed to load options");
+		}
+	};
 
 	useEffect(() => {
 		if (cfg) {
@@ -199,16 +218,27 @@ export const ShowAutoscaler = () => {
 						</div>
 						<div className="space-y-2">
 							<Label>API token</Label>
-							<Input
-								type="password"
-								placeholder={
-									hasToken
-										? "•••••••• (set — leave blank to keep)"
-										: "hcloud API token"
-								}
-								value={form.token}
-								onChange={(e) => set("token", e.target.value)}
-							/>
+							<div className="flex gap-2">
+								<Input
+									type="password"
+									placeholder={
+										hasToken
+											? "•••••••• (set — leave blank to keep)"
+											: "hcloud API token"
+									}
+									value={form.token}
+									onChange={(e) => set("token", e.target.value)}
+								/>
+								<Button
+									type="button"
+									variant="secondary"
+									onClick={fetchOptions}
+									disabled={loadOptions.isPending || (!hasToken && !form.token)}
+									title="List locations, networks + server types from the provider (save the token first)"
+								>
+									{loadOptions.isPending ? "Loading…" : "Load options"}
+								</Button>
+							</div>
 						</div>
 						<div className="space-y-2">
 							<Label>SSH key (authorized on new nodes)</Label>
@@ -229,26 +259,55 @@ export const ShowAutoscaler = () => {
 							</Select>
 						</div>
 						<div className="space-y-2">
-							<Label>Private network id (optional)</Label>
-							<Input
-								placeholder="hcloud network id"
-								value={form.networkId}
-								onChange={(e) => set("networkId", e.target.value)}
-							/>
-						</div>
-						<div className="space-y-2">
-							<Label>Server type</Label>
-							<Input
-								value={form.serverType}
-								onChange={(e) => set("serverType", e.target.value)}
-							/>
+							<Label>Private network</Label>
+							{options ? (
+								<Select
+									value={form.networkId}
+									onValueChange={(v) => set("networkId", v)}
+								>
+									<SelectTrigger>
+										<SelectValue placeholder="Select a network (optional)" />
+									</SelectTrigger>
+									<SelectContent>
+										{options.networks.map((n) => (
+											<SelectItem key={n.id} value={n.id}>
+												{n.name} ({n.zone}) · {n.id}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							) : (
+								<Input
+									placeholder="network id (or Load options)"
+									value={form.networkId}
+									onChange={(e) => set("networkId", e.target.value)}
+								/>
+							)}
 						</div>
 						<div className="space-y-2">
 							<Label>Location</Label>
-							<Input
-								value={form.location}
-								onChange={(e) => set("location", e.target.value)}
-							/>
+							{options ? (
+								<Select
+									value={form.location}
+									onValueChange={(v) => set("location", v)}
+								>
+									<SelectTrigger>
+										<SelectValue placeholder="Select a location" />
+									</SelectTrigger>
+									<SelectContent>
+										{options.locations.map((l) => (
+											<SelectItem key={l.name} value={l.name}>
+												{l.name} — {l.description}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							) : (
+								<Input
+									value={form.location}
+									onChange={(e) => set("location", e.target.value)}
+								/>
+							)}
 						</div>
 						<div className="space-y-2">
 							<Label>Image</Label>
@@ -257,6 +316,45 @@ export const ShowAutoscaler = () => {
 								onChange={(e) => set("image", e.target.value)}
 							/>
 						</div>
+					</div>
+
+					<div className="space-y-2">
+						<Label>Server types (tried in order until one is available)</Label>
+						<Input
+							placeholder="cpx22, cpx32"
+							value={form.serverType}
+							onChange={(e) => set("serverType", e.target.value)}
+						/>
+						{options && (
+							<div className="flex flex-wrap gap-1">
+								{options.serverTypes.map((t) => {
+									const list = form.serverType
+										.split(",")
+										.map((s) => s.trim())
+										.filter(Boolean);
+									const picked = list.includes(t.name);
+									return (
+										<button
+											type="button"
+											key={t.name}
+											onClick={() =>
+												set(
+													"serverType",
+													(picked
+														? list.filter((x) => x !== t.name)
+														: [...list, t.name]
+													).join(", "),
+												)
+											}
+										>
+											<Badge variant={picked ? "default" : "outline"}>
+												{t.name} · {t.cores}c/{t.memory}g
+											</Badge>
+										</button>
+									);
+								})}
+							</div>
+						)}
 					</div>
 
 					<div className="grid grid-cols-3 gap-4">
@@ -273,27 +371,47 @@ export const ShowAutoscaler = () => {
 							{num("cooldownSeconds")}
 						</div>
 					</div>
-					<p className="text-muted-foreground text-xs">
-						Reservation-based scaling (requested CPU/mem ÷ capacity), evaluated
-						per resource: scale up if either is at/above its up-%, down only if
-						both are at/below their down-%.
-					</p>
-					<div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-						<div className="space-y-2">
-							<Label>CPU reservation up %</Label>
-							{num("scaleUpThreshold")}
-						</div>
-						<div className="space-y-2">
-							<Label>CPU reservation down %</Label>
-							{num("scaleDownThreshold")}
-						</div>
-						<div className="space-y-2">
-							<Label>Memory reservation up %</Label>
-							{num("memScaleUpThreshold")}
-						</div>
-						<div className="space-y-2">
-							<Label>Memory reservation down %</Label>
-							{num("memScaleDownThreshold")}
+					<div className="space-y-2">
+						<Label>Scaling policies</Label>
+						<p className="text-muted-foreground text-xs">
+							Based on reservation (requested CPU/mem ÷ cluster capacity, not
+							live usage). Each resource is its own policy: the cluster scales
+							up if <b>either</b> exceeds its up-threshold, and down only when{" "}
+							<b>both</b> are below their down-thresholds.
+						</p>
+						<div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+							{(
+								[
+									{
+										title: "CPU reservation",
+										up: "scaleUpThreshold",
+										down: "scaleDownThreshold",
+									},
+									{
+										title: "Memory reservation",
+										up: "memScaleUpThreshold",
+										down: "memScaleDownThreshold",
+									},
+								] as const
+							).map((p) => (
+								<div key={p.title} className="rounded-lg border p-3 space-y-2">
+									<div className="font-medium text-sm">{p.title}</div>
+									<div className="flex items-center gap-2 text-sm">
+										<span className="w-28 text-muted-foreground">
+											scale up above
+										</span>
+										<div className="w-20">{num(p.up)}</div>
+										<span>%</span>
+									</div>
+									<div className="flex items-center gap-2 text-sm">
+										<span className="w-28 text-muted-foreground">
+											scale down below
+										</span>
+										<div className="w-20">{num(p.down)}</div>
+										<span>%</span>
+									</div>
+								</div>
+							))}
 						</div>
 					</div>
 
@@ -387,6 +505,70 @@ export const ShowAutoscaler = () => {
 											className="text-center text-muted-foreground text-sm"
 										>
 											No autoscaled nodes.
+										</TableCell>
+									</TableRow>
+								)}
+							</TableBody>
+						</Table>
+					</div>
+				</CardContent>
+			</Card>
+
+			<Card className="bg-sidebar rounded-xl">
+				<CardHeader>
+					<CardTitle className="text-lg">Activity</CardTitle>
+					<CardDescription>
+						Recent autoscaler actions — scale up/down, provisioning, and errors
+						(newest first).
+					</CardDescription>
+				</CardHeader>
+				<CardContent>
+					<div className="rounded-lg border">
+						<Table>
+							<TableHeader>
+								<TableRow>
+									<TableHead className="w-[170px]">When</TableHead>
+									<TableHead className="w-[110px]">Type</TableHead>
+									<TableHead>Message</TableHead>
+								</TableRow>
+							</TableHeader>
+							<TableBody>
+								{events && events.length > 0 ? (
+									events.map((e) => (
+										<TableRow key={e.eventId}>
+											<TableCell className="text-muted-foreground text-xs">
+												{new Date(e.createdAt).toLocaleString()}
+											</TableCell>
+											<TableCell>
+												<Badge
+													variant={
+														e.type === "error"
+															? "destructive"
+															: e.type === "scale_up"
+																? "default"
+																: "secondary"
+													}
+												>
+													{e.type.replace("_", " ")}
+												</Badge>
+											</TableCell>
+											<TableCell className="text-sm">
+												{e.message}
+												{e.detail && (
+													<span className="ml-1 text-muted-foreground text-xs">
+														— {e.detail}
+													</span>
+												)}
+											</TableCell>
+										</TableRow>
+									))
+								) : (
+									<TableRow>
+										<TableCell
+											colSpan={3}
+											className="text-center text-muted-foreground text-sm"
+										>
+											No activity yet.
 										</TableCell>
 									</TableRow>
 								)}

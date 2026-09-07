@@ -3,10 +3,12 @@ import { db } from "@nomploy/server/db";
 import {
 	apiUpdateClusterAutoscaler,
 	clusterAutoscaler,
+	clusterAutoscalerEvents,
 	networkPolicies,
 	projects,
 	server as serverTable,
 } from "@nomploy/server/db/schema";
+import { getProvisioner } from "@nomploy/server/setup/autoscale";
 import {
 	evaluateCluster,
 	reconcileAutoscaler,
@@ -36,7 +38,7 @@ import {
 } from "@nomploy/server/utils/process/execAsync";
 import { TRPCError } from "@trpc/server";
 import { observable } from "@trpc/server/observable";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { createTRPCRouter, protectedProcedure, withPermission } from "../trpc";
 
@@ -1150,5 +1152,46 @@ export const nomadRouter = createTRPCRouter({
 			console.log(`[autoscaler:${org}] ${l.trimEnd()}`),
 		).catch((e) => console.error(`[autoscaler:${org}]`, e));
 		return { started: true };
+	}),
+
+	// Autoscaler activity feed (most recent first) — like a cloud ASG's history.
+	getAutoscalerEvents: protectedProcedure.query(async ({ ctx }) => {
+		const org = ctx.session?.activeOrganizationId;
+		if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+		return db.query.clusterAutoscalerEvents.findMany({
+			where: eq(clusterAutoscalerEvents.organizationId, org),
+			orderBy: [desc(clusterAutoscalerEvents.createdAt)],
+			limit: 50,
+		});
+	}),
+
+	// List the cloud's locations / private networks / server types so the UI can
+	// offer dropdowns instead of free-text. Uses the saved token.
+	listProviderOptions: protectedProcedure.mutation(async ({ ctx }) => {
+		const org = ctx.session?.activeOrganizationId;
+		if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+		const cfg = await db.query.clusterAutoscaler.findFirst({
+			where: eq(clusterAutoscaler.organizationId, org),
+		});
+		if (!cfg?.token)
+			throw new TRPCError({
+				code: "BAD_REQUEST",
+				message: "Save a provider API token first.",
+			});
+		try {
+			const provisioner = getProvisioner({
+				provider: cfg.provider,
+				token: cfg.token,
+				serverTypes: [],
+				location: cfg.location,
+				image: cfg.image,
+			});
+			return await provisioner.listOptions();
+		} catch (e) {
+			throw new TRPCError({
+				code: "BAD_REQUEST",
+				message: e instanceof Error ? e.message : "Failed to list options",
+			});
+		}
 	}),
 });
