@@ -54,7 +54,7 @@ export const PaymentFailedEmail = ({
 						{/* Header */}
 						<Section className="bg-[#09090b] rounded-t-xl px-[40px] py-[32px] text-center">
 							<Img
-								src="https://raw.githubusercontent.com/Nomploy/website/refs/heads/main/apps/docs/public/logo-nomploy-blackpng.png"
+								src="https://raw.githubusercontent.com/Nomploy/nomploy/refs/heads/main/apps/dokploy/logo.png"
 								width="190"
 								height="120"
 								alt="Nomploy"

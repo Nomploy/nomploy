@@ -5,6 +5,7 @@ import {
 	Network,
 	Plus,
 	RefreshCw,
+	ServerCog,
 	Server as ServerIcon,
 	ShieldAlert,
 	ShieldCheck,
@@ -29,6 +30,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
@@ -36,6 +45,14 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Label } from "@/components/ui/label";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import {
 	Table,
 	TableBody,
@@ -195,7 +212,43 @@ export const ShowCluster = () => {
 		},
 	);
 
-	const busy = isProvisioning || isLeaving;
+	// Add an existing (bring-your-own) server to the cluster. joinCluster is
+	// self-contained — it installs Docker/Consul/Nomad/CNI/WireGuard over SSH and
+	// joins — so this just needs a registered server that isn't a member yet.
+	const { data: servers } = api.server.all.useQuery();
+	const candidates = (servers ?? []).filter((s) => !s.clusterRole);
+	const [byoOpen, setByoOpen] = useState(false);
+	const [byoServerId, setByoServerId] = useState("");
+	const [byoRole, setByoRole] = useState<ClusterRole>("worker");
+	const [isJoining, setIsJoining] = useState(false);
+	const [joinLogs, setJoinLogs] = useState("");
+
+	api.nomad.joinCluster.useSubscription(
+		{ serverId: byoServerId, role: byoRole },
+		{
+			enabled: isJoining && !!byoServerId,
+			onData(log) {
+				if (log === "JOIN_DONE") {
+					setIsJoining(false);
+					setByoOpen(false);
+					toast.success(`Server joined the cluster as ${byoRole}`);
+					refetchMembers();
+					return;
+				}
+				if (log.includes(OP_ENDED)) {
+					setIsJoining(false);
+					return;
+				}
+				setJoinLogs((prev) => prev + log);
+			},
+			onError(error) {
+				setIsJoining(false);
+				toast.error(error.message || "Join failed");
+			},
+		},
+	);
+
+	const busy = isProvisioning || isLeaving || isJoining;
 	const serverCount = members?.filter((m) => m.role === "server").length ?? 0;
 	const workerCount = members?.filter((m) => m.role === "worker").length ?? 0;
 	// Raft fault tolerance: how many servers can fail while keeping quorum.
@@ -317,6 +370,25 @@ export const ShowCluster = () => {
 								<RefreshCw
 									className={`h-4 w-4 ${isRefetching ? "animate-spin" : ""}`}
 								/>
+							</Button>
+							<Button
+								type="button"
+								variant="outline"
+								disabled={busy || candidates.length === 0}
+								title={
+									candidates.length === 0
+										? "No registered servers left to add — create one under Settings → Servers"
+										: "Join a server you've already added to nomploy"
+								}
+								onClick={() => {
+									setByoServerId(candidates[0]?.serverId ?? "");
+									setByoRole("worker");
+									setJoinLogs("");
+									setByoOpen(true);
+								}}
+							>
+								<ServerCog className="mr-2 h-4 w-4" />
+								Add existing server
 							</Button>
 							<TooltipProvider>
 								<Tooltip>
@@ -586,6 +658,111 @@ export const ShowCluster = () => {
 					</AlertDialogFooter>
 				</AlertDialogContent>
 			</AlertDialog>
+
+			{/* Add an existing (bring-your-own) server to the cluster */}
+			<Dialog
+				open={byoOpen}
+				onOpenChange={(o) => {
+					if (!o && !isJoining) setByoOpen(false);
+				}}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>Add an existing server</DialogTitle>
+						<DialogDescription>
+							Join a server you've already registered in nomploy to the cluster.
+							It's installed (Docker/Consul/Nomad/WireGuard) and joined over the
+							mesh in one step — no cloud provider needed.
+						</DialogDescription>
+					</DialogHeader>
+
+					{candidates.length === 0 ? (
+						<p className="text-muted-foreground text-sm">
+							Every registered server is already a cluster member. Add a server
+							under Settings → Servers first.
+						</p>
+					) : (
+						<div className="space-y-4">
+							<div className="space-y-1.5">
+								<Label>Server</Label>
+								<Select
+									value={byoServerId}
+									onValueChange={setByoServerId}
+									disabled={isJoining}
+								>
+									<SelectTrigger>
+										<SelectValue placeholder="Select a server" />
+									</SelectTrigger>
+									<SelectContent>
+										{candidates.map((s) => (
+											<SelectItem key={s.serverId} value={s.serverId}>
+												{s.name}
+												<span className="ml-2 text-muted-foreground text-xs">
+													{s.ipAddress}
+												</span>
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+							<div className="space-y-1.5">
+								<Label>Role</Label>
+								<Select
+									value={byoRole}
+									onValueChange={(v) => setByoRole(v as ClusterRole)}
+									disabled={isJoining}
+								>
+									<SelectTrigger>
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="worker">
+											Worker — runs workloads
+										</SelectItem>
+										<SelectItem value="server">
+											Server — grows the HA raft
+										</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
+							<p className="text-muted-foreground text-xs">
+								The server must be SSH-reachable from the control plane. If its
+								key isn't authorized yet, the log below prints the exact
+								authorized_keys command to run.
+							</p>
+							{(isJoining || joinLogs) && (
+								<LogTerminal logs={joinLogs} fallback="Joining cluster…" />
+							)}
+						</div>
+					)}
+
+					<DialogFooter>
+						<Button
+							type="button"
+							variant="outline"
+							disabled={isJoining}
+							onClick={() => setByoOpen(false)}
+						>
+							Cancel
+						</Button>
+						<Button
+							type="button"
+							disabled={isJoining || !byoServerId || candidates.length === 0}
+							onClick={() => {
+								setJoinLogs("");
+								setIsJoining(true);
+							}}
+						>
+							{isJoining ? (
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+							) : (
+								<ServerCog className="mr-2 h-4 w-4" />
+							)}
+							{isJoining ? "Joining…" : "Join cluster"}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</div>
 	);
 };

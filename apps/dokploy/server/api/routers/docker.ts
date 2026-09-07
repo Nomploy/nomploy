@@ -10,7 +10,6 @@ import {
 	getContainersByAppLabel,
 	getContainersByAppNameMatch,
 	getServiceContainersByAppName,
-	getStackContainersByAppName,
 	uploadFileToContainer,
 } from "@nomploy/server";
 import { TRPCError } from "@trpc/server";
@@ -230,23 +229,6 @@ export const dockerRouter = createTRPCRouter({
 				input.type,
 				input.serverId,
 			);
-		}),
-
-	getStackContainersByAppName: withPermission("docker", "read")
-		.input(
-			z.object({
-				appName: z.string().min(1).regex(containerIdRegex, "Invalid app name."),
-				serverId: z.string().optional(),
-			}),
-		)
-		.query(async ({ input, ctx }) => {
-			if (input.serverId) {
-				const server = await findServerById(input.serverId);
-				if (server.organizationId !== ctx.session?.activeOrganizationId) {
-					throw new TRPCError({ code: "UNAUTHORIZED" });
-				}
-			}
-			return await getStackContainersByAppName(input.appName, input.serverId);
 		}),
 
 	getServiceContainersByAppName: withPermission("docker", "read")
