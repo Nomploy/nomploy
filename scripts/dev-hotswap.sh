@@ -104,27 +104,56 @@ if [[ "$WHAT" == "all" || "$WHAT" == "dokploy" ]]; then
   swap_dir apps/dokploy dist  /app
 fi
 
-echo "▶ commit $CONTAINER → $HOTSWAP_TAG + re-run Nomad job '$JOB'…"
-sshh "docker commit '$CONTAINER' '$HOTSWAP_TAG' >/dev/null"
-# Re-register the job at the local :hotswap tag with force_pull=false (so Nomad
-# uses the committed image instead of pulling), bumping meta to force a new alloc.
-sshh "JOB='$JOB' HOTSWAP_TAG='$HOTSWAP_TAG' python3 - <<'PY'
+# Re-point the panel Nomad job to an image with force_pull, bumping meta so a new
+# alloc is forced. Used for both the hot-swap deploy and the safety rollback.
+#   repoint_job <image> <force_pull true|false>
+repoint_job() {
+  sshh "JOB='$JOB' IMG='$1' FP='$2' python3 - <<'PY'
 import json, os, time, urllib.request
 base = os.environ.get('NOMAD_ADDR', 'http://127.0.0.1:4646') + '/v1'
 job = json.load(urllib.request.urlopen(base + '/job/' + os.environ['JOB']))
 task = job['TaskGroups'][0]['Tasks'][0]
-task['Config']['image'] = os.environ['HOTSWAP_TAG']
-task['Config']['force_pull'] = False
+task['Config']['image'] = os.environ['IMG']
+task['Config']['force_pull'] = os.environ['FP'] == 'true'
 job.setdefault('Meta', {})['deployed_at'] = 'hotswap-' + str(int(time.time()))
 req = urllib.request.Request(base + '/jobs',
     data=json.dumps({'Job': job}).encode(),
     headers={'Content-Type': 'application/json'}, method='POST')
 print('  eval', json.load(urllib.request.urlopen(req)).get('EvalID', '?'))
 PY"
+}
 
-echo "▶ wait for health…"
-sshh "until [ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3000/api/trpc/settings.health)\" = 200 ]; do sleep 3; done
-  echo '  ✅ healthy'"
+# Wait up to ~$1 seconds for the panel health endpoint to return 200.
+wait_healthy() {
+  sshh "for i in \$(seq 1 $(( $1 / 3 ))); do
+    [ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3000/api/trpc/settings.health)\" = 200 ] && exit 0
+    sleep 3
+  done; exit 1"
+}
 
-echo "done in $(( $(date +%s) - t0 ))s"
-echo "note: panel now runs $HOTSWAP_TAG; UI Reload/Update reverts it to :latest."
+echo "▶ commit $CONTAINER → $HOTSWAP_TAG + re-run Nomad job '$JOB'…"
+sshh "docker commit '$CONTAINER' '$HOTSWAP_TAG' >/dev/null"
+# Safety: verify the committed image is actually present before we point the job
+# at it with force_pull=false — otherwise a failed commit + a missing local tag
+# would make Nomad try to PULL a tag that only exists locally (→ panel down).
+sshh "docker image inspect '$HOTSWAP_TAG' >/dev/null 2>&1" || {
+  echo "✖ commit did not produce $HOTSWAP_TAG locally — aborting without touching the job" >&2
+  exit 1
+}
+repoint_job "$HOTSWAP_TAG" false
+
+echo "▶ wait for health (auto-rollback to :latest on failure)…"
+if wait_healthy 120; then
+  echo "  ✅ healthy on $HOTSWAP_TAG"
+  echo "done in $(( $(date +%s) - t0 ))s"
+  echo "note: panel now runs $HOTSWAP_TAG; UI Reload/Update reverts it to :latest."
+else
+  # The committed image can be reclaimed by Nomad's docker image GC / disk
+  # pressure on a small hub; force_pull=false then fails to find the local tag.
+  # Self-heal so a bad hot-swap never leaves the panel down.
+  echo "✖ panel did not become healthy on $HOTSWAP_TAG — rolling back to :latest" >&2
+  repoint_job "ghcr.io/nomploy/nomploy:latest" true
+  wait_healthy 240 && echo "  ↩ rolled back, panel healthy on :latest" || \
+    echo "  ✖ rollback also unhealthy — check 'nomad alloc status' on the hub" >&2
+  exit 1
+fi
