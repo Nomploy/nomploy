@@ -43,7 +43,10 @@ export class HetznerProvisioner implements NodeProvisioner {
 	}
 
 	async createNode(opts: ProvisionOptions): Promise<ProvisionedNode> {
-		const userData = `#cloud-config\nssh_authorized_keys:\n  - ${opts.sshPublicKey}\n`;
+		// chpasswd expire:false is essential — the Hetzner Ubuntu image otherwise
+		// forces a root password change on first login, which blocks every SSH
+		// command (even with key auth) and hangs the worker join.
+		const userData = `#cloud-config\nssh_authorized_keys:\n  - ${opts.sshPublicKey}\nchpasswd:\n  expire: false\n`;
 		const body: Record<string, unknown> = {
 			name: opts.name,
 			server_type: this.cfg.serverType,
