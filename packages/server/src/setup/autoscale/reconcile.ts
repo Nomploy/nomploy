@@ -8,7 +8,7 @@ import {
 } from "../../db/schema";
 import { execAsyncRemote } from "../../utils/process/execAsync";
 import { getProvisioner } from "./index";
-import { joinWorkerNode, removeWorkerNode } from "./join";
+import { joinServerNode, joinWorkerNode, removeWorkerNode } from "./join";
 
 type Log = (s: string) => void;
 
@@ -390,6 +390,97 @@ export const reconcileAutoscaler = async (
 		decision.reason,
 	);
 	return `scaled down: -${victim.name}`;
+};
+
+/**
+ * Manually provision one VM on the configured cloud and join it to the cluster
+ * as a worker or server — the one-click "Add node" action. Reuses the same
+ * provider config (token/network/location/server types/SSH key) as the
+ * autoscaler, but the node is NOT autoscaled (the loop won't remove it).
+ * Streams progress; rolls back the VM + row on failure; records an event.
+ */
+export const provisionAndJoinNode = async (
+	organizationId: string,
+	role: "worker" | "server",
+	onLog: Log = () => {},
+): Promise<string> => {
+	const cfg = await db.query.clusterAutoscaler.findFirst({
+		where: eq(clusterAutoscaler.organizationId, organizationId),
+	});
+	if (!cfg?.token)
+		throw new Error(
+			"No cloud provider token configured — set one in the Autoscaling tab first.",
+		);
+	if (!cfg.sshKeyId) throw new Error("No SSH key configured for provisioning");
+	const key = await db.query.sshKeys.findFirst({
+		where: (k, { eq: e }) => e(k.sshKeyId, cfg.sshKeyId as string),
+		columns: { publicKey: true },
+	});
+	if (!key?.publicKey) throw new Error("Configured SSH key has no public key");
+
+	const provisioner = getProvisioner({
+		provider: cfg.provider,
+		token: cfg.token,
+		serverTypes: serverTypeList(cfg.serverType),
+		location: cfg.location,
+		image: cfg.image,
+		networkId: cfg.networkId || undefined,
+	});
+	const name = `nomploy-${role}-${nanoid(6).toLowerCase()}`;
+	onLog(`Provisioning ${cfg.provider} ${role} ${name} …\n`);
+	const node = await provisioner.createNode({
+		name,
+		sshPublicKey: key.publicKey,
+	});
+	const ip = node.privateIp || node.publicIp;
+	onLog(`Node ${name} up at ${ip} (provider id ${node.providerId})\n`);
+
+	const [row] = await db
+		.insert(serverTable)
+		.values({
+			serverId: nanoid(),
+			name,
+			ipAddress: ip,
+			port: 22,
+			username: "root",
+			sshKeyId: cfg.sshKeyId,
+			organizationId,
+			createdAt: new Date().toISOString(),
+			// Manually added — the autoscaler must NOT reclaim it. providerNodeId is
+			// kept so removal can also destroy the VM.
+			autoscaled: false,
+			providerNodeId: node.providerId,
+		})
+		.returning();
+	if (!row) throw new Error("Failed to create server record");
+
+	const rollback = async () => {
+		await provisioner.destroyNode(node.providerId).catch(() => {});
+		await db.delete(serverTable).where(eq(serverTable.serverId, row.serverId));
+	};
+	const ok = await waitForSsh(row.serverId, onLog);
+	if (!ok) {
+		await rollback();
+		throw new Error("New node never became SSH-reachable; rolled back");
+	}
+	try {
+		if (role === "server") await joinServerNode(row.serverId, onLog);
+		else await joinWorkerNode(row.serverId, onLog);
+	} catch (e) {
+		onLog(
+			`❌ join failed: ${e instanceof Error ? e.message : String(e)} — rolling back\n`,
+		);
+		await rollback();
+		throw e;
+	}
+	await recordEvent(
+		organizationId,
+		"scale_up",
+		`Added ${role} ${name} (${ip}) via ${cfg.provider}`,
+		"manual add",
+	);
+	onLog("PROVISION_DONE");
+	return `added ${role}: ${name}`;
 };
 
 let looping = false;

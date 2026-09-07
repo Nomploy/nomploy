@@ -11,6 +11,7 @@ import {
 import { getProvisioner } from "@nomploy/server/setup/autoscale";
 import {
 	evaluateCluster,
+	provisionAndJoinNode,
 	reconcileAutoscaler,
 } from "@nomploy/server/setup/autoscale/reconcile";
 import { getNomadBootstrapCommand } from "@nomploy/server/setup/nomad-bootstrap";
@@ -893,10 +894,78 @@ export const nomadRouter = createTRPCRouter({
 							wgIp: null,
 							wgPublicKey: null,
 						});
+
+						// If this node runs on a cloud VM we provisioned, destroy it so
+						// removal doesn't leak an idle (billed) machine.
+						if (server.providerNodeId) {
+							try {
+								const cfg = await db.query.clusterAutoscaler.findFirst({
+									where: eq(
+										clusterAutoscaler.organizationId,
+										server.organizationId,
+									),
+								});
+								if (cfg?.token) {
+									emit.next(
+										`Destroying cloud VM (${cfg.provider} ${server.providerNodeId}) …\n`,
+									);
+									await getProvisioner({
+										provider: cfg.provider,
+										token: cfg.token,
+										serverTypes: [],
+										location: cfg.location,
+										image: cfg.image,
+										networkId: cfg.networkId || undefined,
+									})
+										.destroyNode(server.providerNodeId)
+										.catch((e) =>
+											emit.next(
+												`⚠ VM destroy: ${e instanceof Error ? e.message : String(e)}\n`,
+											),
+										);
+								} else {
+									emit.next(
+										"⚠ Node had a cloud VM but no provider token is configured — the VM was NOT destroyed. Remove it in your cloud console.\n",
+									);
+								}
+							} catch {}
+							await db
+								.delete(serverTable)
+								.where(eq(serverTable.serverId, input.serverId));
+						}
 						emit.next("REMOVE_DONE");
 						emit.complete();
 					} catch (err: unknown) {
 						emitClusterError(emit, err, server);
+					}
+				})();
+			});
+		}),
+
+	// One-click "Add node": provision a fresh cloud VM (using the same provider
+	// config as the autoscaler) and auto-join it as a worker or server. Streams
+	// progress; rolls back the VM on failure.
+	provisionAndJoin: withPermission("server", "create")
+		.input(z.object({ role: z.enum(["server", "worker"]).default("worker") }))
+		.subscription(({ input, ctx }) => {
+			const org = ctx.session?.activeOrganizationId;
+			return observable<string>((emit) => {
+				(async () => {
+					try {
+						if (!org) {
+							emit.next("❌ No active organization.\n");
+							emit.next(OP_ENDED);
+							emit.complete();
+							return;
+						}
+						await provisionAndJoinNode(org, input.role, (l) => emit.next(l));
+						emit.complete();
+					} catch (err: unknown) {
+						emit.next(
+							`\n❌ ${err instanceof Error ? err.message : String(err)}\n`,
+						);
+						emit.next(OP_ENDED);
+						emit.complete();
 					}
 				})();
 			});
@@ -925,19 +994,39 @@ export const nomadRouter = createTRPCRouter({
 			leaderIp = (leader || "").split(":")[0] ?? "";
 		} catch {}
 		const statusByIp = new Map(nodes.map((n) => [n.Address, n.Status]));
+		// Node provenance: is it a cloud VM we can destroy on removal, and was it
+		// spun up by the autoscaler vs. added manually / pre-existing?
+		const rows = await db.query.server.findMany({
+			columns: { serverId: true, autoscaled: true, providerNodeId: true },
+		});
+		const provByServer = new Map(rows.map((r) => [r.serverId, r]));
 		const row = (
 			name: string,
 			role: "server" | "worker",
 			wgIp: string,
 			serverId: string | null,
-		) => ({
-			name,
-			role,
-			wgIp,
-			serverId,
-			status: statusByIp.get(wgIp) ?? "unknown",
-			leader: role === "server" && wgIp === leaderIp,
-		});
+		) => {
+			const prov = serverId ? provByServer.get(serverId) : undefined;
+			const source: "control-plane" | "autoscaled" | "provisioned" | "manual" =
+				serverId === null
+					? "control-plane"
+					: prov?.autoscaled
+						? "autoscaled"
+						: prov?.providerNodeId
+							? "provisioned"
+							: "manual";
+			return {
+				name,
+				role,
+				wgIp,
+				serverId,
+				status: statusByIp.get(wgIp) ?? "unknown",
+				leader: role === "server" && wgIp === leaderIp,
+				source,
+				// True when the node has a cloud VM behind it (removal can destroy it).
+				hasVm: !!prov?.providerNodeId,
+			};
+		};
 		return [
 			row("control-plane", "server", cluster.hubWgIp, null),
 			...(cluster.servers || []).map((s) =>
