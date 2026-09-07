@@ -43,6 +43,8 @@ type Form = {
 	maxNodes: number;
 	scaleUpThreshold: number;
 	scaleDownThreshold: number;
+	memScaleUpThreshold: number;
+	memScaleDownThreshold: number;
 	cooldownSeconds: number;
 };
 
@@ -51,7 +53,7 @@ const DEFAULTS: Form = {
 	provider: "hetzner",
 	token: "",
 	sshKeyId: "",
-	serverType: "cx22",
+	serverType: "cpx22",
 	location: "nbg1",
 	image: "ubuntu-24.04",
 	networkId: "",
@@ -59,6 +61,8 @@ const DEFAULTS: Form = {
 	maxNodes: 3,
 	scaleUpThreshold: 80,
 	scaleDownThreshold: 25,
+	memScaleUpThreshold: 75,
+	memScaleDownThreshold: 25,
 	cooldownSeconds: 300,
 };
 
@@ -91,6 +95,8 @@ export const ShowAutoscaler = () => {
 				maxNodes: cfg.maxNodes,
 				scaleUpThreshold: cfg.scaleUpThreshold,
 				scaleDownThreshold: cfg.scaleDownThreshold,
+				memScaleUpThreshold: cfg.memScaleUpThreshold,
+				memScaleDownThreshold: cfg.memScaleDownThreshold,
 				cooldownSeconds: cfg.cooldownSeconds,
 			}));
 			setHasToken(cfg.hasToken);
@@ -116,6 +122,8 @@ export const ShowAutoscaler = () => {
 				maxNodes: Number(form.maxNodes),
 				scaleUpThreshold: Number(form.scaleUpThreshold),
 				scaleDownThreshold: Number(form.scaleDownThreshold),
+				memScaleUpThreshold: Number(form.memScaleUpThreshold),
+				memScaleDownThreshold: Number(form.memScaleDownThreshold),
 				cooldownSeconds: Number(form.cooldownSeconds),
 			});
 			toast.success("Autoscaler settings saved");
@@ -251,7 +259,7 @@ export const ShowAutoscaler = () => {
 						</div>
 					</div>
 
-					<div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+					<div className="grid grid-cols-3 gap-4">
 						<div className="space-y-2">
 							<Label>Min nodes</Label>
 							{num("minNodes")}
@@ -261,16 +269,31 @@ export const ShowAutoscaler = () => {
 							{num("maxNodes")}
 						</div>
 						<div className="space-y-2">
-							<Label>Scale-up %</Label>
+							<Label>Cooldown (s)</Label>
+							{num("cooldownSeconds")}
+						</div>
+					</div>
+					<p className="text-muted-foreground text-xs">
+						Reservation-based scaling (requested CPU/mem ÷ capacity), evaluated
+						per resource: scale up if either is at/above its up-%, down only if
+						both are at/below their down-%.
+					</p>
+					<div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+						<div className="space-y-2">
+							<Label>CPU reservation up %</Label>
 							{num("scaleUpThreshold")}
 						</div>
 						<div className="space-y-2">
-							<Label>Scale-down %</Label>
+							<Label>CPU reservation down %</Label>
 							{num("scaleDownThreshold")}
 						</div>
 						<div className="space-y-2">
-							<Label>Cooldown (s)</Label>
-							{num("cooldownSeconds")}
+							<Label>Memory reservation up %</Label>
+							{num("memScaleUpThreshold")}
+						</div>
+						<div className="space-y-2">
+							<Label>Memory reservation down %</Label>
+							{num("memScaleDownThreshold")}
 						</div>
 					</div>
 
@@ -305,7 +328,8 @@ export const ShowAutoscaler = () => {
 						</Badge>
 						{d && (
 							<>
-								<Badge variant="secondary">utilization {d.utilization}%</Badge>
+								<Badge variant="secondary">cpu reserved {d.cpuReserved}%</Badge>
+								<Badge variant="secondary">mem reserved {d.memReserved}%</Badge>
 								<Badge variant={d.blockedEvals > 0 ? "destructive" : "outline"}>
 									{d.blockedEvals} blocked evals
 								</Badge>

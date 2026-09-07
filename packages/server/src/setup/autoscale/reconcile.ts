@@ -22,17 +22,28 @@ const nomad = async (path: string) => {
 interface Decision {
 	action: "up" | "down" | "none";
 	reason: string;
-	utilization: number;
+	/** CPU reserved as a % of cluster CPU capacity (what Nomad schedules on). */
+	cpuReserved: number;
+	/** Memory reserved as a % of cluster memory capacity. */
+	memReserved: number;
 	blockedEvals: number;
 	autoscaledCount: number;
 }
 
-/** Compute the current cluster pressure + what the autoscaler should do. */
+/**
+ * Compute the current cluster reservation pressure + what the autoscaler should
+ * do. Reservation (allocs' requested CPU/mem ÷ capacity) is evaluated per
+ * resource as two independent checks: scale UP if either resource is at/above
+ * its up-threshold (or there are blocked evals); scale DOWN only if both are
+ * at/below their down-thresholds.
+ */
 export const evaluateCluster = async (cfg: {
 	minNodes: number;
 	maxNodes: number;
 	scaleUpThreshold: number;
 	scaleDownThreshold: number;
+	memScaleUpThreshold: number;
+	memScaleDownThreshold: number;
 	organizationId: string;
 }): Promise<Decision> => {
 	// Client nodes that can currently receive work.
@@ -78,9 +89,8 @@ export const evaluateCluster = async (cfg: {
 			memUsed += t?.Memory?.MemoryMB || 0;
 		}
 	}
-	const cpuPct = cpuTotal > 0 ? (cpuUsed / cpuTotal) * 100 : 0;
-	const memPct = memTotal > 0 ? (memUsed / memTotal) * 100 : 0;
-	const utilization = Math.round(Math.max(cpuPct, memPct));
+	const cpuReserved = Math.round(cpuTotal > 0 ? (cpuUsed / cpuTotal) * 100 : 0);
+	const memReserved = Math.round(memTotal > 0 ? (memUsed / memTotal) * 100 : 0);
 
 	// Blocked evaluations = allocations that could not be placed (needs capacity).
 	let blockedEvals = 0;
@@ -101,7 +111,7 @@ export const evaluateCluster = async (cfg: {
 	});
 	const autoscaledCount = autoscaled.length;
 
-	const base = { utilization, blockedEvals, autoscaledCount };
+	const base = { cpuReserved, memReserved, blockedEvals, autoscaledCount };
 	// Floor first: always keep at least minNodes autoscaled workers, even with no
 	// pressure. (Also caps runaway scale-up from a permanently-unplaceable alloc,
 	// since the pressure branch below still respects maxNodes.)
@@ -112,27 +122,30 @@ export const evaluateCluster = async (cfg: {
 			...base,
 		};
 	}
+	// Two independent reservation checks — scale up if EITHER binds.
+	const cpuHigh = cpuReserved >= cfg.scaleUpThreshold;
+	const memHigh = memReserved >= cfg.memScaleUpThreshold;
 	if (
-		(blockedEvals > 0 || utilization >= cfg.scaleUpThreshold) &&
+		(blockedEvals > 0 || cpuHigh || memHigh) &&
 		autoscaledCount < cfg.maxNodes
 	) {
-		return {
-			action: "up",
-			reason:
-				blockedEvals > 0
-					? `${blockedEvals} blocked evaluation(s) — need capacity`
-					: `utilization ${utilization}% ≥ ${cfg.scaleUpThreshold}%`,
-			...base,
-		};
+		const reasons: string[] = [];
+		if (blockedEvals > 0) reasons.push(`${blockedEvals} blocked eval(s)`);
+		if (cpuHigh) reasons.push(`cpu ${cpuReserved}% ≥ ${cfg.scaleUpThreshold}%`);
+		if (memHigh)
+			reasons.push(`mem ${memReserved}% ≥ ${cfg.memScaleUpThreshold}%`);
+		return { action: "up", reason: reasons.join(", "), ...base };
 	}
+	// Scale down only if BOTH resources are slack.
 	if (
-		utilization <= cfg.scaleDownThreshold &&
+		cpuReserved <= cfg.scaleDownThreshold &&
+		memReserved <= cfg.memScaleDownThreshold &&
 		autoscaledCount > cfg.minNodes &&
 		blockedEvals === 0
 	) {
 		return {
 			action: "down",
-			reason: `utilization ${utilization}% ≤ ${cfg.scaleDownThreshold}%`,
+			reason: `cpu ${cpuReserved}% ≤ ${cfg.scaleDownThreshold}% & mem ${memReserved}% ≤ ${cfg.memScaleDownThreshold}%`,
 			...base,
 		};
 	}
@@ -174,7 +187,7 @@ export const reconcileAutoscaler = async (
 
 	const decision = await evaluateCluster(cfg);
 	onLog(
-		`autoscaler: util=${decision.utilization}% blocked=${decision.blockedEvals} nodes=${decision.autoscaledCount} → ${decision.action} (${decision.reason})\n`,
+		`autoscaler: cpu=${decision.cpuReserved}% mem=${decision.memReserved}% blocked=${decision.blockedEvals} nodes=${decision.autoscaledCount} → ${decision.action} (${decision.reason})\n`,
 	);
 	if (decision.action === "none") return `none: ${decision.reason}`;
 
