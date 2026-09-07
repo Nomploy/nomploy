@@ -97,7 +97,7 @@ export function GPUSupport({ serverId }: GPUSupportProps) {
 							<div className="flex items-center gap-2">
 								<DialogAction
 									title="Enable GPU Support?"
-									description="This will enable GPU support for Docker Swarm on this server. Make sure you have the required hardware and drivers installed."
+									description="Installs the NVIDIA Container Toolkit, points Docker at the nvidia runtime, and installs the nomad-device-nvidia plugin so Nomad can schedule GPUs. The NVIDIA driver (nvidia-smi) must already be installed."
 									onClick={handleEnableGPU}
 								>
 									<Button
@@ -106,7 +106,7 @@ export function GPUSupport({ serverId }: GPUSupportProps) {
 									>
 										{isLoading
 											? "Loading..."
-											: gpuStatus?.swarmEnabled
+											: gpuStatus?.nomadGpuCount
 												? "Reconfigure GPU"
 												: "Enable GPU"}
 									</Button>
@@ -190,10 +190,10 @@ export function GPUSupport({ serverId }: GPUSupportProps) {
 											}
 										/>
 										<StatusRow
-											label="NVIDIA Container Runtime"
-											isEnabled={gpuStatus?.runtimeInstalled}
+											label="NVIDIA Container Toolkit"
+											isEnabled={gpuStatus?.toolkitInstalled}
 											description={
-												gpuStatus?.runtimeInstalled
+												gpuStatus?.toolkitInstalled
 													? "Installed"
 													: "Not Installed"
 											}
@@ -201,32 +201,49 @@ export function GPUSupport({ serverId }: GPUSupportProps) {
 									</div>
 								</div>
 
-								{/* Configuration Status */}
+								{/* Nomad scheduling status */}
 								<div className="border rounded-lg p-4">
 									<h3 className="text-lg font-semibold mb-1">
-										Docker Swarm GPU Status
+										Nomad GPU Status
 									</h3>
 									<p className="text-sm text-muted-foreground mb-4">
-										Shows the configuration state that changes with the Enable
-										GPU
+										Shows the configuration state that changes with Enable GPU.
+										Once enabled, request GPUs in a service with{" "}
+										<code className="rounded bg-muted px-1">
+											device "nvidia/gpu"
+										</code>{" "}
+										(or compose{" "}
+										<code className="rounded bg-muted px-1">
+											deploy.resources.reservations.devices
+										</code>
+										).
 									</p>
 									<div className="grid gap-2.5">
 										<StatusRow
-											label="Runtime Configuration"
-											isEnabled={gpuStatus?.runtimeConfigured}
+											label="Docker nvidia runtime"
+											isEnabled={gpuStatus?.dockerRuntimeConfigured}
 											description={
-												gpuStatus?.runtimeConfigured
-													? "Default Runtime"
-													: "Not Default Runtime"
+												gpuStatus?.dockerRuntimeConfigured
+													? "Configured"
+													: "Not Configured"
 											}
 										/>
 										<StatusRow
-											label="Swarm GPU Support"
-											isEnabled={gpuStatus?.swarmEnabled}
+											label="nomad-device-nvidia plugin"
+											isEnabled={gpuStatus?.nomadPluginInstalled}
 											description={
-												gpuStatus?.swarmEnabled
-													? `Enabled (${gpuStatus.gpuResources} GPU${gpuStatus.gpuResources !== 1 ? "s" : ""})`
-													: "Not Enabled"
+												gpuStatus?.nomadPluginInstalled
+													? "Installed"
+													: "Not Installed"
+											}
+										/>
+										<StatusRow
+											label="GPUs schedulable by Nomad"
+											isEnabled={!!gpuStatus?.nomadGpuCount}
+											description={
+												gpuStatus?.nomadGpuCount
+													? `${gpuStatus.nomadGpuCount} GPU${gpuStatus.nomadGpuCount !== 1 ? "s" : ""} fingerprinted`
+													: "None fingerprinted"
 											}
 										/>
 									</div>

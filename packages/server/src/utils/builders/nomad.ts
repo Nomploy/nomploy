@@ -32,6 +32,8 @@ export interface NomadServiceSpec {
 	resources?: {
 		cpu?: number;
 		memory?: number;
+		/** Number of NVIDIA GPUs to request (nomad-device-nvidia). */
+		gpus?: number;
 	};
 	scaling?: {
 		min: number;
@@ -324,9 +326,19 @@ ${checks.join("\n")}
 const generateResourcesBlock = (
 	resources?: NomadServiceSpec["resources"],
 ): string => {
+	// GPUs are scheduled via the nomad-device-nvidia plugin. Requires the node to
+	// have GPU support enabled (Settings → Server → GPU). "nvidia/gpu" matches any
+	// NVIDIA GPU the plugin fingerprints.
+	const gpuBlock =
+		resources?.gpus && resources.gpus > 0
+			? `
+        device "nvidia/gpu" {
+          count = ${resources.gpus}
+        }`
+			: "";
 	return `      resources {
         cpu    = ${resources?.cpu || 256}
-        memory = ${resources?.memory || 512}
+        memory = ${resources?.memory || 512}${gpuBlock}
       }`;
 };
 

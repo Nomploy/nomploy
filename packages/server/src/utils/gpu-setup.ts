@@ -1,54 +1,78 @@
-import * as fs from "node:fs/promises";
 import { execAsync, execAsyncRemote, sleep } from "../utils/process/execAsync";
 
+// The nomad-device-nvidia plugin version installed into Nomad's plugin dir.
+// Pinned so the download is reproducible; bump deliberately.
+const NOMAD_DEVICE_NVIDIA_VERSION = "1.1.0";
+// Nomad's default plugin_dir is <data_dir>/plugins; data_dir is /opt/nomad
+// (install.sh + nomad-cluster.ts). The device plugin binary lives here.
+const NOMAD_PLUGIN_DIR = "/opt/nomad/plugins";
+const NVIDIA_PLUGIN_HCL = "/etc/nomad.d/nvidia.hcl";
+
+/**
+ * GPU status for a node in the Nomad model.
+ * - driver/toolkit/runtime describe the host + Docker prerequisites.
+ * - nomadPluginInstalled/nomadGpuCount describe whether Nomad's
+ *   nomad-device-nvidia plugin is present and how many GPUs Nomad has
+ *   fingerprinted (i.e. how many are schedulable via `device "nvidia/gpu"`).
+ */
 interface GPUInfo {
 	driverInstalled: boolean;
 	driverVersion?: string;
 	gpuModel?: string;
-	runtimeInstalled: boolean;
-	runtimeConfigured: boolean;
-	cudaSupport: boolean;
-	cudaVersion?: string;
 	memoryInfo?: string;
 	availableGPUs: number;
-	swarmEnabled: boolean;
-	gpuResources: number;
+	cudaSupport: boolean;
+	cudaVersion?: string;
+	/** nvidia-container-toolkit (nvidia-ctk) present. */
+	toolkitInstalled: boolean;
+	/** Docker knows the "nvidia" runtime (nvidia-ctk runtime configure). */
+	dockerRuntimeConfigured: boolean;
+	/** The nomad-device-nvidia plugin binary is installed. */
+	nomadPluginInstalled: boolean;
+	/** GPUs Nomad has fingerprinted on this node (schedulable). */
+	nomadGpuCount: number;
 }
+
+const emptyStatus: GPUInfo = {
+	driverInstalled: false,
+	driverVersion: undefined,
+	gpuModel: undefined,
+	memoryInfo: undefined,
+	availableGPUs: 0,
+	cudaSupport: false,
+	cudaVersion: undefined,
+	toolkitInstalled: false,
+	dockerRuntimeConfigured: false,
+	nomadPluginInstalled: false,
+	nomadGpuCount: 0,
+};
 
 export async function checkGPUStatus(serverId?: string): Promise<GPUInfo> {
 	try {
-		const [driverInfo, runtimeInfo, swarmInfo, gpuInfo, cudaInfo] =
+		const [driverInfo, toolkitInfo, nomadInfo, gpuInfo, cudaInfo] =
 			await Promise.all([
 				checkGpuDriver(serverId),
-				checkRuntime(serverId),
-				checkSwarmResources(serverId),
+				checkToolkit(serverId),
+				checkNomadGpu(serverId),
 				checkGpuInfo(serverId),
 				checkCudaSupport(serverId),
 			]);
 
 		return {
+			...emptyStatus,
 			...driverInfo,
-			...runtimeInfo,
-			...swarmInfo,
+			...toolkitInfo,
+			...nomadInfo,
 			...gpuInfo,
 			...cudaInfo,
 		};
 	} catch {
-		return {
-			driverInstalled: false,
-			driverVersion: undefined,
-			runtimeInstalled: false,
-			runtimeConfigured: false,
-			cudaSupport: false,
-			cudaVersion: undefined,
-			gpuModel: undefined,
-			memoryInfo: undefined,
-			availableGPUs: 0,
-			swarmEnabled: false,
-			gpuResources: 0,
-		};
+		return { ...emptyStatus };
 	}
 }
+
+const run = async (cmd: string, serverId?: string) =>
+	serverId ? execAsyncRemote(serverId, cmd) : execAsync(cmd);
 
 const checkGpuDriver = async (serverId?: string) => {
 	let driverVersion: string | undefined;
@@ -56,22 +80,18 @@ const checkGpuDriver = async (serverId?: string) => {
 	let availableGPUs = 0;
 
 	try {
-		const driverCommand =
-			"nvidia-smi --query-gpu=driver_version --format=csv,noheader";
-		const { stdout: nvidiaSmi } = serverId
-			? await execAsyncRemote(serverId, driverCommand)
-			: await execAsync(driverCommand);
-
-		driverVersion = nvidiaSmi.trim();
+		const { stdout: nvidiaSmi } = await run(
+			"nvidia-smi --query-gpu=driver_version --format=csv,noheader",
+			serverId,
+		);
+		driverVersion = nvidiaSmi.trim().split("\n")[0]?.trim();
 		if (driverVersion) {
 			driverInstalled = true;
-			const countCommand =
-				"nvidia-smi --query-gpu=gpu_name --format=csv,noheader | wc -l";
-			const { stdout: gpuCount } = serverId
-				? await execAsyncRemote(serverId, countCommand)
-				: await execAsync(countCommand);
-
-			availableGPUs = Number.parseInt(gpuCount.trim(), 10);
+			const { stdout: gpuCount } = await run(
+				"nvidia-smi --query-gpu=gpu_name --format=csv,noheader | wc -l",
+				serverId,
+			);
+			availableGPUs = Number.parseInt(gpuCount.trim(), 10) || 0;
 		}
 	} catch (error) {
 		console.debug("GPU driver check:", error);
@@ -80,80 +100,73 @@ const checkGpuDriver = async (serverId?: string) => {
 	return { driverVersion, driverInstalled, availableGPUs };
 };
 
-const checkRuntime = async (serverId?: string) => {
-	let runtimeInstalled = false;
-	let runtimeConfigured = false;
+const checkToolkit = async (serverId?: string) => {
+	let toolkitInstalled = false;
+	let dockerRuntimeConfigured = false;
 
 	try {
-		// First check: Is nvidia-container-runtime installed?
-		const checkBinaryCommand = "command -v nvidia-container-runtime";
-		try {
-			const { stdout } = serverId
-				? await execAsyncRemote(serverId, checkBinaryCommand)
-				: await execAsync(checkBinaryCommand);
-			runtimeInstalled = !!stdout.trim();
-		} catch (error) {
-			console.debug("Runtime binary check:", error);
-		}
-
-		// Second check: Is it configured in Docker?
-		try {
-			const runtimeCommand = 'docker info --format "{{json .Runtimes}}"';
-			const { stdout: runtimeInfo } = serverId
-				? await execAsyncRemote(serverId, runtimeCommand)
-				: await execAsync(runtimeCommand);
-
-			const defaultCommand = 'docker info --format "{{.DefaultRuntime}}"';
-			const { stdout: defaultRuntime } = serverId
-				? await execAsyncRemote(serverId, defaultCommand)
-				: await execAsync(defaultCommand);
-
-			const runtimes = JSON.parse(runtimeInfo);
-			const hasNvidiaRuntime = "nvidia" in runtimes;
-			const isDefaultRuntime = defaultRuntime.trim() === "nvidia";
-
-			// Only set runtimeConfigured if both conditions are met
-			runtimeConfigured = hasNvidiaRuntime && isDefaultRuntime;
-		} catch (error) {
-			console.debug("Runtime configuration check:", error);
-		}
+		const { stdout } = await run(
+			"command -v nvidia-ctk || command -v nvidia-container-toolkit || true",
+			serverId,
+		);
+		toolkitInstalled = !!stdout.trim();
 	} catch (error) {
-		console.debug("Runtime check:", error);
+		console.debug("Toolkit binary check:", error);
 	}
 
-	return { runtimeInstalled, runtimeConfigured };
+	try {
+		const { stdout: runtimeInfo } = await run(
+			'docker info --format "{{json .Runtimes}}"',
+			serverId,
+		);
+		const runtimes = JSON.parse(runtimeInfo);
+		dockerRuntimeConfigured = "nvidia" in runtimes;
+	} catch (error) {
+		console.debug("Docker runtime check:", error);
+	}
+
+	return { toolkitInstalled, dockerRuntimeConfigured };
 };
 
-const checkSwarmResources = async (serverId?: string) => {
-	let swarmEnabled = false;
-	let gpuResources = 0;
+/**
+ * Is the nomad-device-nvidia plugin installed, and how many GPUs has Nomad
+ * fingerprinted on this node? Reads the local agent's own node devices.
+ */
+const checkNomadGpu = async (serverId?: string) => {
+	let nomadPluginInstalled = false;
+	let nomadGpuCount = 0;
 
 	try {
-		const nodeCommand =
-			"docker node inspect self --format '{{json .Description.Resources.GenericResources}}'";
-		const { stdout: resources } = serverId
-			? await execAsyncRemote(serverId, nodeCommand)
-			: await execAsync(nodeCommand);
+		const { stdout } = await run(
+			`test -x ${NOMAD_PLUGIN_DIR}/nomad-device-nvidia && echo yes || true`,
+			serverId,
+		);
+		nomadPluginInstalled = stdout.trim() === "yes";
+	} catch (error) {
+		console.debug("Nomad plugin check:", error);
+	}
 
-		if (resources && resources !== "null") {
-			const genericResources = JSON.parse(resources);
-			for (const resource of genericResources) {
-				if (
-					resource.DiscreteResourceSpec &&
-					(resource.DiscreteResourceSpec.Kind === "GPU" ||
-						resource.DiscreteResourceSpec.Kind === "gpu")
-				) {
-					gpuResources = resource.DiscreteResourceSpec.Value;
-					swarmEnabled = true;
-					break;
+	try {
+		// `-self` targets the agent running on this host. Devices of type "gpu"
+		// (vendor nvidia) each carry a list of instances = individual GPUs.
+		const { stdout } = await run(
+			"nomad node status -self -json 2>/dev/null || true",
+			serverId,
+		);
+		if (stdout.trim()) {
+			const node = JSON.parse(stdout);
+			const devices = node?.NodeResources?.Devices ?? [];
+			for (const d of devices) {
+				if (String(d?.Type).toLowerCase() === "gpu") {
+					nomadGpuCount += Array.isArray(d?.Instances) ? d.Instances.length : 0;
 				}
 			}
 		}
 	} catch (error) {
-		console.debug("Swarm resource check:", error);
+		console.debug("Nomad GPU fingerprint check:", error);
 	}
 
-	return { swarmEnabled, gpuResources };
+	return { nomadPluginInstalled, nomadGpuCount };
 };
 
 const checkGpuInfo = async (serverId?: string) => {
@@ -161,13 +174,12 @@ const checkGpuInfo = async (serverId?: string) => {
 	let memoryInfo: string | undefined;
 
 	try {
-		const gpuInfoCommand =
-			"nvidia-smi --query-gpu=gpu_name,memory.total --format=csv,noheader";
-		const { stdout: gpuInfo } = serverId
-			? await execAsyncRemote(serverId, gpuInfoCommand)
-			: await execAsync(gpuInfoCommand);
-
-		[gpuModel, memoryInfo] = gpuInfo.split(",").map((s) => s.trim());
+		const { stdout: gpuInfo } = await run(
+			"nvidia-smi --query-gpu=gpu_name,memory.total --format=csv,noheader",
+			serverId,
+		);
+		const firstLine = gpuInfo.trim().split("\n")[0] ?? "";
+		[gpuModel, memoryInfo] = firstLine.split(",").map((s) => s.trim());
 	} catch (error) {
 		console.debug("GPU info check:", error);
 	}
@@ -180,11 +192,10 @@ const checkCudaSupport = async (serverId?: string) => {
 	let cudaSupport = false;
 
 	try {
-		const cudaCommand = 'nvidia-smi -q | grep "CUDA Version"';
-		const { stdout: cudaInfo } = serverId
-			? await execAsyncRemote(serverId, cudaCommand)
-			: await execAsync(cudaCommand);
-
+		const { stdout: cudaInfo } = await run(
+			'nvidia-smi -q | grep "CUDA Version"',
+			serverId,
+		);
 		const cudaMatch = cudaInfo.match(/CUDA Version\s*:\s*([\d.]+)/);
 		cudaVersion = cudaMatch ? cudaMatch[1] : undefined;
 		cudaSupport = !!cudaVersion;
@@ -195,158 +206,115 @@ const checkCudaSupport = async (serverId?: string) => {
 	return { cudaVersion, cudaSupport };
 };
 
+/**
+ * Enable GPU scheduling on a Nomad node: install the NVIDIA Container Toolkit,
+ * point Docker at the nvidia runtime, install the nomad-device-nvidia plugin
+ * into Nomad's plugin dir, drop its config, and restart Docker + Nomad so the
+ * node fingerprints its GPUs as `nvidia/gpu` devices. Requires the NVIDIA driver
+ * (nvidia-smi) to already be installed — driver installation is hardware- and
+ * distro-specific and left to the operator.
+ */
 export async function setupGPUSupport(serverId?: string): Promise<void> {
+	const status = await checkGPUStatus(serverId);
+	if (!status.driverInstalled) {
+		throw new Error(
+			"NVIDIA driver not found (nvidia-smi failed). Install the NVIDIA driver for your GPU + distro first, then enable GPU support.",
+		);
+	}
+
+	const script = buildGpuSetupScript();
 	try {
-		// 1. Initial status check and validation
-		const initialStatus = await checkGPUStatus(serverId);
-		const shouldContinue = await validatePrerequisites(initialStatus);
-		if (!shouldContinue) return;
-
-		// 2. Get node ID
-		const nodeId = await getNodeId(serverId);
-
-		// 3. Create daemon configuration
-		const daemonConfig = createDaemonConfig(initialStatus.availableGPUs);
-
-		// 4. Setup server based on environment
-		if (serverId) {
-			await setupRemoteServer(serverId, daemonConfig);
-		} else {
-			await setupLocalServer(daemonConfig);
-		}
-
-		// 5. Wait for Docker restart
-		await sleep(10000);
-
-		// 6. Add GPU label
-		await addGpuLabel(nodeId, serverId);
-
-		// 7. Final verification
-		await sleep(5000);
-		await verifySetup(nodeId, serverId);
+		await run(script, serverId);
 	} catch (error) {
 		if (
 			error instanceof Error &&
-			error.message.includes("password is required")
+			/password is required|sudo/i.test(error.message)
 		) {
 			throw new Error(
-				"Sudo access required. Please run with appropriate permissions.",
+				"Passwordless sudo is required to configure GPU support on this node.",
 			);
 		}
 		throw error;
 	}
+
+	// Give Nomad a moment to restart + re-fingerprint devices, then verify.
+	await sleep(8000);
+	const final = await checkGPUStatus(serverId);
+	if (!final.nomadPluginInstalled) {
+		throw new Error(
+			"nomad-device-nvidia plugin did not install. Check the node's /opt/nomad/plugins and Nomad logs.",
+		);
+	}
+	if (final.nomadGpuCount === 0) {
+		throw new Error(
+			"GPU toolkit + plugin installed, but Nomad has not fingerprinted a GPU yet. Verify `nvidia-smi` works and check `nomad node status -self` after a moment.",
+		);
+	}
 }
 
-const validatePrerequisites = async (initialStatus: GPUInfo) => {
-	if (!initialStatus.driverInstalled) {
-		throw new Error(
-			"NVIDIA drivers not installed. Please install appropriate NVIDIA drivers first.",
-		);
-	}
+/**
+ * Idempotent host-setup script: NVIDIA Container Toolkit (apt or dnf) → Docker
+ * nvidia runtime → nomad-device-nvidia plugin + config → restart Docker+Nomad.
+ */
+const buildGpuSetupScript = (): string => `
+set -e
+SUDO=""
+if [ "$EUID" -ne 0 ]; then
+  if sudo -n true 2>/dev/null; then SUDO="sudo"; else
+    echo "Error: passwordless sudo required"; exit 1; fi
+fi
 
-	if (!initialStatus.runtimeInstalled) {
-		throw new Error(
-			"NVIDIA Container Runtime not installed. Please install nvidia-container-runtime first.",
-		);
-	}
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64) PLUGIN_ARCH=amd64 ;;
+  aarch64|arm64) PLUGIN_ARCH=arm64 ;;
+  *) echo "Unsupported arch: $ARCH"; exit 1 ;;
+esac
 
-	if (initialStatus.swarmEnabled && initialStatus.runtimeConfigured) {
-		return false;
-	}
+# 1. NVIDIA Container Toolkit (skip if nvidia-ctk already present).
+if ! command -v nvidia-ctk >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+      | $SUDO gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+    curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+      | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+      | $SUDO tee /etc/apt/sources.list.d/nvidia-container-toolkit.list >/dev/null
+    $SUDO apt-get update
+    $SUDO apt-get install -y nvidia-container-toolkit
+  elif command -v dnf >/dev/null 2>&1; then
+    curl -fsSL https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
+      | $SUDO tee /etc/yum.repos.d/nvidia-container-toolkit.repo >/dev/null
+    $SUDO dnf install -y nvidia-container-toolkit
+  else
+    echo "Error: need apt-get or dnf to install nvidia-container-toolkit"; exit 1
+  fi
+fi
 
-	return true;
-};
+# 2. Register the nvidia runtime with Docker (not as default) + restart Docker.
+$SUDO nvidia-ctk runtime configure --runtime=docker
+$SUDO systemctl restart docker
 
-const getNodeId = async (serverId?: string) => {
-	const nodeIdCommand = 'docker info --format "{{.Swarm.NodeID}}"';
-	const { stdout: nodeId } = serverId
-		? await execAsyncRemote(serverId, nodeIdCommand)
-		: await execAsync(nodeIdCommand);
+# 3. Install the nomad-device-nvidia plugin into Nomad's plugin dir.
+$SUDO mkdir -p ${NOMAD_PLUGIN_DIR}
+TMP="$(mktemp -d)"
+curl -fsSL -o "$TMP/plugin.zip" \
+  "https://releases.hashicorp.com/nomad-device-nvidia/${NOMAD_DEVICE_NVIDIA_VERSION}/nomad-device-nvidia_${NOMAD_DEVICE_NVIDIA_VERSION}_linux_$PLUGIN_ARCH.zip"
+(cd "$TMP" && unzip -o plugin.zip >/dev/null)
+$SUDO install -m 0755 "$TMP/nomad-device-nvidia" ${NOMAD_PLUGIN_DIR}/nomad-device-nvidia
+rm -rf "$TMP"
 
-	const trimmedNodeId = nodeId.trim();
-	if (!trimmedNodeId) {
-		throw new Error("Setup Server before enabling GPU support");
-	}
+# 4. Enable the plugin in Nomad's config (idempotent write).
+$SUDO tee ${NVIDIA_PLUGIN_HCL} >/dev/null <<'HCL'
+plugin "nomad-device-nvidia" {
+  config {
+    enabled            = true
+    fingerprint_period = "1m"
+  }
+}
+HCL
 
-	return trimmedNodeId;
-};
-
-const createDaemonConfig = (availableGPUs: number) => ({
-	runtimes: {
-		nvidia: {
-			path: "nvidia-container-runtime",
-			runtimeArgs: [],
-		},
-	},
-	"default-runtime": "nvidia",
-	"node-generic-resources": [`GPU=${availableGPUs}`],
-});
-
-const setupRemoteServer = async (serverId: string, daemonConfig: any) => {
-	const setupCommands = [
-		"sudo -n true",
-		`echo '${JSON.stringify(daemonConfig, null, 2)}' | sudo tee /etc/docker/daemon.json`,
-		"sudo mkdir -p /etc/nvidia-container-runtime",
-		'sudo sed -i "/swarm-resource/d" /etc/nvidia-container-runtime/config.toml',
-		'echo "swarm-resource = \\"DOCKER_RESOURCE_GPU\\"" | sudo tee -a /etc/nvidia-container-runtime/config.toml',
-		"sudo systemctl daemon-reload",
-		"sudo systemctl restart docker",
-	].join(" && ");
-
-	await execAsyncRemote(serverId, setupCommands);
-};
-
-const setupLocalServer = async (daemonConfig: any) => {
-	const configFile = `/tmp/docker-daemon-${Date.now()}.json`;
-	await fs.writeFile(configFile, JSON.stringify(daemonConfig, null, 2));
-
-	const setupCommands = [
-		`sudo sh -c '
-			cp ${configFile} /etc/docker/daemon.json && 
-			mkdir -p /etc/nvidia-container-runtime && 
-			sed -i "/swarm-resource/d" /etc/nvidia-container-runtime/config.toml &&
-			echo "swarm-resource = \\"DOCKER_RESOURCE_GPU\\"" >> /etc/nvidia-container-runtime/config.toml && 
-			systemctl daemon-reload && 
-			systemctl restart docker
-		'`,
-		`rm ${configFile}`,
-	].join(" && ");
-
-	try {
-		await execAsync(setupCommands);
-	} catch {
-		throw new Error(
-			"Failed to configure GPU support. Please ensure you have sudo privileges and try again.",
-		);
-	}
-};
-
-const addGpuLabel = async (nodeId: string, serverId?: string) => {
-	const labelCommand = `docker node update --label-add gpu=true ${nodeId}`;
-	if (serverId) {
-		await execAsyncRemote(serverId, labelCommand);
-	} else {
-		await execAsync(labelCommand);
-	}
-};
-
-const verifySetup = async (nodeId: string, serverId?: string) => {
-	const finalStatus = await checkGPUStatus(serverId);
-
-	if (!finalStatus.swarmEnabled) {
-		const diagnosticCommands = [
-			`docker node inspect ${nodeId}`,
-			'nvidia-smi -a | grep "GPU UUID"',
-			"cat /etc/docker/daemon.json",
-			"cat /etc/nvidia-container-runtime/config.toml",
-		].join(" && ");
-
-		await (serverId
-			? execAsyncRemote(serverId, diagnosticCommands)
-			: execAsync(diagnosticCommands));
-
-		throw new Error("GPU support not detected in swarm after setup");
-	}
-
-	return finalStatus;
-};
+# 5. Restart Nomad so it loads the plugin + fingerprints the GPU(s). A client
+#    restart does not kill running allocations.
+$SUDO systemctl restart nomad
+echo "GPU_SETUP_DONE"
+`;
