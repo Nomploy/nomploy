@@ -31,6 +31,18 @@ export interface ProvisionedNode {
 	privateIp?: string;
 }
 
+/** Options the UI offers (populated from the cloud API once a token is set). */
+export interface ProviderOptions {
+	locations: { name: string; description: string }[];
+	networks: { id: string; name: string; zone: string }[];
+	serverTypes: {
+		name: string;
+		cores: number;
+		memory: number;
+		architecture: string;
+	}[];
+}
+
 export interface NodeProvisioner {
 	/** Human-readable provider id, e.g. "hetzner". */
 	readonly provider: string;
@@ -38,6 +50,8 @@ export interface NodeProvisioner {
 	createNode(opts: ProvisionOptions): Promise<ProvisionedNode>;
 	/** Destroy a VM by its provider id (idempotent — missing = success). */
 	destroyNode(providerId: string): Promise<void>;
+	/** List locations / networks / server types for the UI to choose from. */
+	listOptions(): Promise<ProviderOptions>;
 }
 
 /** Config common to every provisioner, persisted (token encrypted) in the DB. */
@@ -45,8 +59,8 @@ export interface AutoscaleProviderConfig {
 	provider: string;
 	/** Cloud API token/secret. */
 	token: string;
-	/** VM size, e.g. Hetzner "cx22", AWS instance type, … */
-	serverType: string;
+	/** VM sizes to try in order (first that's available in the location wins). */
+	serverTypes: string[];
 	/** Region/location, e.g. Hetzner "nbg1". */
 	location: string;
 	/** Base image, e.g. "ubuntu-24.04". */

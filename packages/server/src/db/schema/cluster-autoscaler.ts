@@ -55,6 +55,39 @@ export const clusterAutoscaler = pgTable("cluster_autoscaler", {
 	lastScaleAt: text("lastScaleAt"),
 });
 
+/**
+ * Autoscaler activity log (like a cloud ASG's activity history). Every scaling
+ * decision that acts, provision/join/remove/destroy step, and error is recorded
+ * here and shown in the UI so operators can see what the autoscaler did and why.
+ */
+export const clusterAutoscalerEvents = pgTable("cluster_autoscaler_event", {
+	eventId: text("eventId")
+		.notNull()
+		.primaryKey()
+		.$defaultFn(() => nanoid()),
+	organizationId: text("organizationId")
+		.notNull()
+		.references(() => organization.id, { onDelete: "cascade" }),
+	createdAt: text("createdAt")
+		.notNull()
+		.$defaultFn(() => new Date().toISOString()),
+	// scale_up | scale_down | error | info
+	type: text("type").notNull(),
+	message: text("message").notNull(),
+	// Optional structured detail (node name, provider id, reason, …).
+	detail: text("detail"),
+});
+
+export const clusterAutoscalerEventRelations = relations(
+	clusterAutoscalerEvents,
+	({ one }) => ({
+		organization: one(organization, {
+			fields: [clusterAutoscalerEvents.organizationId],
+			references: [organization.id],
+		}),
+	}),
+);
+
 export const clusterAutoscalerRelations = relations(
 	clusterAutoscaler,
 	({ one }) => ({

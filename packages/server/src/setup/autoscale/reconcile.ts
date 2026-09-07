@@ -1,12 +1,35 @@
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "../../db";
-import { clusterAutoscaler, server as serverTable } from "../../db/schema";
+import {
+	clusterAutoscaler,
+	clusterAutoscalerEvents,
+	server as serverTable,
+} from "../../db/schema";
 import { execAsyncRemote } from "../../utils/process/execAsync";
 import { getProvisioner } from "./index";
 import { joinWorkerNode, removeWorkerNode } from "./join";
 
 type Log = (s: string) => void;
+
+/** Record an autoscaler activity event (shown in the UI, like ASG history). */
+const recordEvent = (
+	organizationId: string,
+	type: "scale_up" | "scale_down" | "error" | "info",
+	message: string,
+	detail?: string,
+) =>
+	db
+		.insert(clusterAutoscalerEvents)
+		.values({ organizationId, type, message, detail })
+		.catch(() => {});
+
+/** Split the CSV server-type list into an ordered fallback array. */
+const serverTypeList = (csv: string): string[] =>
+	csv
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
 
 const NOMAD_ADDRESS = process.env.NOMAD_ADDRESS || "http://127.0.0.1:4646";
 const NOMAD_TOKEN = process.env.NOMAD_TOKEN || "";
@@ -218,17 +241,34 @@ export const reconcileAutoscaler = async (
 		const provisioner = getProvisioner({
 			provider: cfg.provider,
 			token: cfg.token,
-			serverType: cfg.serverType,
+			serverTypes: serverTypeList(cfg.serverType),
 			location: cfg.location,
 			image: cfg.image,
 			networkId: cfg.networkId || undefined,
 		});
 		const name = `nomploy-auto-${nanoid(6).toLowerCase()}`;
 		onLog(`Provisioning ${cfg.provider} node ${name} …\n`);
-		const node = await provisioner.createNode({
-			name,
-			sshPublicKey: key.publicKey,
-		});
+		await recordEvent(
+			organizationId,
+			"scale_up",
+			`Provisioning ${name}`,
+			decision.reason,
+		);
+		let node: Awaited<ReturnType<typeof provisioner.createNode>>;
+		try {
+			node = await provisioner.createNode({
+				name,
+				sshPublicKey: key.publicKey,
+			});
+		} catch (e) {
+			await recordEvent(
+				organizationId,
+				"error",
+				`Provision failed for ${name}`,
+				e instanceof Error ? e.message : String(e),
+			);
+			throw e;
+		}
 		const ip = node.privateIp || node.publicIp;
 		onLog(`Node ${name} up at ${ip} (provider id ${node.providerId})\n`);
 
@@ -269,10 +309,22 @@ export const reconcileAutoscaler = async (
 			onLog(
 				`❌ join failed: ${e instanceof Error ? e.message : String(e)} — rolling back\n`,
 			);
+			await recordEvent(
+				organizationId,
+				"error",
+				`Join failed for ${name} — rolled back`,
+				e instanceof Error ? e.message : String(e),
+			);
 			await rollback();
 			throw e;
 		}
 		await stamp();
+		await recordEvent(
+			organizationId,
+			"scale_up",
+			`Added worker ${name} (${ip})`,
+			decision.reason,
+		);
 		return `scaled up: +${name}`;
 	}
 
@@ -306,12 +358,18 @@ export const reconcileAutoscaler = async (
 	} catch {}
 
 	onLog(`Scaling down: removing ${victim.name}\n`);
+	await recordEvent(
+		organizationId,
+		"scale_down",
+		`Removing worker ${victim.name}`,
+		decision.reason,
+	);
 	await removeWorkerNode(victim.serverId, onLog);
 	if (victim.providerNodeId) {
 		const provisioner = getProvisioner({
 			provider: cfg.provider,
 			token: cfg.token,
-			serverType: cfg.serverType,
+			serverTypes: serverTypeList(cfg.serverType),
 			location: cfg.location,
 			image: cfg.image,
 			networkId: cfg.networkId || undefined,
@@ -325,6 +383,12 @@ export const reconcileAutoscaler = async (
 	}
 	await db.delete(serverTable).where(eq(serverTable.serverId, victim.serverId));
 	await stamp();
+	await recordEvent(
+		organizationId,
+		"scale_down",
+		`Removed worker ${victim.name}`,
+		decision.reason,
+	);
 	return `scaled down: -${victim.name}`;
 };
 

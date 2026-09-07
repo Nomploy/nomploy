@@ -395,10 +395,17 @@ const generateConsulServices = (
         timeout  = "5s"
       }`;
 
+		// Mesh services advertise the alloc (pod) address. Without this the Connect
+		// sidecar-to-sidecar hop dials the node's wg host IP + a bridge-mapped port
+		// and Envoy's transparent original-source binding dies on the NAT hairpin
+		// (same-node) / non-routable pod source (cross-node). address_mode=alloc
+		// makes that hop use a routable source, so the mesh works both same-node
+		// (direct bridge) and cross-node (over the WireGuard mesh).
+		const addressModeLine = inMesh ? '\n      address_mode = "alloc"' : "";
 		return `    service {
       name     = "${serviceName}"
       port     = "${port.label}"
-      provider = "consul"${connectBlock}${tagsStr}${checkBlock}
+      provider = "consul"${addressModeLine}${connectBlock}${tagsStr}${checkBlock}
     }`;
 	});
 
