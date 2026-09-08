@@ -7,6 +7,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { api } from "@/utils/api";
+import { ShowNomadPackForm } from "../nomad-pack/show";
 import { ComposeActions } from "./actions";
 import { ShowProviderFormCompose } from "./generic/show";
 
@@ -47,7 +48,11 @@ export const ShowGeneralCompose = ({ composeId }: Props) => {
 					<ComposeActions composeId={composeId} />
 				</CardContent>
 			</Card>
-			<ShowProviderFormCompose composeId={composeId} />
+			{data?.composeType === "nomad-pack" ? (
+				<ShowNomadPackForm composeId={composeId} />
+			) : (
+				<ShowProviderFormCompose composeId={composeId} />
+			)}
 		</>
 	);
 };
