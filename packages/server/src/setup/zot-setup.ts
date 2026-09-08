@@ -130,8 +130,9 @@ export const enableZotRegistry = async (
 	await waitForRegistry(addr, onLog);
 
 	// docker login from the control plane so builds can push.
+	const shq = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
 	await execAsync(
-		`printf %s '${cfg.password.replace(/'/g, "'\\''")}' | docker login ${addr} -u '${cfg.username}' --password-stdin`,
+		`printf %s ${shq(cfg.password)} | docker login ${addr} -u ${shq(cfg.username)} --password-stdin`,
 	).catch((e) =>
 		onLog(`⚠ docker login: ${e instanceof Error ? e.message : e}\n`),
 	);

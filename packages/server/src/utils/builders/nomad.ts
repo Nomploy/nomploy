@@ -85,7 +85,10 @@ export const getBuildNomadCommand = async (
 	// verbatim \u2014 no translation, and no docker compose build/push (the jobspec
 	// references already-built images and owns its own ${NOMAD_*} interpolation,
 	// which we must NOT substitute). This is the "deploy using Nomad syntax" path.
-	const isNativeHcl = /(^|\n)\s*job\s+"/.test(composeFile);
+	// A native Nomad jobspec opens with a `job "<name>" {` block. Requiring the
+	// name + opening brace (not just `job "`) avoids misreading a compose file
+	// that merely contains those tokens as HCL.
+	const isNativeHcl = /(^|\n)\s*job\s+"[^"]+"\s*\{/.test(composeFile);
 
 	let jobSpec: string;
 	if (isNativeHcl) {

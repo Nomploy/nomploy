@@ -458,10 +458,20 @@ export const removeCompose = async (
 		const { COMPOSE_PATH } = paths(!!compose.serverId);
 		const projectPath = join(COMPOSE_PATH, compose.appName);
 
-		if (compose.composeType === "nomad") {
-			const stopCmd = `nomad job stop -purge ${compose.appName}`;
+		if (
+			compose.composeType === "nomad" ||
+			compose.composeType === "nomad-pack"
+		) {
+			// Tear down the Nomad job (native/compose = purge by appName; a pack =
+			// nomad-pack destroy, since its jobs aren't named after appName).
+			const teardown =
+				compose.composeType === "nomad-pack" && compose.nomadPack
+					? `nomad-pack destroy ${compose.nomadPack}${
+							compose.nomadPackRegistry ? " --registry nomploy-custom" : ""
+						} --name "${compose.appName}" 2>&1 || true`
+					: `nomad job stop -purge ${compose.appName} || true`;
 			const command = `
-			${stopCmd};
+			${teardown};
 			rm -rf ${projectPath}`;
 
 			if (compose.serverId) {
@@ -522,6 +532,20 @@ export const startCompose = async (composeId: string) => {
 			}
 		}
 
+		if (compose.composeType === "nomad-pack" && compose.nomadPack) {
+			// Re-run the pack, reusing the var-file written at last deploy if present.
+			const varFile = join(projectPath, `${compose.appName}.vars.hcl`);
+			const registryFlag = compose.nomadPackRegistry
+				? " --registry nomploy-custom"
+				: "";
+			const cmd = `VF=""; [ -f "${varFile}" ] && VF="--var-file=${varFile}"; nomad-pack run ${compose.nomadPack}${registryFlag} $VF --name "${compose.appName}" 2>&1`;
+			if (compose.serverId) {
+				await execAsyncRemote(compose.serverId, cmd);
+			} else {
+				await execAsync(cmd);
+			}
+		}
+
 		await updateCompose(composeId, {
 			composeStatus: "done",
 		});
@@ -559,6 +583,27 @@ export const stopCompose = async (composeId: string) => {
 
 		if (compose.composeType === "nomad") {
 			const stopCmd = `nomad job stop ${compose.appName}`;
+			if (compose.serverId) {
+				await execAsyncRemote(compose.serverId, stopCmd);
+			} else {
+				await execAsync(stopCmd);
+			}
+		}
+
+		if (compose.composeType === "nomad-pack" && compose.nomadPack) {
+			// A pack's jobs aren't named after appName, so `nomad job stop` won't
+			// match — tear the deployment down with `nomad-pack destroy` (by the
+			// --name we deployed it under). Re-deploy re-runs it.
+			// Ensure the custom registry alias exists before destroy (it may not,
+			// e.g. after a control-plane rebuild). Registry values are charset-
+			// validated at the schema, so interpolation here is safe.
+			const regAdd = compose.nomadPackRegistry
+				? `nomad-pack registry add nomploy-custom "${compose.nomadPackRegistry}" 2>&1 || true; `
+				: "";
+			const registryFlag = compose.nomadPackRegistry
+				? " --registry nomploy-custom"
+				: "";
+			const stopCmd = `${regAdd}nomad-pack destroy ${compose.nomadPack}${registryFlag} --name "${compose.appName}" 2>&1`;
 			if (compose.serverId) {
 				await execAsyncRemote(compose.serverId, stopCmd);
 			} else {
