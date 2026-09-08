@@ -31,6 +31,7 @@ export const composeType = pgEnum("composeType", [
 	"docker-compose",
 	"stack",
 	"nomad",
+	"nomad-pack",
 ]);
 
 export const compose = pgTable("compose", {
@@ -48,6 +49,12 @@ export const compose = pgTable("compose", {
 	refreshToken: text("refreshToken").$defaultFn(() => nanoid()),
 	sourceType: sourceTypeCompose("sourceType").notNull().default("github"),
 	composeType: composeType("composeType").notNull().default("nomad"),
+	// Nomad Pack (composeType = "nomad-pack"): the pack to deploy + an optional
+	// custom registry. The pack's variables are stored in composeFile (HCL).
+	// nomadPack is the pack name (community registry) or "<registry>:<pack>".
+	nomadPack: text("nomadPack"),
+	// Optional custom pack registry: a git URL added via `nomad-pack registry add`.
+	nomadPackRegistry: text("nomadPackRegistry"),
 	// Github
 	repository: text("repository"),
 	owner: text("owner"),
@@ -166,7 +173,11 @@ const createSchema = createInsertSchema(compose, {
 	customGitSSHKeyId: z.string().optional(),
 	command: z.string().optional(),
 	composePath: z.string().min(1),
-	composeType: z.enum(["docker-compose", "stack", "nomad"]).optional(),
+	composeType: z
+		.enum(["docker-compose", "stack", "nomad", "nomad-pack"])
+		.optional(),
+	nomadPack: z.string().optional(),
+	nomadPackRegistry: z.string().optional(),
 	watchPaths: z.array(z.string()).optional(),
 	sourceType: z
 		.enum(["git", "github", "gitlab", "bitbucket", "gitea", "raw"])
@@ -183,6 +194,8 @@ export const apiCreateCompose = createSchema.pick({
 	appName: true,
 	serverId: true,
 	composeFile: true,
+	nomadPack: true,
+	nomadPackRegistry: true,
 });
 
 export const apiCreateComposeByTemplate = createSchema

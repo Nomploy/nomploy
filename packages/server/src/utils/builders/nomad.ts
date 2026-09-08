@@ -135,6 +135,52 @@ ${buildSteps}
 `;
 };
 
+/**
+ * Build the deploy command for a Nomad Pack (composeType = "nomad-pack").
+ * Writes the pack variables (composeFile, HCL) to a var-file, optionally
+ * registers a custom pack registry, and runs `nomad-pack run`. The deployment is
+ * named by appName so it maps back to nomploy for status/logs.
+ */
+export const getBuildNomadPackCommand = (
+	compose: NomadComposeNested,
+): string => {
+	const { COMPOSE_PATH } = paths(!!compose.serverId);
+	const { appName, composeFile, nomadPack, nomadPackRegistry } = compose;
+	const projectPath = join(COMPOSE_PATH, appName, "code");
+	const varFile = join(projectPath, `${appName}.vars.hcl`);
+
+	if (!nomadPack || !nomadPack.trim()) {
+		return 'echo "Error: no Nomad Pack specified"; exit 1';
+	}
+
+	const hasVars = !!composeFile && composeFile.trim().length > 0;
+	const encodedVars = encodeBase64(composeFile || "");
+	// A custom registry (git URL) is added under a fixed local name, then
+	// referenced with --registry. Tolerate a non-zero exit so re-deploys (where
+	// the registry already exists) don't fail.
+	const registryName = "nomploy-custom";
+	const addRegistry = nomadPackRegistry
+		? `\tnomad-pack registry add ${registryName} "${nomadPackRegistry}" 2>&1 || true\n`
+		: "";
+	const registryFlag = nomadPackRegistry ? ` --registry ${registryName}` : "";
+	const varFlag = hasVars ? ` --var-file="${varFile}"` : "";
+	const writeVars = hasVars
+		? `\techo "${encodedVars}" | base64 -d > "${varFile}"\n\techo "Pack variables written"\n`
+		: "";
+
+	return `
+set -e
+{
+	mkdir -p "${projectPath}"
+${writeVars}${addRegistry}	nomad-pack run ${nomadPack}${registryFlag}${varFlag} --name "${appName}" 2>&1
+	echo "Nomad Pack deployed"
+} || {
+	echo "Error: Nomad Pack deployment failed"
+	exit 1
+}
+`;
+};
+
 // ─── Env Var Resolution ──────────────────────────────────────────────────────
 
 /**

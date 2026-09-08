@@ -11,6 +11,7 @@ import { ShowNomadLogs } from "@/components/dashboard/nomad/logs/show-nomad-logs
 import { ShowNetworkPolicies } from "@/components/dashboard/nomad/network/show-network-policies";
 import { ShowNomadNodes } from "@/components/dashboard/nomad/nodes/show-nomad-nodes";
 import { NomadOverview } from "@/components/dashboard/nomad/overview";
+import { ShowRegistry } from "@/components/dashboard/nomad/registry/show-registry";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
 import {
 	Select,
@@ -68,6 +69,7 @@ const NomadDashboard = () => {
 					<TabsTrigger value="nodes">Nodes</TabsTrigger>
 					<TabsTrigger value="consul">Consul</TabsTrigger>
 					<TabsTrigger value="network">Network</TabsTrigger>
+					<TabsTrigger value="registry">Registry</TabsTrigger>
 					<TabsTrigger value="autoscale">Autoscaling</TabsTrigger>
 					<TabsTrigger value="logs">Logs</TabsTrigger>
 				</TabsList>
@@ -85,6 +87,9 @@ const NomadDashboard = () => {
 				</TabsContent>
 				<TabsContent value="network">
 					<ShowNetworkPolicies />
+				</TabsContent>
+				<TabsContent value="registry">
+					<ShowRegistry />
 				</TabsContent>
 				<TabsContent value="autoscale">
 					<ShowAutoscaler />

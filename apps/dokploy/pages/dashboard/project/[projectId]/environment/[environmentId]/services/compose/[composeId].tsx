@@ -82,6 +82,17 @@ const Service = (
 
 	const { data } = api.compose.one.useQuery({ composeId });
 
+	// nomad-pack behaves like a Nomad job for logs/containers/monitoring
+	// (allocations), so normalize it to "nomad" for the child components.
+	const isNomad =
+		data?.composeType === "nomad" || data?.composeType === "nomad-pack";
+	// Sound cast: when composeType is "nomad-pack", isNomad is true so the else
+	// branch never yields it — child appType props take the 3-value union.
+	const appType = (isNomad ? "nomad" : data?.composeType || "docker-compose") as
+		| "docker-compose"
+		| "stack"
+		| "nomad";
+
 	const { data: auth } = api.user.get.useQuery();
 	const { data: permissions } = api.user.getPermissions.useQuery();
 	const { data: isCloud } = api.settings.isCloud.useQuery();
@@ -308,13 +319,13 @@ const Service = (
 									{permissions?.service.read && (
 										<TabsContent value="containers">
 											<div className="flex flex-col gap-4 pt-2.5">
-												{data?.composeType === "nomad" ? (
+												{isNomad ? (
 													<ShowNomadAllocations appName={data?.appName || ""} />
 												) : (
 													<ShowComposeContainers
 														serverId={data?.serverId || undefined}
 														appName={data?.appName || ""}
-														appType={data?.composeType || "docker-compose"}
+														appType={appType}
 													/>
 												)}
 											</div>
@@ -333,7 +344,7 @@ const Service = (
 															token={
 																data?.server?.metricsConfig?.server?.token || ""
 															}
-															appType={data?.composeType || "docker-compose"}
+															appType={appType}
 														/>
 													) : (
 														<>
@@ -358,14 +369,14 @@ const Service = (
 																token={
 																	monitoring?.metricsConfig?.server?.token || ""
 																}
-																appType={data?.composeType || "docker-compose"}
+																appType={appType}
 															/>
 														) : ( */}
 															{/* <div> */}
 															<ComposeFreeMonitoring
 																serverId={data?.serverId || ""}
 																appName={data?.appName || ""}
-																appType={data?.composeType || "docker-compose"}
+																appType={appType}
 															/>
 															{/* </div> */}
 															{/* )} */}
@@ -379,13 +390,13 @@ const Service = (
 									{permissions?.logs.read && (
 										<TabsContent value="logs">
 											<div className="flex flex-col gap-4 pt-2.5">
-												{data?.composeType === "nomad" ? (
+												{isNomad ? (
 													<ShowNomadAllocations appName={data?.appName || ""} />
 												) : (
 													<ShowDockerLogsCompose
 														serverId={data?.serverId || ""}
 														appName={data?.appName || ""}
-														appType={data?.composeType || "docker-compose"}
+														appType={appType}
 													/>
 												)}
 											</div>

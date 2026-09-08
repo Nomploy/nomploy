@@ -52,6 +52,18 @@ RUN curl -fsSL "https://releases.hashicorp.com/nomad/${NOMAD_VERSION}/nomad_${NO
     && rm /tmp/nomad.zip \
     && nomad --version
 
+# nomad-pack — the deploy pipeline runs `nomad-pack run` to deploy packs from a
+# registry. Retry the download (transient HashiCorp release flakes).
+ARG NOMAD_PACK_VERSION=0.3.0
+RUN ok=0; for i in 1 2 3; do \
+      if curl -fsSL "https://releases.hashicorp.com/nomad-pack/${NOMAD_PACK_VERSION}/nomad-pack_${NOMAD_PACK_VERSION}_linux_${TARGETARCH}.zip" -o /tmp/nomad-pack.zip; then ok=1; break; fi; \
+      echo "nomad-pack download attempt $i failed; retrying in 5s"; sleep 5; \
+    done; \
+    [ "$ok" = 1 ] \
+    && unzip -o /tmp/nomad-pack.zip -d /usr/local/bin/ \
+    && rm /tmp/nomad-pack.zip \
+    && nomad-pack version
+
 # Copy only the necessary files
 COPY --from=build /prod/nomploy/.next ./.next
 COPY --from=build /prod/nomploy/dist ./dist

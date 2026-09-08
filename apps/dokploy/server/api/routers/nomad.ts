@@ -2,11 +2,13 @@ import { findServerById, updateServerById } from "@nomploy/server";
 import { db } from "@nomploy/server/db";
 import {
 	apiUpdateClusterAutoscaler,
+	apiUpsertZotRegistry,
 	clusterAutoscaler,
 	clusterAutoscalerEvents,
 	networkPolicies,
 	projects,
 	server as serverTable,
+	zotRegistry,
 } from "@nomploy/server/db/schema";
 import { getProvisioner } from "@nomploy/server/setup/autoscale";
 import {
@@ -33,6 +35,10 @@ import {
 	serverMeshMembers,
 	writeCluster,
 } from "@nomploy/server/setup/nomad-mesh";
+import {
+	disableZotRegistry,
+	enableZotRegistry,
+} from "@nomploy/server/setup/zot-setup";
 import {
 	execAsync,
 	execAsyncRemote,
@@ -1375,4 +1381,83 @@ export const nomadRouter = createTRPCRouter({
 			});
 		}
 	}),
+
+	// ── Built-in registry (zot) ─────────────────────────────────────────────
+	getZotRegistry: protectedProcedure.query(async ({ ctx }) => {
+		const org = ctx.session?.activeOrganizationId;
+		if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+		const cfg = await db.query.zotRegistry.findFirst({
+			where: eq(zotRegistry.organizationId, org),
+		});
+		if (!cfg) return null;
+		// Mask secrets; expose booleans so the UI can show "set".
+		const { password, s3SecretAccessKey, ...rest } = cfg;
+		const hubWgIp = readCluster()?.hubWgIp || "10.10.0.1";
+		return {
+			...rest,
+			hasPassword: !!password,
+			hasS3Secret: !!s3SecretAccessKey,
+			// Overlay address the registry is (or will be) reachable at.
+			address: `${hubWgIp}:${cfg.port}`,
+		};
+	}),
+
+	updateZotRegistry: protectedProcedure
+		.input(apiUpsertZotRegistry)
+		.mutation(async ({ input, ctx }) => {
+			const org = ctx.session?.activeOrganizationId;
+			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+			// Only overwrite secrets when a non-empty value is provided.
+			const patch: Record<string, unknown> = { ...input };
+			if (!input.password) patch.password = undefined;
+			if (!input.s3SecretAccessKey) patch.s3SecretAccessKey = undefined;
+			const existing = await db.query.zotRegistry.findFirst({
+				where: eq(zotRegistry.organizationId, org),
+			});
+			if (existing) {
+				await db
+					.update(zotRegistry)
+					.set(patch)
+					.where(eq(zotRegistry.organizationId, org));
+			} else {
+				await db.insert(zotRegistry).values({ ...patch, organizationId: org });
+			}
+			return { success: true };
+		}),
+
+	enableZotRegistry: withPermission("server", "create").subscription(
+		({ ctx }) => {
+			const org = ctx.session?.activeOrganizationId;
+			return observable<string>((emit) => {
+				(async () => {
+					try {
+						if (!org) {
+							emit.next("❌ No active organization.\n");
+							emit.next(OP_ENDED);
+							emit.complete();
+							return;
+						}
+						await enableZotRegistry(org, (l) => emit.next(l));
+						emit.next("ZOT_DONE");
+						emit.complete();
+					} catch (err: unknown) {
+						emit.next(
+							`\n❌ ${err instanceof Error ? err.message : String(err)}\n`,
+						);
+						emit.next(OP_ENDED);
+						emit.complete();
+					}
+				})();
+			});
+		},
+	),
+
+	disableZotRegistry: withPermission("server", "delete").mutation(
+		async ({ ctx }) => {
+			const org = ctx.session?.activeOrganizationId;
+			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+			await disableZotRegistry(org);
+			return { success: true };
+		},
+	),
 });
