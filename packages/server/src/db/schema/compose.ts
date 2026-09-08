@@ -176,8 +176,16 @@ const createSchema = createInsertSchema(compose, {
 	composeType: z
 		.enum(["docker-compose", "stack", "nomad", "nomad-pack"])
 		.optional(),
-	nomadPack: z.string().optional(),
-	nomadPackRegistry: z.string().optional(),
+	// Constrained charsets: these are interpolated into `nomad-pack` shell
+	// commands, so reject shell metacharacters (no spaces, ;, |, $, backticks…).
+	nomadPack: z
+		.string()
+		.regex(/^[a-zA-Z0-9_.:/-]*$/, "Invalid pack reference")
+		.optional(),
+	nomadPackRegistry: z
+		.string()
+		.regex(/^[a-zA-Z0-9_.:/@#?=&~-]*$/, "Invalid registry URL")
+		.optional(),
 	watchPaths: z.array(z.string()).optional(),
 	sourceType: z
 		.enum(["git", "github", "gitlab", "bitbucket", "gitea", "raw"])

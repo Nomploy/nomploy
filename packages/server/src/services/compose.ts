@@ -594,10 +594,16 @@ export const stopCompose = async (composeId: string) => {
 			// A pack's jobs aren't named after appName, so `nomad job stop` won't
 			// match — tear the deployment down with `nomad-pack destroy` (by the
 			// --name we deployed it under). Re-deploy re-runs it.
+			// Ensure the custom registry alias exists before destroy (it may not,
+			// e.g. after a control-plane rebuild). Registry values are charset-
+			// validated at the schema, so interpolation here is safe.
+			const regAdd = compose.nomadPackRegistry
+				? `nomad-pack registry add nomploy-custom "${compose.nomadPackRegistry}" 2>&1 || true; `
+				: "";
 			const registryFlag = compose.nomadPackRegistry
 				? " --registry nomploy-custom"
 				: "";
-			const stopCmd = `nomad-pack destroy ${compose.nomadPack}${registryFlag} --name "${compose.appName}" 2>&1`;
+			const stopCmd = `${regAdd}nomad-pack destroy ${compose.nomadPack}${registryFlag} --name "${compose.appName}" 2>&1`;
 			if (compose.serverId) {
 				await execAsyncRemote(compose.serverId, stopCmd);
 			} else {

@@ -59,6 +59,11 @@ export const generateZotConfig = (opts: ZotOptions): string => {
 			...(opts.storage.endpoint
 				? { regionendpoint: opts.storage.endpoint }
 				: {}),
+			// Put credentials in the driver config so auth doesn't rely on the s3
+			// driver consulting the AWS env chain (also set as env below). Omitted
+			// when empty → falls back to the instance's IAM role / env.
+			...(opts.s3AccessKeyId ? { accesskey: opts.s3AccessKeyId } : {}),
+			...(opts.s3SecretAccessKey ? { secretkey: opts.s3SecretAccessKey } : {}),
 		};
 	}
 	const config = {
