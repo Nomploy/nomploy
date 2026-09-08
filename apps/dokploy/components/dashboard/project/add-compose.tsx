@@ -285,7 +285,9 @@ export const AddCompose = ({ environmentId, projectName }: Props) => {
 											<SelectItem value="docker-compose">
 												Docker Compose
 											</SelectItem>
-											<SelectItem value="nomad">Nomad</SelectItem>
+											<SelectItem value="nomad">
+												Nomad (compose or HCL jobspec)
+											</SelectItem>
 										</SelectContent>
 									</Select>
 									<FormMessage />
