@@ -114,6 +114,36 @@ describe("nomad builder — compose → HCL (live)", () => {
 		expect(hcl).toContain('path     = "/health"');
 	});
 
+	it("deploys a native Nomad HCL jobspec verbatim (no translation)", async () => {
+		const hcl = `job "raw-app" {
+  type = "service"
+  group "web" {
+    task "server" {
+      driver = "docker"
+      config { image = "nginx:alpine" }
+    }
+  }
+}`;
+		const hclCompose = {
+			...compose,
+			appName: "rawapp",
+			composeFile: hcl,
+			domains: [],
+		};
+
+		const cmd = await getBuildNomadCommand(hclCompose);
+		const match = cmd.match(/echo "([A-Za-z0-9+/=]+)" \| base64 -d/);
+		const jobSpec = Buffer.from(match?.[1] ?? "", "base64").toString("utf8");
+
+		// The jobspec is written out byte-for-byte — not run through the compose
+		// translator (which would rename the job to the appName + add spread/dns).
+		expect(jobSpec).toBe(hcl);
+		expect(jobSpec).toContain('job "raw-app"');
+		// A native jobspec skips the docker compose build/push steps.
+		expect(cmd).not.toContain("docker compose build");
+		expect(cmd).toContain("nomad job run");
+	});
+
 	it("translates a GPU reservation into a Nomad device stanza", async () => {
 		const gpuCompose = {
 			...compose,

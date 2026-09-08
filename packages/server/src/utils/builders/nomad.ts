@@ -80,23 +80,41 @@ export const getBuildNomadCommand = async (
 	const projectPath = join(COMPOSE_PATH, appName, "code");
 	const jobFilePath = join(projectPath, `${appName}.nomad.hcl`);
 
-	// Resolve all env vars (project + environment + service)
-	const envVars = resolveNomadEnvVars(compose);
+	// Native Nomad jobspec passthrough: if the source is already a Nomad HCL job
+	// (a top-level `job "\u2026" {` block) rather than docker-compose YAML, deploy it
+	// verbatim \u2014 no translation, and no docker compose build/push (the jobspec
+	// references already-built images and owns its own ${NOMAD_*} interpolation,
+	// which we must NOT substitute). This is the "deploy using Nomad syntax" path.
+	const isNativeHcl = /(^|\n)\s*job\s+"/.test(composeFile);
 
-	// Parse compose file into Nomad services
-	const services = parseComposeToNomadServices(composeFile, envVars);
-
-	// Generate Nomad HCL job spec. Isolated projects join the Connect mesh.
-	const segmentation = compose.environment?.project?.isolated
-		? { projectId: compose.environment.projectId }
-		: undefined;
-	const jobSpec = generateNomadJobSpec(
-		appName,
-		services,
-		domains,
-		segmentation,
-	);
+	let jobSpec: string;
+	if (isNativeHcl) {
+		jobSpec = composeFile;
+	} else {
+		// Resolve all env vars (project + environment + service)
+		const envVars = resolveNomadEnvVars(compose);
+		// Parse compose file into Nomad services
+		const services = parseComposeToNomadServices(composeFile, envVars);
+		// Generate Nomad HCL job spec. Isolated projects join the Connect mesh.
+		const segmentation = compose.environment?.project?.isolated
+			? { projectId: compose.environment.projectId }
+			: undefined;
+		jobSpec = generateNomadJobSpec(appName, services, domains, segmentation);
+	}
 	const encodedJobSpec = encodeBase64(jobSpec);
+
+	// Compose sources build+push their image first; a native jobspec skips that.
+	const buildSteps = isNativeHcl
+		? ""
+		: `
+	# Build Docker image
+	docker compose build 2>&1
+	echo "Docker image built: \u2705"
+
+	# Push to registry
+	docker compose push 2>&1
+	echo "Docker image pushed: \u2705"
+`;
 
 	return `
 set -e
@@ -106,15 +124,7 @@ set -e
 	# Write Nomad job file
 	echo "${encodedJobSpec}" | base64 -d > "${jobFilePath}"
 	echo "Nomad job file written: \u2705"
-
-	# Build Docker image
-	docker compose build 2>&1
-	echo "Docker image built: \u2705"
-
-	# Push to registry
-	docker compose push 2>&1
-	echo "Docker image pushed: \u2705"
-
+${buildSteps}
 	# Deploy to Nomad
 	nomad job run "${jobFilePath}" 2>&1
 	echo "Nomad Job Deployed: \u2705"
