@@ -153,6 +153,16 @@ export const applications = pgTable("application", {
 	ulimitsSwarm: json("ulimitsSwarm").$type<UlimitsSwarm>(),
 	//
 	replicas: integer("replicas").default(1).notNull(),
+	// Nomad horizontal autoscaling for this app. When enabled, the app's Nomad
+	// job gets a scaling{} block (min/max + CPU/memory target) that the Nomad
+	// Autoscaler drives — same mechanism compose services get via x-nomad-scaling.
+	autoscalingEnabled: boolean("autoscalingEnabled").notNull().default(false),
+	minReplicas: integer("minReplicas").notNull().default(1),
+	maxReplicas: integer("maxReplicas").notNull().default(3),
+	// Target % (allocated) that the autoscaler steers toward; null = that metric
+	// isn't used. At least one should be set when autoscaling is enabled.
+	autoscaleCpuTarget: integer("autoscaleCpuTarget"),
+	autoscaleMemoryTarget: integer("autoscaleMemoryTarget"),
 	applicationStatus: applicationStatus("applicationStatus")
 		.notNull()
 		.default("idle"),
