@@ -7,7 +7,7 @@ import {
 	type ZotOptions,
 	type ZotStorage,
 } from "../utils/builders/nomad-zot";
-import { execAsync } from "../utils/process/execAsync";
+import { execAsync, execAsyncRemote } from "../utils/process/execAsync";
 import { readCluster } from "./nomad-mesh";
 
 type Log = (s: string) => void;
@@ -29,15 +29,11 @@ const toStorage = (cfg: typeof zotRegistry.$inferSelect): ZotStorage =>
 			}
 		: { kind: "local" };
 
-/**
- * Add the built-in registry to the control plane's Docker insecure-registries so
- * `docker push/login` to the overlay HTTP endpoint works. Uses `systemctl reload
- * docker` (SIGHUP) which re-reads insecure-registries WITHOUT restarting
- * containers, so the panel + running allocations are undisturbed. Idempotent.
- */
-const configureInsecureRegistry = async (addr: string, onLog: Log) => {
-	onLog(`Allowing insecure registry ${addr} on the control plane…\n`);
-	const script = `SUDO=""; [ "$EUID" -ne 0 ] && SUDO=sudo
+// The daemon.json edit + docker reload (SIGHUP re-reads insecure-registries
+// WITHOUT restarting containers, so the panel + allocs are undisturbed).
+const insecureRegistryScript = (
+	addr: string,
+) => `SUDO=""; [ "$EUID" -ne 0 ] && SUDO=sudo
 $SUDO python3 - "${addr}" <<'PY'
 import json, os, sys
 addr = sys.argv[1]
@@ -58,11 +54,27 @@ else:
     print("present")
 PY
 $SUDO systemctl reload docker 2>/dev/null || $SUDO kill -HUP "$(cat /var/run/docker.pid 2>/dev/null)" 2>/dev/null || true`;
+
+/**
+ * Allow the built-in (HTTP) registry on every node's Docker: the control plane
+ * (so builds push) AND all worker peers (so their allocations can pull). Uses a
+ * non-disruptive reload. Existing workers are covered here; new workers pick it
+ * up on the next enable/reconfigure.
+ */
+const configureInsecureRegistry = async (addr: string, onLog: Log) => {
+	const script = insecureRegistryScript(addr);
+	onLog(`Allowing insecure registry ${addr} on the control plane…\n`);
 	await execAsync(script).catch((e) =>
 		onLog(
 			`⚠ insecure-registry config: ${e instanceof Error ? e.message : e}\n`,
 		),
 	);
+	for (const p of readCluster()?.peers ?? []) {
+		onLog(`Allowing insecure registry on worker ${p.name}…\n`);
+		await execAsyncRemote(p.serverId, script).catch((e) =>
+			onLog(`⚠ ${p.name}: ${e instanceof Error ? e.message : e}\n`),
+		);
+	}
 };
 
 /** Wait until the registry answers the OCI base endpoint (/v2/). */
