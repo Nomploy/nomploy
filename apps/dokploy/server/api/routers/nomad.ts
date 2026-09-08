@@ -888,12 +888,16 @@ export const nomadRouter = createTRPCRouter({
 							(s) => s.serverId !== input.serverId,
 						);
 						writeCluster(cluster);
-						await updateServerById(input.serverId, {
-							nomadAddress: null,
-							clusterRole: null,
-							wgIp: null,
-							wgPublicKey: null,
-						});
+						// A provider-backed node's row is deleted below, so skip the
+						// field-clearing update for it (it would be immediately deleted).
+						if (!server.providerNodeId) {
+							await updateServerById(input.serverId, {
+								nomadAddress: null,
+								clusterRole: null,
+								wgIp: null,
+								wgPublicKey: null,
+							});
+						}
 
 						// If this node runs on a cloud VM we provisioned, destroy it so
 						// removal doesn't leak an idle (billed) machine.
@@ -972,7 +976,7 @@ export const nomadRouter = createTRPCRouter({
 		}),
 
 	// List cluster members (hub + servers + workers) with live Nomad status.
-	getClusterMembers: withPermission("server", "read").query(async () => {
+	getClusterMembers: withPermission("server", "read").query(async ({ ctx }) => {
 		const cluster = readCluster();
 		if (!cluster) return [];
 		const cfg = {
@@ -999,9 +1003,13 @@ export const nomadRouter = createTRPCRouter({
 		const statusByIp = new Map(nodes.map((n) => [n.Address, n.Status]));
 		// Node provenance: is it a cloud VM we can destroy on removal, and was it
 		// spun up by the autoscaler vs. added manually / pre-existing?
-		const rows = await db.query.server.findMany({
-			columns: { serverId: true, autoscaled: true, providerNodeId: true },
-		});
+		const org = ctx.session?.activeOrganizationId;
+		const rows = org
+			? await db.query.server.findMany({
+					where: eq(serverTable.organizationId, org),
+					columns: { serverId: true, autoscaled: true, providerNodeId: true },
+				})
+			: [];
 		const provByServer = new Map(rows.map((r) => [r.serverId, r]));
 		const row = (
 			name: string,

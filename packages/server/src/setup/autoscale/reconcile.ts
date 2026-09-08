@@ -270,25 +270,40 @@ export const reconcileAutoscaler = async (
 			throw e;
 		}
 		const ip = node.privateIp || node.publicIp;
+		if (!ip) {
+			await provisioner.destroyNode(node.providerId).catch(() => {});
+			throw new Error("Provider returned no reachable IP for the new node");
+		}
 		onLog(`Node ${name} up at ${ip} (provider id ${node.providerId})\n`);
 
-		// Register the node as a nomploy server, then join it as a worker.
-		const [row] = await db
-			.insert(serverTable)
-			.values({
-				serverId: nanoid(),
-				name,
-				ipAddress: ip,
-				port: 22,
-				username: "root",
-				sshKeyId: cfg.sshKeyId,
-				organizationId,
-				createdAt: new Date().toISOString(),
-				autoscaled: true,
-				providerNodeId: node.providerId,
-			})
-			.returning();
-		if (!row) throw new Error("Failed to create server record");
+		// Register the node as a nomploy server, then join it as a worker. Destroy
+		// the (already-created, billed) VM if the row insert fails, since the
+		// rollback below only covers failures after the row exists.
+		let row: typeof serverTable.$inferSelect | undefined;
+		try {
+			[row] = await db
+				.insert(serverTable)
+				.values({
+					serverId: nanoid(),
+					name,
+					ipAddress: ip,
+					port: 22,
+					username: "root",
+					sshKeyId: cfg.sshKeyId,
+					organizationId,
+					createdAt: new Date().toISOString(),
+					autoscaled: true,
+					providerNodeId: node.providerId,
+				})
+				.returning();
+		} catch (e) {
+			await provisioner.destroyNode(node.providerId).catch(() => {});
+			throw e;
+		}
+		if (!row) {
+			await provisioner.destroyNode(node.providerId).catch(() => {});
+			throw new Error("Failed to create server record");
+		}
 
 		// Roll back the VM + row if the node never becomes reachable or the join
 		// fails, so a failure never leaves an orphaned VM or half-joined row.
@@ -433,26 +448,42 @@ export const provisionAndJoinNode = async (
 		sshPublicKey: key.publicKey,
 	});
 	const ip = node.privateIp || node.publicIp;
+	if (!ip) {
+		await provisioner.destroyNode(node.providerId).catch(() => {});
+		throw new Error("Provider returned no reachable IP for the new node");
+	}
 	onLog(`Node ${name} up at ${ip} (provider id ${node.providerId})\n`);
 
-	const [row] = await db
-		.insert(serverTable)
-		.values({
-			serverId: nanoid(),
-			name,
-			ipAddress: ip,
-			port: 22,
-			username: "root",
-			sshKeyId: cfg.sshKeyId,
-			organizationId,
-			createdAt: new Date().toISOString(),
-			// Manually added — the autoscaler must NOT reclaim it. providerNodeId is
-			// kept so removal can also destroy the VM.
-			autoscaled: false,
-			providerNodeId: node.providerId,
-		})
-		.returning();
-	if (!row) throw new Error("Failed to create server record");
+	// Destroy the VM if the row insert fails — the VM already exists at this point,
+	// so a throw here would otherwise leak a billed machine (rollback below only
+	// covers failures after the row exists).
+	let row: typeof serverTable.$inferSelect | undefined;
+	try {
+		[row] = await db
+			.insert(serverTable)
+			.values({
+				serverId: nanoid(),
+				name,
+				ipAddress: ip,
+				port: 22,
+				username: "root",
+				sshKeyId: cfg.sshKeyId,
+				organizationId,
+				createdAt: new Date().toISOString(),
+				// Manually added — the autoscaler must NOT reclaim it. providerNodeId is
+				// kept so removal can also destroy the VM.
+				autoscaled: false,
+				providerNodeId: node.providerId,
+			})
+			.returning();
+	} catch (e) {
+		await provisioner.destroyNode(node.providerId).catch(() => {});
+		throw e;
+	}
+	if (!row) {
+		await provisioner.destroyNode(node.providerId).catch(() => {});
+		throw new Error("Failed to create server record");
+	}
 
 	const rollback = async () => {
 		await provisioner.destroyNode(node.providerId).catch(() => {});
