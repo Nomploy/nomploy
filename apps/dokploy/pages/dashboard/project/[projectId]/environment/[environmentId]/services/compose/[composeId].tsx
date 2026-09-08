@@ -31,6 +31,7 @@ import { ShowBackups } from "@/components/dashboard/database/backups/show-backup
 import { ComposeFreeMonitoring } from "@/components/dashboard/monitoring/free/container/show-free-compose-monitoring";
 import { ComposePaidMonitoring } from "@/components/dashboard/monitoring/paid/container/show-paid-compose-monitoring";
 import { ShowNomadAllocations } from "@/components/dashboard/nomad/allocations/show-nomad-allocations";
+import { ShowNomadScaling } from "@/components/dashboard/nomad/scaling/show-nomad-scaling";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
 import { AdvanceBreadcrumb } from "@/components/shared/advance-breadcrumb";
 import { StatusTooltip } from "@/components/shared/status-tooltip";
@@ -320,7 +321,12 @@ const Service = (
 										<TabsContent value="containers">
 											<div className="flex flex-col gap-4 pt-2.5">
 												{isNomad ? (
-													<ShowNomadAllocations appName={data?.appName || ""} />
+													<>
+														<ShowNomadScaling appName={data?.appName || ""} />
+														<ShowNomadAllocations
+															appName={data?.appName || ""}
+														/>
+													</>
 												) : (
 													<ShowComposeContainers
 														serverId={data?.serverId || undefined}
