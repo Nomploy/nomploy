@@ -328,6 +328,38 @@ export const nomadRouter = createTRPCRouter({
 			);
 		}),
 
+	// Manually scale a job's task group to `count` (Nomad's scale endpoint). The
+	// autoscaler, if a scaling{} policy is present, may adjust it again later.
+	scaleNomadJob: withPermission("server", "create")
+		.input(
+			serverInput.extend({
+				jobId: z.string(),
+				group: z.string(),
+				count: z.number().int().min(0),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			const cfg = await resolveNomad(ctx, input.serverId);
+			const res = await nomadClient(cfg).request(
+				withNs(`/job/${input.jobId}/scale`, cfg.namespace),
+				{
+					method: "POST",
+					body: JSON.stringify({
+						Target: { Group: input.group },
+						Count: input.count,
+						Message: `scaled to ${input.count} from the nomploy UI`,
+					}),
+				},
+			);
+			if (!res.ok) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: `Scale failed: ${res.status} ${res.statusText}`,
+				});
+			}
+			return { success: true };
+		}),
+
 	getAllocations: withPermission("server", "read")
 		.input(serverInput)
 		.query(async ({ input, ctx }) => {
