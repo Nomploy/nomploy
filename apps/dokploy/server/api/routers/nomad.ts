@@ -1392,10 +1392,13 @@ export const nomadRouter = createTRPCRouter({
 		if (!cfg) return null;
 		// Mask secrets; expose booleans so the UI can show "set".
 		const { password, s3SecretAccessKey, ...rest } = cfg;
+		const hubWgIp = readCluster()?.hubWgIp || "10.10.0.1";
 		return {
 			...rest,
 			hasPassword: !!password,
 			hasS3Secret: !!s3SecretAccessKey,
+			// Overlay address the registry is (or will be) reachable at.
+			address: `${hubWgIp}:${cfg.port}`,
 		};
 	}),
 
