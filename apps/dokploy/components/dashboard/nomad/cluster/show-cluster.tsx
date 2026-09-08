@@ -136,13 +136,17 @@ export const ShowCluster = () => {
 		refetchInterval: 20000,
 	});
 	const { data: autoscaler } = api.nomad.getAutoscalerConfig.useQuery();
-	const { data: dnsHealth } = api.nomad.getClusterDnsHealth.useQuery(
-		undefined,
-		{
+	const { data: dnsHealth, refetch: refetchDns } =
+		api.nomad.getClusterDnsHealth.useQuery(undefined, {
 			refetchOnWindowFocus: false,
 			refetchInterval: 30000,
-		},
-	);
+		});
+	// Refresh both the members table and the DNS-health strip after any topology
+	// change (add / remove / drain), so neither shows stale state.
+	const refetchCluster = () => {
+		refetchMembers();
+		refetchDns();
+	};
 
 	// One-click cloud provisioning is available only once a provider token + SSH
 	// key are configured (in the Autoscaling tab).
@@ -163,7 +167,7 @@ export const ShowCluster = () => {
 					toast.success(
 						`New ${provisionRole} provisioned and joined the cluster`,
 					);
-					refetchMembers();
+					refetchCluster();
 					return;
 				}
 				if (log.includes(OP_ENDED)) {
@@ -206,7 +210,7 @@ export const ShowCluster = () => {
 					setIsLeaving(false);
 					setRemoveTarget(null);
 					toast.success("Node removed from the cluster");
-					refetchMembers();
+					refetchCluster();
 					return;
 				}
 				if (log.includes(OP_ENDED)) {
@@ -242,7 +246,7 @@ export const ShowCluster = () => {
 					setIsJoining(false);
 					setByoOpen(false);
 					toast.success(`Server joined the cluster as ${byoRole}`);
-					refetchMembers();
+					refetchCluster();
 					return;
 				}
 				if (log.includes(OP_ENDED)) {
@@ -266,12 +270,13 @@ export const ShowCluster = () => {
 					? "Node draining — allocations are migrating off"
 					: "Node resumed — scheduling re-enabled",
 			);
-			refetchMembers();
+			refetchCluster();
 		},
 		onError: (error) => toast.error(error.message || "Drain change failed"),
 	});
 
-	const busy = isProvisioning || isLeaving || isJoining;
+	const busy =
+		isProvisioning || isLeaving || isJoining || setNodeDrain.isPending;
 	const serverCount = members?.filter((m) => m.role === "server").length ?? 0;
 	const workerCount = members?.filter((m) => m.role === "worker").length ?? 0;
 	// Raft fault tolerance: how many servers can fail while keeping quorum.
@@ -387,7 +392,7 @@ export const ShowCluster = () => {
 								type="button"
 								variant="ghost"
 								size="sm"
-								onClick={() => refetchMembers()}
+								onClick={() => refetchCluster()}
 								disabled={isRefetching}
 							>
 								<RefreshCw
