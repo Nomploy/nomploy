@@ -12,6 +12,7 @@ import { useRouter } from "next/router";
 import { type ReactElement, useEffect, useState } from "react";
 import { toast } from "sonner";
 import superjson from "superjson";
+import { ShowApplicationAutoscaling } from "@/components/dashboard/application/advanced/autoscaling/show-autoscaling";
 import { ShowClusterSettings } from "@/components/dashboard/application/advanced/cluster/show-cluster-settings";
 import { AddCommand } from "@/components/dashboard/application/advanced/general/add-command";
 import { ShowPorts } from "@/components/dashboard/application/advanced/ports/show-port";
@@ -415,6 +416,9 @@ const Service = (
 												<ShowClusterSettings
 													id={applicationId}
 													type="application"
+												/>
+												<ShowApplicationAutoscaling
+													applicationId={applicationId}
 												/>
 												<ShowNomadScaling
 													appName={data?.appName || ""}

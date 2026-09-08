@@ -80,14 +80,29 @@ export const applicationToNomadSpec = (
 		...(((application.args as string[] | null) ?? []) as string[]),
 	];
 
+	// Horizontal autoscaling: emit a scaling{} block (driven by the Nomad
+	// Autoscaler) when enabled. Reuses the same generator as compose services.
+	const scaling = application.autoscalingEnabled
+		? {
+				min: application.minReplicas ?? 1,
+				max: application.maxReplicas ?? 3,
+				cpuTarget: application.autoscaleCpuTarget ?? undefined,
+				memoryTarget: application.autoscaleMemoryTarget ?? undefined,
+			}
+		: undefined;
+
 	return {
 		name: NOMAD_APP_SERVICE_NAME,
 		image: imageOverride ?? resolveApplicationImage(application),
 		ports,
-		replicas: application.replicas ?? 1,
+		// When autoscaling, the job starts at min; the autoscaler takes over.
+		replicas: application.autoscalingEnabled
+			? (application.minReplicas ?? 1)
+			: (application.replicas ?? 1),
 		env,
 		entrypoint: entrypoint.length > 0 ? entrypoint : undefined,
 		resources: cpu || memory ? { cpu, memory } : undefined,
+		scaling,
 	};
 };
 
