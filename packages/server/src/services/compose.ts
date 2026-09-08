@@ -9,7 +9,10 @@ import {
 } from "@nomploy/server/db/schema";
 import { syncIntentionsForOrg } from "@nomploy/server/setup/nomad-connect";
 import { getBuildComposeCommand } from "@nomploy/server/utils/builders/compose";
-import { getBuildNomadCommand } from "@nomploy/server/utils/builders/nomad";
+import {
+	getBuildNomadCommand,
+	getBuildNomadPackCommand,
+} from "@nomploy/server/utils/builders/nomad";
 import { randomizeSpecificationFile } from "@nomploy/server/utils/docker/compose";
 import {
 	cloneCompose,
@@ -269,7 +272,9 @@ export const deployCompose = async ({
 		}
 
 		command = "set -e;";
-		if (compose.composeType === "nomad") {
+		if (compose.composeType === "nomad-pack") {
+			command += getBuildNomadPackCommand(entity);
+		} else if (compose.composeType === "nomad") {
 			command += await getBuildNomadCommand(entity);
 		} else {
 			command += await getBuildComposeCommand(entity);
@@ -394,7 +399,9 @@ export const rebuildCompose = async ({
 		}
 
 		command = "set -e;";
-		if (compose.composeType === "nomad") {
+		if (compose.composeType === "nomad-pack") {
+			command += getBuildNomadPackCommand(compose);
+		} else if (compose.composeType === "nomad") {
 			command += await getBuildNomadCommand(compose);
 		} else {
 			command += await getBuildComposeCommand(compose);

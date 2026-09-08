@@ -33,7 +33,9 @@ export const ShowGeneralCompose = ({ composeId }: Props) => {
 								? "Compose"
 								: data?.composeType === "nomad"
 									? "Nomad"
-									: "Stack"}
+									: data?.composeType === "nomad-pack"
+										? "Nomad Pack"
+										: "Stack"}
 						</Badge>
 					</div>
 

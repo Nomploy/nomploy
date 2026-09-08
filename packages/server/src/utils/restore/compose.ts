@@ -71,7 +71,8 @@ export const restoreComposeBackup = async (
 				database: backupInput.databaseName,
 				...credentials,
 			},
-			restoreType: composeType,
+			// A nomad-pack service restores like any other Nomad job.
+			restoreType: composeType === "nomad-pack" ? "nomad" : composeType,
 			rcloneCommand,
 			backupFile: backupInput.backupFile,
 		});
