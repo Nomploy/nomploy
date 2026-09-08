@@ -49,7 +49,7 @@ const DEFAULTS: Form = {
 	s3SecretAccessKey: "",
 };
 
-export const ShowRegistry = () => {
+export const ShowZotRegistry = () => {
 	const { data: cfg, refetch } = api.nomad.getZotRegistry.useQuery();
 	const update = api.nomad.updateZotRegistry.useMutation();
 	const disable = api.nomad.disableZotRegistry.useMutation();
