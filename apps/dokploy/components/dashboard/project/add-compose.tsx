@@ -46,7 +46,9 @@ import { api } from "@/utils/api";
 import { APP_NAME_MESSAGE, APP_NAME_REGEX } from "@/utils/schema";
 
 const AddComposeSchema = z.object({
-	composeType: z.enum(["docker-compose", "stack", "nomad"]).optional(),
+	composeType: z
+		.enum(["docker-compose", "stack", "nomad", "nomad-pack"])
+		.optional(),
 	name: z.string().min(1, {
 		message: "Name is required",
 	}),
@@ -288,6 +290,7 @@ export const AddCompose = ({ environmentId, projectName }: Props) => {
 											<SelectItem value="nomad">
 												Nomad (compose or HCL jobspec)
 											</SelectItem>
+											<SelectItem value="nomad-pack">Nomad Pack</SelectItem>
 										</SelectContent>
 									</Select>
 									<FormMessage />
