@@ -48,7 +48,20 @@ export interface ZotOptions {
  * docker/distribution s3 driver (credentials come from the AWS_* env, not here).
  */
 export const generateZotConfig = (opts: ZotOptions): string => {
-	const storage: Record<string, unknown> = { rootDirectory: ZOT_DATA_DIR };
+	const storage: Record<string, unknown> = {
+		rootDirectory: ZOT_DATA_DIR,
+		// Hard-link dedupe identical blobs to save disk (e.g. shared base layers).
+		dedupe: true,
+		// Reclaim orphaned blobs + prune untagged (dangling) manifests, which pile
+		// up every time a moving tag like :latest is re-pushed. Keeps ALL tagged
+		// images; only untagged/unreferenced content is collected.
+		gc: true,
+		gcDelay: "1h",
+		gcInterval: "1h",
+		retention: {
+			policies: [{ repositories: ["**"], deleteUntagged: true }],
+		},
+	};
 	if (opts.storage.kind === "s3") {
 		storage.storageDriver = {
 			name: "s3",
@@ -75,6 +88,13 @@ export const generateZotConfig = (opts: ZotOptions): string => {
 			auth: { htpasswd: { path: ZOT_HTPASSWD_PATH } },
 		},
 		log: { level: "info" },
+		extensions: {
+			// GraphQL search + Trivy-backed CVE scanning. The panel surfaces the CVE
+			// data in the image browser (no zui needed). Trivy's DB downloads to
+			// <storage>/_trivy/db and refreshes on updateInterval; scanning can spike
+			// memory, hence the registry job's raised memory_max.
+			search: { enable: true, cve: { updateInterval: "2h" } },
+		},
 	};
 	return JSON.stringify(config, null, 2);
 };
@@ -148,8 +168,9 @@ export const generateZotNomadJob = (
       }
 ${envBlock}
       resources {
-        cpu    = 500
-        memory = 256
+        cpu        = 500
+        memory     = 512
+        memory_max = 1024
       }
     }
   }

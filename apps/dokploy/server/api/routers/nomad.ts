@@ -1683,4 +1683,47 @@ export const nomadRouter = createTRPCRouter({
 				});
 			return { success: true };
 		}),
+
+	// Trivy-backed vulnerability scan for one image, via zot's search GraphQL
+	// (extensions.search.cve). Returns a per-severity summary + the CVE list.
+	// `available: false` when scanning is off or the Trivy DB isn't ready yet.
+	getImageVulnerabilities: protectedProcedure
+		.input(z.object({ repo: z.string().min(1), reference: z.string().min(1) }))
+		.query(async ({ input, ctx }) => {
+			const org = ctx.session?.activeOrganizationId;
+			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+			const { base, headers } = await zotApiContext(org);
+			const query =
+				"query ($image: String!) { CVEListForImage(image: $image, requestedPage: {limit: 50}) { Summary { MaxSeverity Count CriticalCount HighCount MediumCount LowCount UnknownCount } CVEList { Id Title Severity } } }";
+			type Empty = { available: false; summary: null; cves: never[] };
+			const unavailable: Empty = { available: false, summary: null, cves: [] };
+			let res: Response;
+			try {
+				res = await fetch(`${base}/v2/_zot/ext/search`, {
+					method: "POST",
+					headers: { ...headers, "Content-Type": "application/json" },
+					body: JSON.stringify({
+						query,
+						variables: { image: `${input.repo}:${input.reference}` },
+					}),
+				});
+			} catch {
+				return unavailable;
+			}
+			if (!res.ok) return unavailable;
+			// biome-ignore lint/suspicious/noExplicitAny: GraphQL response shape
+			const json: any = await res.json().catch(() => null);
+			const data = json?.data?.CVEListForImage;
+			if (!data || json?.errors) return unavailable;
+			return {
+				available: true as const,
+				summary: data.Summary ?? null,
+				// biome-ignore lint/suspicious/noExplicitAny: GraphQL CVE node
+				cves: ((data.CVEList ?? []) as any[]).map((c) => ({
+					id: c.Id as string,
+					title: c.Title as string,
+					severity: c.Severity as string,
+				})),
+			};
+		}),
 });
