@@ -82,11 +82,22 @@ export const applicationToNomadSpec = (
 
 	// Horizontal autoscaling: emit a scaling{} block (driven by the Nomad
 	// Autoscaler) when enabled. Reuses the same generator as compose services.
+	// The autoscaler targets utilization (nomad-apm), which needs at least one
+	// running allocation to produce a metric — so min must be ≥ 1 (a min of 0
+	// could never scale back up). And if the user enabled autoscaling but set no
+	// target, default to a CPU target so the app actually scales instead of
+	// silently pinning at min (defense-in-depth; the UI also guards this).
+	const autoscaleMin = Math.max(1, application.minReplicas ?? 1);
+	const hasAutoscaleTarget =
+		application.autoscaleCpuTarget != null ||
+		application.autoscaleMemoryTarget != null;
 	const scaling = application.autoscalingEnabled
 		? {
-				min: application.minReplicas ?? 1,
-				max: application.maxReplicas ?? 3,
-				cpuTarget: application.autoscaleCpuTarget ?? undefined,
+				min: autoscaleMin,
+				max: Math.max(autoscaleMin, application.maxReplicas ?? 3),
+				cpuTarget:
+					application.autoscaleCpuTarget ??
+					(hasAutoscaleTarget ? undefined : 70),
 				memoryTarget: application.autoscaleMemoryTarget ?? undefined,
 			}
 		: undefined;
@@ -97,7 +108,7 @@ export const applicationToNomadSpec = (
 		ports,
 		// When autoscaling, the job starts at min; the autoscaler takes over.
 		replicas: application.autoscalingEnabled
-			? (application.minReplicas ?? 1)
+			? autoscaleMin
 			: (application.replicas ?? 1),
 		env,
 		entrypoint: entrypoint.length > 0 ? entrypoint : undefined,

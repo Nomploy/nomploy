@@ -322,9 +322,13 @@ const Service = (
 											<div className="flex flex-col gap-4 pt-2.5">
 												{isNomad ? (
 													<>
-														<ShowNomadScaling appName={data?.appName || ""} />
+														<ShowNomadScaling
+															appName={data?.appName || ""}
+															serverId={data?.serverId || undefined}
+														/>
 														<ShowNomadAllocations
 															appName={data?.appName || ""}
+															serverId={data?.serverId || undefined}
 														/>
 													</>
 												) : (
@@ -397,7 +401,10 @@ const Service = (
 										<TabsContent value="logs">
 											<div className="flex flex-col gap-4 pt-2.5">
 												{isNomad ? (
-													<ShowNomadAllocations appName={data?.appName || ""} />
+													<ShowNomadAllocations
+														appName={data?.appName || ""}
+														serverId={data?.serverId || undefined}
+													/>
 												) : (
 													<ShowDockerLogsCompose
 														serverId={data?.serverId || ""}

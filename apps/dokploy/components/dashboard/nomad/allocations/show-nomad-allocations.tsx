@@ -87,7 +87,12 @@ const AllocationRow = ({
 	const [open, setOpen] = useState(false);
 	const [logType, setLogType] = useState<"stdout" | "stderr">("stdout");
 
-	const taskName = alloc.TaskGroup;
+	// Nomad's logs endpoint needs the TASK name, not the group. For nomploy-
+	// translated jobs they're equal, but native-HCL / Nomad Pack jobs often
+	// differ (e.g. group "web", task "server"), so read the actual task from the
+	// allocation's TaskStates and fall back to the group name.
+	const taskName =
+		(alloc.TaskStates && Object.keys(alloc.TaskStates)[0]) || alloc.TaskGroup;
 
 	return (
 		<Collapsible open={open} onOpenChange={setOpen}>

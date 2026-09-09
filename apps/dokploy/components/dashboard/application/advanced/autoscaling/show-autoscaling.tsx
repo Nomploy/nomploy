@@ -96,15 +96,16 @@ export const ShowApplicationAutoscaling = ({ applicationId }: Props) => {
 							<Label>Min replicas</Label>
 							<Input
 								type="number"
-								min={0}
+								min={1}
 								value={min}
-								onChange={(e) => setMin(Number(e.target.value) || 0)}
+								onChange={(e) =>
+									setMin(Math.max(1, Number(e.target.value) || 1))
+								}
 							/>
-							{min === 0 && (
-								<p className="text-amber-600 text-xs dark:text-amber-500">
-									0 lets the app scale down to zero replicas (fully stopped).
-								</p>
-							)}
+							<p className="text-muted-foreground text-xs">
+								At least 1 — the autoscaler steers on live utilization, so it
+								can't scale an app back up from zero.
+							</p>
 						</div>
 						<div className="space-y-1.5">
 							<Label>Max replicas</Label>
