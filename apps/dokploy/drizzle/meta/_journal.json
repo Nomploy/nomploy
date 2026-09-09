@@ -1261,6 +1261,13 @@
       "when": 1788858740463,
       "tag": "0179_polite_arachne",
       "breakpoints": true
+    },
+    {
+      "idx": 180,
+      "version": "7",
+      "when": 1788963165660,
+      "tag": "0180_cute_tyger_tiger",
+      "breakpoints": true
     }
   ]
 }

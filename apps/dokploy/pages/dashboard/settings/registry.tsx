@@ -4,14 +4,12 @@ import type { GetServerSidePropsContext } from "next";
 import type { ReactElement } from "react";
 import superjson from "superjson";
 import { ShowRegistry } from "@/components/dashboard/settings/cluster/registry/show-registry";
-import { ShowZotRegistry } from "@/components/dashboard/settings/registry/show-zot-registry";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
 import { appRouter } from "@/server/api/root";
 
 const Page = () => {
 	return (
 		<div className="flex flex-col gap-4 w-full">
-			<ShowZotRegistry />
 			<ShowRegistry />
 		</div>
 	);
