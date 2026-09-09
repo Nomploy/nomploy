@@ -167,6 +167,36 @@ const resolvePackJobIds = async (
 	}
 };
 
+// Media types to request when reading a manifest (single-arch + multi-arch, OCI +
+// docker), so the registry returns the digest + sizes for the image browser.
+const MANIFEST_ACCEPT = [
+	"application/vnd.oci.image.manifest.v1+json",
+	"application/vnd.oci.image.index.v1+json",
+	"application/vnd.docker.distribution.manifest.v2+json",
+	"application/vnd.docker.distribution.manifest.list.v2+json",
+].join(", ");
+
+// Reach the built-in (zot) registry's OCI /v2 API server-side. The panel runs on
+// the control plane, so it can hit the overlay address directly with the org's
+// stored basic-auth creds. Throws if the registry isn't enabled.
+const zotApiContext = async (org: string) => {
+	const cfg = await db.query.zotRegistry.findFirst({
+		where: eq(zotRegistry.organizationId, org),
+	});
+	if (!cfg?.enabled)
+		throw new TRPCError({
+			code: "BAD_REQUEST",
+			message: "The built-in registry isn't enabled.",
+		});
+	const hubWgIp = readCluster()?.hubWgIp || "10.10.0.1";
+	const headers: Record<string, string> = {};
+	if (cfg.username && cfg.password)
+		headers.Authorization = `Basic ${Buffer.from(
+			`${cfg.username}:${cfg.password}`,
+		).toString("base64")}`;
+	return { base: `http://${hubWgIp}:${cfg.port}`, headers };
+};
+
 // ── Consul (service catalog + health) ──────────────────────────────────────
 // Read-only. The control-plane Consul holds the whole cluster's catalog, so with
 // no serverId we read it directly; for a remote standalone cluster we reuse that
@@ -1579,4 +1609,78 @@ export const nomadRouter = createTRPCRouter({
 			return { success: true };
 		},
 	),
+
+	// List the built-in registry's repositories, each with its tags + per-tag
+	// digest and size (summed from the manifest's config + layers).
+	listRegistryImages: protectedProcedure.query(async ({ ctx }) => {
+		const org = ctx.session?.activeOrganizationId;
+		if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+		const { base, headers } = await zotApiContext(org);
+		const catRes = await fetch(`${base}/v2/_catalog?n=1000`, { headers });
+		if (!catRes.ok)
+			throw new TRPCError({
+				code: "INTERNAL_SERVER_ERROR",
+				message: `Registry catalog error: ${catRes.status} ${catRes.statusText}`,
+			});
+		const { repositories = [] } = (await catRes.json()) as {
+			repositories?: string[];
+		};
+		const repos = await Promise.all(
+			repositories.map(async (repo) => {
+				const tagRes = await fetch(`${base}/v2/${repo}/tags/list`, { headers });
+				const { tags = [] } = tagRes.ok
+					? ((await tagRes.json()) as { tags?: string[] | null })
+					: { tags: [] };
+				const tagInfos = await Promise.all(
+					(tags ?? []).map(async (tag) => {
+						try {
+							const m = await fetch(`${base}/v2/${repo}/manifests/${tag}`, {
+								headers: { ...headers, Accept: MANIFEST_ACCEPT },
+							});
+							const digest = m.headers.get("docker-content-digest") || "";
+							// biome-ignore lint/suspicious/noExplicitAny: OCI manifest shape
+							const body: any = m.ok ? await m.json() : {};
+							let size = Number(body?.config?.size) || 0;
+							for (const l of body?.layers ?? []) size += Number(l?.size) || 0;
+							return { tag, digest, size };
+						} catch {
+							return { tag, digest: "", size: 0 };
+						}
+					}),
+				);
+				return { repo, tags: tagInfos };
+			}),
+		);
+		return { repos };
+	}),
+
+	// Delete an image by tag or digest (DELETE is by digest, so a tag is resolved
+	// to its digest first). Untags immediately; blobs are reclaimed by zot's GC.
+	deleteRegistryImage: withPermission("server", "delete")
+		.input(z.object({ repo: z.string().min(1), reference: z.string().min(1) }))
+		.mutation(async ({ input, ctx }) => {
+			const org = ctx.session?.activeOrganizationId;
+			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+			const { base, headers } = await zotApiContext(org);
+			let digest = input.reference;
+			if (!digest.startsWith("sha256:")) {
+				const m = await fetch(
+					`${base}/v2/${input.repo}/manifests/${input.reference}`,
+					{ headers: { ...headers, Accept: MANIFEST_ACCEPT } },
+				);
+				digest = m.headers.get("docker-content-digest") || "";
+				if (!digest)
+					throw new TRPCError({ code: "NOT_FOUND", message: "Tag not found" });
+			}
+			const del = await fetch(`${base}/v2/${input.repo}/manifests/${digest}`, {
+				method: "DELETE",
+				headers,
+			});
+			if (!del.ok && del.status !== 202)
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: `Delete failed: ${del.status} ${del.statusText}`,
+				});
+			return { success: true };
+		}),
 });
