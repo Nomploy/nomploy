@@ -16,6 +16,19 @@ whole is licensed under the **GNU AGPL-3.0**; the upstream enterprise
 - **Nomad orchestration** — deploys run as Nomad jobs; the compose files you
   already know are translated to Nomad HCL (ports, env, health checks, resources,
   replicas and autoscaling via `x-nomad-scaling`).
+- **Three ways to deploy** — translated Docker Compose, a **native Nomad HCL job
+  file** deployed verbatim, or a **Nomad Pack** from the community or a custom
+  registry.
+- **Highly-available clusters** — grow from one node to an HA Nomad + Consul
+  control plane from the **Cluster** tab: add/remove servers and workers over an
+  encrypted WireGuard mesh, drain nodes for maintenance, and watch cluster DNS
+  health.
+- **Autoscaling** — horizontal autoscaling on CPU/memory targets for both
+  applications and compose services.
+- **Built-in image registry** — an optional bundled OCI registry (zot) with
+  local or S3-compatible storage, so you can build → push → pull without an
+  external registry (**Settings → Registry**).
+- **GPU workloads** — request NVIDIA GPUs for a job via Nomad device plugins.
 - **Nomad dashboard** — view jobs, allocations, nodes, logs and cluster
   resources; scale or stop jobs from the UI. Pick which server's Nomad cluster to
   view with a per-server selector.
@@ -49,6 +62,18 @@ and the nomploy app, then prints the URL to open.
 To add Nomad to an **existing** managed server instead, use the **Bootstrap
 Nomad** button in that server's Nomad settings inside the dashboard.
 
+## 📚 Documentation
+
+Full guides live in [`docs/`](docs/README.md):
+
+- [Getting Started](docs/getting-started.md) — install, first login, first deploy.
+- [Architecture](docs/architecture.md) — Nomad, Consul, Traefik and the WireGuard overlay.
+- [Cluster management](docs/cluster.md) — high availability: add/remove nodes, drain, DNS health.
+- [Deploying](docs/deploying.md) — Compose, native Nomad HCL, and Nomad Pack.
+- [Autoscaling](docs/autoscaling.md) — scale apps and services on CPU/memory.
+- [Built-in registry](docs/registry.md) — the bundled OCI registry (zot).
+- [GPU workloads](docs/gpu.md) — requesting NVIDIA GPUs.
+
 ## 🧭 How nomploy differs from Dokploy
 
 | | Dokploy | nomploy |
@@ -77,9 +102,10 @@ The Docker Swarm backend has been removed from every runtime path:
   Swarm node; server setup/validation no longer touch `docker swarm` or the
   overlay network.
 
-A few Swarm-era leftovers remain but are inert or unreachable (GPU node
-labelling, unused `*Swarm` DB columns, the retired `stack` compose type); they
-affect no live path and are being cleaned up.
+Cleanup of Swarm-era remnants is largely done: the unused `*Swarm` DB columns
+have been dropped, and GPU scheduling now uses Nomad device plugins rather than
+node labels. The `stack` compose type remains in the schema enum for backward
+compatibility but is unused and unreachable.
 
 ## 🤝 Contributing
 
