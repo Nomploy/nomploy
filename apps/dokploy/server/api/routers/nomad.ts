@@ -139,6 +139,34 @@ const withNs = (path: string, namespace: string) => {
 	return `${path}${sep}namespace=${encodeURIComponent(namespace)}`;
 };
 
+/**
+ * Resolve a Nomad Pack deployment to its real Nomad job ids. `nomad-pack run
+ * --name <appName>` sets each deployed job's `pack.deployment_name` meta to
+ * appName, but the job IDs come from the pack template (and a pack can register
+ * several). So logs/allocations/scale — which address a job by appName — find
+ * nothing for a pack. This maps appName → the actual job ids via that meta.
+ */
+const resolvePackJobIds = async (
+	cfg: NomadConfig,
+	deploymentName: string,
+): Promise<string[]> => {
+	try {
+		const res = await nomadClient(cfg).request(
+			withNs("/jobs?meta=true", cfg.namespace),
+		);
+		if (!res.ok) return [];
+		const jobs = (await res.json()) as Array<{
+			ID: string;
+			Meta?: Record<string, string> | null;
+		}>;
+		return jobs
+			.filter((j) => (j.Meta || {})["pack.deployment_name"] === deploymentName)
+			.map((j) => j.ID);
+	} catch {
+		return [];
+	}
+};
+
 // ── Consul (service catalog + health) ──────────────────────────────────────
 // Read-only. The control-plane Consul holds the whole cluster's catalog, so with
 // no serverId we read it directly; for a remote standalone cluster we reuse that
@@ -308,25 +336,63 @@ export const nomadRouter = createTRPCRouter({
 		.input(serverInput.extend({ jobId: z.string() }))
 		.query(async ({ input, ctx }) => {
 			const cfg = await resolveNomad(ctx, input.serverId);
-			return nomadClient(cfg).get(withNs(`/job/${input.jobId}`, cfg.namespace));
+			const client = nomadClient(cfg);
+			const direct = await client.request(
+				withNs(`/job/${input.jobId}`, cfg.namespace),
+			);
+			if (direct.ok) return direct.json();
+			// Nomad Pack: appName isn't the job id — resolve the pack's real jobs.
+			const [first] = await resolvePackJobIds(cfg, input.jobId);
+			if (first) return client.get(withNs(`/job/${first}`, cfg.namespace));
+			throw new TRPCError({
+				code: "NOT_FOUND",
+				message: `Job ${input.jobId} not found`,
+			});
 		}),
 
 	getJobAllocations: withPermission("server", "read")
 		.input(serverInput.extend({ jobId: z.string() }))
 		.query(async ({ input, ctx }) => {
 			const cfg = await resolveNomad(ctx, input.serverId);
-			return nomadClient(cfg).get(
+			const client = nomadClient(cfg);
+			const direct = await client.request(
 				withNs(`/job/${input.jobId}/allocations`, cfg.namespace),
 			);
+			if (direct.ok) {
+				const allocs = (await direct.json()) as unknown[];
+				if (Array.isArray(allocs) && allocs.length > 0) return allocs;
+			}
+			// Empty or job-not-found: a Nomad Pack registers jobs under other ids —
+			// union the allocations across the pack's real jobs.
+			const packIds = await resolvePackJobIds(cfg, input.jobId);
+			if (packIds.length === 0) return [];
+			const per = await Promise.all(
+				packIds.map(async (id) => {
+					const r = await client.request(
+						withNs(`/job/${id}/allocations`, cfg.namespace),
+					);
+					return r.ok ? ((await r.json()) as unknown[]) : [];
+				}),
+			);
+			return per.flat();
 		}),
 
 	getJobScale: withPermission("server", "read")
 		.input(serverInput.extend({ jobId: z.string() }))
 		.query(async ({ input, ctx }) => {
 			const cfg = await resolveNomad(ctx, input.serverId);
-			return nomadClient(cfg).get(
+			const client = nomadClient(cfg);
+			const direct = await client.request(
 				withNs(`/job/${input.jobId}/scale`, cfg.namespace),
 			);
+			if (direct.ok) return direct.json();
+			const [first] = await resolvePackJobIds(cfg, input.jobId);
+			if (first)
+				return client.get(withNs(`/job/${first}/scale`, cfg.namespace));
+			throw new TRPCError({
+				code: "NOT_FOUND",
+				message: `Job ${input.jobId} not found`,
+			});
 		}),
 
 	// Manually scale a job's task group to `count` (Nomad's scale endpoint). The
