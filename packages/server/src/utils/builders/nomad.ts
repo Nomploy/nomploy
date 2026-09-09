@@ -66,6 +66,71 @@ export const clusterDnsServers = (): string[] => {
 	}
 };
 
+// ─── Post-deploy health check ────────────────────────────────────────────────
+
+// A translated compose/app job carries an update{} block, so `nomad job run`
+// blocks and fails on a bad rollout. But a native HCL job may omit update{}, and
+// `nomad-pack run` returns at registration — both can exit 0 while allocations
+// crash or fail to place. This Python probe (run after those deploys) resolves
+// the deployed job id(s) (for a pack, via the pack.deployment_name meta) and
+// polls their allocations: it FAILS the deploy only on a definitive failure (all
+// current-version allocations failed/lost), and merely WARNS on a timeout that's
+// still pending — so a slow image pull isn't mistaken for a failure. Must contain
+// no `${` or backticks (it lives inside a JS template literal).
+const HEALTH_PROBE_PY = `import json, subprocess, sys, time
+name, mode = sys.argv[1], sys.argv[2]
+deadline = time.time() + 150
+def api(path):
+    try:
+        out = subprocess.run(["nomad","operator","api",path], capture_output=True, text=True, timeout=15)
+        return json.loads(out.stdout or "null") if out.returncode == 0 else None
+    except Exception:
+        return None
+def job_ids():
+    if mode == "job":
+        return [name]
+    jobs = api("/v1/jobs?meta=true") or []
+    return [j["ID"] for j in jobs if (j.get("Meta") or {}).get("pack.deployment_name") == name]
+ids = []
+while time.time() < deadline:
+    ids = job_ids()
+    if ids:
+        break
+    time.sleep(3)
+if not ids:
+    print("could not resolve deployed job(s) to health-check; skipping")
+    sys.exit(0)
+def status(jid):
+    allocs = api("/v1/job/%s/allocations" % jid) or []
+    if not allocs:
+        job = api("/v1/job/%s" % jid) or {}
+        return "dead" if job.get("Status") == "dead" else "pending"
+    latest = max((a.get("JobVersion", 0) for a in allocs), default=0)
+    cur = [a for a in allocs if a.get("JobVersion", 0) == latest]
+    if any(a.get("ClientStatus") == "running" for a in cur):
+        return "running"
+    if cur and all(a.get("ClientStatus") in ("failed", "lost") for a in cur):
+        return "failed"
+    return "pending"
+while time.time() < deadline:
+    sts = {jid: status(jid) for jid in ids}
+    bad = [k for k, v in sts.items() if v in ("failed", "dead")]
+    if bad:
+        print("Allocations failed for: %s" % ", ".join(bad))
+        sys.exit(1)
+    if all(v == "running" for v in sts.values()):
+        print("All deployed jobs have running allocations")
+        sys.exit(0)
+    time.sleep(4)
+print("Not confirmed healthy within the window (still pending) - check the dashboard")
+sys.exit(0)
+`;
+
+// Shell that runs the probe after a deploy. mode "job" checks the job id == name;
+// mode "pack" resolves the pack's real jobs first. Base64 so no quoting hell.
+const healthCheckSnippet = (name: string, mode: "job" | "pack"): string =>
+	`\techo "Verifying deployment health…"\n\techo "${encodeBase64(HEALTH_PROBE_PY)}" | base64 -d | python3 - "${name}" "${mode}"\n`;
+
 // ─── Main Entry Point ────────────────────────────────────────────────────────
 
 /**
@@ -144,7 +209,7 @@ ${buildSteps}
 	# Deploy to Nomad
 	nomad job run "${jobFilePath}" 2>&1
 	echo "Nomad Job Deployed: \u2705"
-} || {
+${isNativeHcl ? healthCheckSnippet(appName, "job") : ""}} || {
 	echo "Error: \u274c Nomad deployment failed"
 	exit 1
 }
@@ -191,7 +256,7 @@ set -e
 	mkdir -p "${projectPath}"
 ${writeVars}${addRegistry}	nomad-pack run ${nomadPack}${registryFlag}${varFlag} --name "${appName}" 2>&1
 	echo "Nomad Pack deployed"
-} || {
+${healthCheckSnippet(appName, "pack")}} || {
 	echo "Error: Nomad Pack deployment failed"
 	exit 1
 }
