@@ -30,7 +30,12 @@ interface TaskGroupSpec {
  * scaling{} block) and a manual "scale to N" control.
  */
 export const ShowNomadScaling = ({ appName, serverId }: Props) => {
-	const { data: job } = api.nomad.getJob.useQuery(
+	const {
+		data: job,
+		isLoading: jobLoading,
+		isError: jobError,
+		error: jobErr,
+	} = api.nomad.getJob.useQuery(
 		{ jobId: appName, serverId },
 		{ enabled: !!appName },
 	);
@@ -39,6 +44,8 @@ export const ShowNomadScaling = ({ appName, serverId }: Props) => {
 		{ enabled: !!appName, refetchInterval: 10000 },
 	);
 	const scaleMut = api.nomad.scaleNomadJob.useMutation();
+	// Which group is currently being scaled, so only its row shows a spinner.
+	const [scalingGroup, setScalingGroup] = useState<string | null>(null);
 
 	// biome-ignore lint/suspicious/noExplicitAny: Nomad job/scale API shapes
 	const groups: TaskGroupSpec[] = (job as any)?.TaskGroups ?? [];
@@ -56,22 +63,63 @@ export const ShowNomadScaling = ({ appName, serverId }: Props) => {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [job, scale]);
 
-	const doScale = async (group: string) => {
+	const doScale = async (g: TaskGroupSpec) => {
+		// Clamp to the group's policy bounds before submitting.
+		const min = g.Scaling?.Min ?? 0;
+		const max = g.Scaling?.Max;
+		let count = counts[g.Name] ?? 1;
+		if (count < min || (max != null && count > max)) {
+			toast.error(
+				`Count must be between ${min} and ${max != null ? max : "∞"}`,
+			);
+			return;
+		}
+		count = Math.max(min, max != null ? Math.min(count, max) : count);
+		setScalingGroup(g.Name);
 		try {
 			await scaleMut.mutateAsync({
 				jobId: appName,
-				group,
-				count: counts[group] ?? 1,
+				group: g.Name,
+				count,
 				serverId,
 			});
-			toast.success(`Scaled ${group} to ${counts[group]}`);
+			toast.success(`Scaled ${g.Name} to ${count}`);
 			await refetch();
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : "Scale failed");
+		} finally {
+			setScalingGroup(null);
 		}
 	};
 
-	if (groups.length === 0) return null;
+	// Distinguish loading / error / genuinely-empty instead of rendering nothing.
+	if (jobLoading) {
+		return (
+			<Card className="bg-background">
+				<CardContent className="flex items-center gap-2 py-6 text-muted-foreground text-sm">
+					<Loader2 className="size-4 animate-spin" /> Loading scaling…
+				</CardContent>
+			</Card>
+		);
+	}
+	if (jobError) {
+		return (
+			<Card className="bg-background">
+				<CardContent className="py-6 text-destructive text-sm">
+					Couldn't load scaling: {jobErr?.message ?? "unknown error"}
+				</CardContent>
+			</Card>
+		);
+	}
+	if (groups.length === 0) {
+		return (
+			<Card className="bg-background">
+				<CardContent className="py-6 text-muted-foreground text-sm">
+					No task groups found for this job.
+				</CardContent>
+			</Card>
+		);
+	}
 
 	return (
 		<Card className="bg-background">
@@ -121,6 +169,7 @@ export const ShowNomadScaling = ({ appName, serverId }: Props) => {
 									min={g.Scaling?.Min ?? 0}
 									max={g.Scaling?.Max ?? undefined}
 									className="w-20"
+									disabled={scalingGroup === g.Name}
 									value={counts[g.Name] ?? desired}
 									onChange={(e) =>
 										setCounts((c) => ({
@@ -132,10 +181,10 @@ export const ShowNomadScaling = ({ appName, serverId }: Props) => {
 								<Button
 									type="button"
 									size="sm"
-									onClick={() => doScale(g.Name)}
-									disabled={scaleMut.isPending}
+									onClick={() => doScale(g)}
+									disabled={scalingGroup === g.Name}
 								>
-									{scaleMut.isPending ? (
+									{scalingGroup === g.Name ? (
 										<Loader2 className="h-4 w-4 animate-spin" />
 									) : (
 										"Scale"

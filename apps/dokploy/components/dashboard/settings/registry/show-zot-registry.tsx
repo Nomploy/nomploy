@@ -1,6 +1,17 @@
 import { Box, Copy, Loader2, Power, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+	AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -77,7 +88,8 @@ export const ShowZotRegistry = () => {
 	const set = <K extends keyof Form>(k: K, v: Form[K]) =>
 		setForm((f) => ({ ...f, [k]: v }));
 
-	const save = async () => {
+	// Returns true on success so callers (e.g. Enable) can bail if the save failed.
+	const save = async (): Promise<boolean> => {
 		try {
 			await update.mutateAsync({
 				storageKind: form.storageKind,
@@ -95,8 +107,10 @@ export const ShowZotRegistry = () => {
 			});
 			toast.success("Registry settings saved");
 			await refetch();
+			return true;
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : "Failed to save");
+			return false;
 		}
 	};
 
@@ -122,8 +136,9 @@ export const ShowZotRegistry = () => {
 	});
 
 	const startEnable = async () => {
-		// Persist current settings first, then deploy.
-		await save();
+		// Persist current settings first; don't deploy if the save failed.
+		const ok = await save();
+		if (!ok) return;
 		setLogs("");
 		setIsEnabling(true);
 	};
@@ -204,8 +219,15 @@ export const ShowZotRegistry = () => {
 						<Label>Port</Label>
 						<Input
 							type="number"
+							min={1}
+							max={65535}
 							value={form.port}
-							onChange={(e) => set("port", Number(e.target.value) || 5000)}
+							onChange={(e) => {
+								// Keep the current value while the field is mid-edit/empty
+								// instead of snapping back to a default.
+								const n = Number.parseInt(e.target.value, 10);
+								set("port", Number.isNaN(n) ? form.port : n);
+							}}
 						/>
 					</div>
 					<div className="space-y-1.5">
@@ -276,7 +298,12 @@ export const ShowZotRegistry = () => {
 						onClick={save}
 						disabled={update.isPending || isEnabling}
 					>
-						<Save className="mr-2 h-4 w-4" /> Save settings
+						{update.isPending ? (
+							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+						) : (
+							<Save className="mr-2 h-4 w-4" />
+						)}
+						{update.isPending ? "Saving…" : "Save settings"}
 					</Button>
 					<Button type="button" onClick={startEnable} disabled={isEnabling}>
 						{isEnabling ? (
@@ -287,14 +314,41 @@ export const ShowZotRegistry = () => {
 						{isEnabling ? "Deploying…" : enabled ? "Reconfigure" : "Enable"}
 					</Button>
 					{enabled && (
-						<Button
-							type="button"
-							variant="destructive"
-							onClick={handleDisable}
-							disabled={disable.isPending || isEnabling}
-						>
-							Disable
-						</Button>
+						<AlertDialog>
+							<AlertDialogTrigger asChild>
+								<Button
+									type="button"
+									variant="destructive"
+									disabled={disable.isPending || isEnabling}
+								>
+									{disable.isPending ? (
+										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+									) : null}
+									Disable
+								</Button>
+							</AlertDialogTrigger>
+							<AlertDialogContent>
+								<AlertDialogHeader>
+									<AlertDialogTitle>
+										Disable the built-in registry?
+									</AlertDialogTitle>
+									<AlertDialogDescription>
+										Apps that pull images from <code>{address}</code> will fail
+										until you re-enable it. Stored images and settings are kept,
+										so you can turn it back on later.
+									</AlertDialogDescription>
+								</AlertDialogHeader>
+								<AlertDialogFooter>
+									<AlertDialogCancel>Cancel</AlertDialogCancel>
+									<AlertDialogAction
+										className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+										onClick={handleDisable}
+									>
+										Disable registry
+									</AlertDialogAction>
+								</AlertDialogFooter>
+							</AlertDialogContent>
+						</AlertDialog>
 					)}
 				</div>
 
