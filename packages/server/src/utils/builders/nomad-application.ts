@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { paths } from "@nomploy/server/constants";
 import type { Domain } from "@nomploy/server/services/domain";
-import { getRegistryTag, projectSlug } from "../cluster/upload";
+import { getRegistryTag } from "../cluster/upload";
 import { encodeBase64, getEnvironmentVariablesObject } from "../docker/utils";
 import type { ApplicationNested } from "./index";
 import { generateNomadJobSpec, type NomadServiceSpec } from "./nomad";
@@ -24,23 +24,10 @@ export const resolveApplicationImage = (
 		return application.dockerImage || "ERROR-NO-IMAGE-PROVIDED";
 	}
 	const imageName = `${application.appName}:latest`;
-	// Built-in (self-hosted) registry images are namespaced by PROJECT:
-	// <host>/<project-slug>/<app>. External registries keep their own imagePrefix.
-	const slug = projectSlug(application.environment?.project?.name);
 	if (application.registry)
-		return getRegistryTag(
-			application.registry,
-			imageName,
-			application.registry.registryType === "selfHosted" ? slug : undefined,
-		);
+		return getRegistryTag(application.registry, imageName);
 	if (application.buildRegistry)
-		return getRegistryTag(
-			application.buildRegistry,
-			imageName,
-			application.buildRegistry.registryType === "selfHosted"
-				? slug
-				: undefined,
-		);
+		return getRegistryTag(application.buildRegistry, imageName);
 	// No registry: only reachable on the node that built it (single-node).
 	return imageName;
 };

@@ -2,13 +2,11 @@ import { findServerById, updateServerById } from "@nomploy/server";
 import { db } from "@nomploy/server/db";
 import {
 	apiUpdateClusterAutoscaler,
-	apiUpsertZotRegistry,
 	clusterAutoscaler,
 	clusterAutoscalerEvents,
 	networkPolicies,
 	projects,
 	server as serverTable,
-	zotRegistry,
 } from "@nomploy/server/db/schema";
 import { getProvisioner } from "@nomploy/server/setup/autoscale";
 import {
@@ -35,11 +33,6 @@ import {
 	serverMeshMembers,
 	writeCluster,
 } from "@nomploy/server/setup/nomad-mesh";
-import {
-	configureNodeForZot,
-	disableZotRegistry,
-	enableZotRegistry,
-} from "@nomploy/server/setup/zot-setup";
 import {
 	execAsync,
 	execAsyncRemote,
@@ -165,36 +158,6 @@ const resolvePackJobIds = async (
 	} catch {
 		return [];
 	}
-};
-
-// Media types to request when reading a manifest (single-arch + multi-arch, OCI +
-// docker), so the registry returns the digest + sizes for the image browser.
-const MANIFEST_ACCEPT = [
-	"application/vnd.oci.image.manifest.v1+json",
-	"application/vnd.oci.image.index.v1+json",
-	"application/vnd.docker.distribution.manifest.v2+json",
-	"application/vnd.docker.distribution.manifest.list.v2+json",
-].join(", ");
-
-// Reach the built-in (zot) registry's OCI /v2 API server-side. The panel runs on
-// the control plane, so it can hit the overlay address directly with the org's
-// stored basic-auth creds. Throws if the registry isn't enabled.
-const zotApiContext = async (org: string) => {
-	const cfg = await db.query.zotRegistry.findFirst({
-		where: eq(zotRegistry.organizationId, org),
-	});
-	if (!cfg?.enabled)
-		throw new TRPCError({
-			code: "BAD_REQUEST",
-			message: "The built-in registry isn't enabled.",
-		});
-	const hubWgIp = readCluster()?.hubWgIp || "10.10.0.1";
-	const headers: Record<string, string> = {};
-	if (cfg.username && cfg.password)
-		headers.Authorization = `Basic ${Buffer.from(
-			`${cfg.username}:${cfg.password}`,
-		).toString("base64")}`;
-	return { base: `http://${hubWgIp}:${cfg.port}`, headers };
 };
 
 // ── Consul (service catalog + health) ──────────────────────────────────────
@@ -827,16 +790,6 @@ export const nomadRouter = createTRPCRouter({
 								wgIp,
 								wgPublicKey: pubkey,
 							});
-							// Configure the built-in registry on the new node if enabled.
-							await configureNodeForZot(
-								server.organizationId,
-								input.serverId,
-								(l) => emit.next(l),
-							).catch((e) =>
-								emit.next(
-									`⚠ registry config: ${e instanceof Error ? e.message : String(e)}\n`,
-								),
-							);
 							emit.next(
 								"\nServer joined. Raft grows via retry_join; peers persist in raft state across restarts.\n",
 							);
@@ -896,16 +849,6 @@ export const nomadRouter = createTRPCRouter({
 							wgIp,
 							wgPublicKey: pubkey,
 						});
-						// Configure the built-in registry on the new node if enabled.
-						await configureNodeForZot(
-							server.organizationId,
-							input.serverId,
-							(l) => emit.next(l),
-						).catch((e) =>
-							emit.next(
-								`⚠ registry config: ${e instanceof Error ? e.message : String(e)}\n`,
-							),
-						);
 						emit.next("JOIN_DONE");
 						emit.complete();
 					} catch (err: unknown) {
@@ -1530,200 +1473,4 @@ export const nomadRouter = createTRPCRouter({
 			});
 		}
 	}),
-
-	// ── Built-in registry (zot) ─────────────────────────────────────────────
-	getZotRegistry: protectedProcedure.query(async ({ ctx }) => {
-		const org = ctx.session?.activeOrganizationId;
-		if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
-		const cfg = await db.query.zotRegistry.findFirst({
-			where: eq(zotRegistry.organizationId, org),
-		});
-		if (!cfg) return null;
-		// Mask secrets; expose booleans so the UI can show "set".
-		const { password, s3SecretAccessKey, ...rest } = cfg;
-		const hubWgIp = readCluster()?.hubWgIp || "10.10.0.1";
-		return {
-			...rest,
-			hasPassword: !!password,
-			hasS3Secret: !!s3SecretAccessKey,
-			// Overlay address the registry is (or will be) reachable at.
-			address: `${hubWgIp}:${cfg.port}`,
-		};
-	}),
-
-	updateZotRegistry: protectedProcedure
-		.input(apiUpsertZotRegistry)
-		.mutation(async ({ input, ctx }) => {
-			const org = ctx.session?.activeOrganizationId;
-			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
-			// Only overwrite secrets when a non-empty value is provided.
-			const patch: Record<string, unknown> = { ...input };
-			if (!input.password) patch.password = undefined;
-			if (!input.s3SecretAccessKey) patch.s3SecretAccessKey = undefined;
-			const existing = await db.query.zotRegistry.findFirst({
-				where: eq(zotRegistry.organizationId, org),
-			});
-			if (existing) {
-				await db
-					.update(zotRegistry)
-					.set(patch)
-					.where(eq(zotRegistry.organizationId, org));
-			} else {
-				await db.insert(zotRegistry).values({ ...patch, organizationId: org });
-			}
-			return { success: true };
-		}),
-
-	enableZotRegistry: withPermission("server", "create").subscription(
-		({ ctx }) => {
-			const org = ctx.session?.activeOrganizationId;
-			return observable<string>((emit) => {
-				(async () => {
-					try {
-						if (!org) {
-							emit.next("❌ No active organization.\n");
-							emit.next(OP_ENDED);
-							emit.complete();
-							return;
-						}
-						await enableZotRegistry(org, (l) => emit.next(l));
-						emit.next("ZOT_DONE");
-						emit.complete();
-					} catch (err: unknown) {
-						emit.next(
-							`\n❌ ${err instanceof Error ? err.message : String(err)}\n`,
-						);
-						emit.next(OP_ENDED);
-						emit.complete();
-					}
-				})();
-			});
-		},
-	),
-
-	disableZotRegistry: withPermission("server", "delete").mutation(
-		async ({ ctx }) => {
-			const org = ctx.session?.activeOrganizationId;
-			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
-			await disableZotRegistry(org);
-			return { success: true };
-		},
-	),
-
-	// List the built-in registry's repositories, each with its tags + per-tag
-	// digest and size (summed from the manifest's config + layers).
-	listRegistryImages: protectedProcedure.query(async ({ ctx }) => {
-		const org = ctx.session?.activeOrganizationId;
-		if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
-		const { base, headers } = await zotApiContext(org);
-		const catRes = await fetch(`${base}/v2/_catalog?n=1000`, { headers });
-		if (!catRes.ok)
-			throw new TRPCError({
-				code: "INTERNAL_SERVER_ERROR",
-				message: `Registry catalog error: ${catRes.status} ${catRes.statusText}`,
-			});
-		const { repositories = [] } = (await catRes.json()) as {
-			repositories?: string[];
-		};
-		const repos = await Promise.all(
-			repositories.map(async (repo) => {
-				const tagRes = await fetch(`${base}/v2/${repo}/tags/list`, { headers });
-				const { tags = [] } = tagRes.ok
-					? ((await tagRes.json()) as { tags?: string[] | null })
-					: { tags: [] };
-				const tagInfos = await Promise.all(
-					(tags ?? []).map(async (tag) => {
-						try {
-							const m = await fetch(`${base}/v2/${repo}/manifests/${tag}`, {
-								headers: { ...headers, Accept: MANIFEST_ACCEPT },
-							});
-							const digest = m.headers.get("docker-content-digest") || "";
-							// biome-ignore lint/suspicious/noExplicitAny: OCI manifest shape
-							const body: any = m.ok ? await m.json() : {};
-							let size = Number(body?.config?.size) || 0;
-							for (const l of body?.layers ?? []) size += Number(l?.size) || 0;
-							return { tag, digest, size };
-						} catch {
-							return { tag, digest: "", size: 0 };
-						}
-					}),
-				);
-				return { repo, tags: tagInfos };
-			}),
-		);
-		return { repos };
-	}),
-
-	// Delete an image by tag or digest (DELETE is by digest, so a tag is resolved
-	// to its digest first). Untags immediately; blobs are reclaimed by zot's GC.
-	deleteRegistryImage: withPermission("server", "delete")
-		.input(z.object({ repo: z.string().min(1), reference: z.string().min(1) }))
-		.mutation(async ({ input, ctx }) => {
-			const org = ctx.session?.activeOrganizationId;
-			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
-			const { base, headers } = await zotApiContext(org);
-			let digest = input.reference;
-			if (!digest.startsWith("sha256:")) {
-				const m = await fetch(
-					`${base}/v2/${input.repo}/manifests/${input.reference}`,
-					{ headers: { ...headers, Accept: MANIFEST_ACCEPT } },
-				);
-				digest = m.headers.get("docker-content-digest") || "";
-				if (!digest)
-					throw new TRPCError({ code: "NOT_FOUND", message: "Tag not found" });
-			}
-			const del = await fetch(`${base}/v2/${input.repo}/manifests/${digest}`, {
-				method: "DELETE",
-				headers,
-			});
-			if (!del.ok && del.status !== 202)
-				throw new TRPCError({
-					code: "BAD_REQUEST",
-					message: `Delete failed: ${del.status} ${del.statusText}`,
-				});
-			return { success: true };
-		}),
-
-	// Trivy-backed vulnerability scan for one image, via zot's search GraphQL
-	// (extensions.search.cve). Returns a per-severity summary + the CVE list.
-	// `available: false` when scanning is off or the Trivy DB isn't ready yet.
-	getImageVulnerabilities: protectedProcedure
-		.input(z.object({ repo: z.string().min(1), reference: z.string().min(1) }))
-		.query(async ({ input, ctx }) => {
-			const org = ctx.session?.activeOrganizationId;
-			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
-			const { base, headers } = await zotApiContext(org);
-			const query =
-				"query ($image: String!) { CVEListForImage(image: $image, requestedPage: {limit: 50}) { Summary { MaxSeverity Count CriticalCount HighCount MediumCount LowCount UnknownCount } CVEList { Id Title Severity } } }";
-			type Empty = { available: false; summary: null; cves: never[] };
-			const unavailable: Empty = { available: false, summary: null, cves: [] };
-			let res: Response;
-			try {
-				res = await fetch(`${base}/v2/_zot/ext/search`, {
-					method: "POST",
-					headers: { ...headers, "Content-Type": "application/json" },
-					body: JSON.stringify({
-						query,
-						variables: { image: `${input.repo}:${input.reference}` },
-					}),
-				});
-			} catch {
-				return unavailable;
-			}
-			if (!res.ok) return unavailable;
-			// biome-ignore lint/suspicious/noExplicitAny: GraphQL response shape
-			const json: any = await res.json().catch(() => null);
-			const data = json?.data?.CVEListForImage;
-			if (!data || json?.errors) return unavailable;
-			return {
-				available: true as const,
-				summary: data.Summary ?? null,
-				// biome-ignore lint/suspicious/noExplicitAny: GraphQL CVE node
-				cves: ((data.CVEList ?? []) as any[]).map((c) => ({
-					id: c.Id as string,
-					title: c.Title as string,
-					severity: c.Severity as string,
-				})),
-			};
-		}),
 });
