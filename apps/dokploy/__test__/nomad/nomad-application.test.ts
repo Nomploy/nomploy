@@ -104,4 +104,25 @@ describe("nomad application builder — application → HCL", () => {
 		};
 		expect(resolveApplicationImage(dockerApp)).toBe("nginx:alpine");
 	});
+
+	it("namespaces built-in (self-hosted) registry images by project slug", () => {
+		const app = {
+			...application,
+			environment: {
+				project: { name: "My Cool Project", env: null },
+				env: null,
+			},
+			registry: {
+				registryUrl: "registry.nomploy.local:5000",
+				username: "nomploy",
+				password: "p",
+				registryType: "selfHosted",
+				imagePrefix: "nomploy",
+			},
+			// biome-ignore lint/suspicious/noExplicitAny: test mock of ApplicationNested
+		} as any;
+		expect(resolveApplicationImage(app)).toBe(
+			"registry.nomploy.local:5000/my-cool-project/myapp-abc123:latest",
+		);
+	});
 });

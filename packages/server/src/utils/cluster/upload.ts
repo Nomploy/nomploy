@@ -95,14 +95,36 @@ const extractRepositoryName = (imageName: string): string => {
 	return imageName.substring(lastSlashIndex + 1);
 };
 
-export const getRegistryTag = (registry: Registry, imageName: string) => {
+/**
+ * Slugify a project name for use as a registry path segment
+ * (<host>/<project-slug>/<image>). Falls back to "project" when empty.
+ */
+export const projectSlug = (name?: string | null): string =>
+	(name || "")
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 40) || "project";
+
+export const getRegistryTag = (
+	registry: Registry,
+	imageName: string,
+	// Overrides the registry's imagePrefix — used to namespace built-in-registry
+	// images by project (<host>/<project-slug>/<image>).
+	pathPrefixOverride?: string,
+) => {
 	const { registryUrl, imagePrefix, username } = registry;
 
 	// Extract the repository name (last part after '/')
 	const repositoryName = extractRepositoryName(imageName);
 
-	// Build the final tag using registry's username/prefix (must be lowercase for valid image refs)
-	const targetPrefix = (imagePrefix || username).toLowerCase();
+	// Build the final tag using the project slug (built-in) or registry's
+	// prefix/username (must be lowercase for valid image refs).
+	const targetPrefix = (
+		pathPrefixOverride ||
+		imagePrefix ||
+		username
+	).toLowerCase();
 	const finalRegistry = registryUrl || "";
 
 	return finalRegistry

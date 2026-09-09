@@ -139,7 +139,10 @@ export const ShowRegistryImages = () => {
 					) : repos.length === 0 ? (
 						<div className="py-6 text-muted-foreground text-sm">
 							No images yet. Push one with{" "}
-							<code>docker push &lt;address&gt;/nomploy/&lt;image&gt;</code>.
+							<code>
+								docker push &lt;address&gt;/&lt;project&gt;/&lt;image&gt;
+							</code>
+							.
 						</div>
 					) : (
 						<div className="overflow-x-auto rounded-lg border">
