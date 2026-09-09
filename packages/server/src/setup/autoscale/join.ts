@@ -4,6 +4,7 @@ import {
 	getClusterServerJoinCommand,
 	getClusterWorkerJoinCommand,
 } from "../nomad-cluster";
+import { configureNodeForZot } from "../zot-setup";
 import {
 	addPeerEverywhere,
 	allMeshMembers,
@@ -73,6 +74,11 @@ export const joinWorkerNode = async (
 		wgIp,
 		wgPublicKey: pubkey,
 	});
+	// If a built-in registry is enabled, configure this node too so its
+	// allocations can pull from it (best-effort — doesn't fail the join).
+	await configureNodeForZot(server.organizationId, serverId, onLog).catch((e) =>
+		onLog(`⚠ registry config: ${e instanceof Error ? e.message : String(e)}\n`),
+	);
 	return { wgIp, publicKey: pubkey };
 };
 
@@ -143,6 +149,11 @@ export const joinServerNode = async (
 		wgIp,
 		wgPublicKey: pubkey,
 	});
+	// Servers run a Nomad client too, so configure them for the built-in registry
+	// as well (best-effort — doesn't fail the join).
+	await configureNodeForZot(server.organizationId, serverId, onLog).catch((e) =>
+		onLog(`⚠ registry config: ${e instanceof Error ? e.message : String(e)}\n`),
+	);
 	return { wgIp, publicKey: pubkey };
 };
 

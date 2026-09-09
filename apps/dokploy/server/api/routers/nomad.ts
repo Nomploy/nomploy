@@ -36,6 +36,7 @@ import {
 	writeCluster,
 } from "@nomploy/server/setup/nomad-mesh";
 import {
+	configureNodeForZot,
 	disableZotRegistry,
 	enableZotRegistry,
 } from "@nomploy/server/setup/zot-setup";
@@ -730,6 +731,16 @@ export const nomadRouter = createTRPCRouter({
 								wgIp,
 								wgPublicKey: pubkey,
 							});
+							// Configure the built-in registry on the new node if enabled.
+							await configureNodeForZot(
+								server.organizationId,
+								input.serverId,
+								(l) => emit.next(l),
+							).catch((e) =>
+								emit.next(
+									`⚠ registry config: ${e instanceof Error ? e.message : String(e)}\n`,
+								),
+							);
 							emit.next(
 								"\nServer joined. Raft grows via retry_join; peers persist in raft state across restarts.\n",
 							);
@@ -789,6 +800,16 @@ export const nomadRouter = createTRPCRouter({
 							wgIp,
 							wgPublicKey: pubkey,
 						});
+						// Configure the built-in registry on the new node if enabled.
+						await configureNodeForZot(
+							server.organizationId,
+							input.serverId,
+							(l) => emit.next(l),
+						).catch((e) =>
+							emit.next(
+								`⚠ registry config: ${e instanceof Error ? e.message : String(e)}\n`,
+							),
+						);
 						emit.next("JOIN_DONE");
 						emit.complete();
 					} catch (err: unknown) {

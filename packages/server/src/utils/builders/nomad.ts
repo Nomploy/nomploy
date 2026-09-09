@@ -92,7 +92,20 @@ export const getBuildNomadCommand = async (
 
 	let jobSpec: string;
 	if (isNativeHcl) {
-		jobSpec = composeFile;
+		// Lifecycle + observability (stop/start/remove, logs, allocations) all
+		// address the job by appName. A raw jobspec declares its own job id
+		// (job "<name>" {…}), usually != appName — left as-is, Stop/Remove would be
+		// no-ops (orphaning the job) and Logs/Allocations would come up empty. So
+		// rewrite a single-job spec's id to appName. Multi-job specs are left
+		// verbatim (advanced use — the author owns their lifecycle).
+		const jobDecls = composeFile.match(/(?:^|\n)\s*job\s+"[^"]+"\s*\{/g) ?? [];
+		jobSpec =
+			jobDecls.length === 1
+				? composeFile.replace(
+						/((?:^|\n)\s*job\s+)"[^"]+"(\s*\{)/,
+						`$1"${appName}"$2`,
+					)
+				: composeFile;
 	} else {
 		// Resolve all env vars (project + environment + service)
 		const envVars = resolveNomadEnvVars(compose);
@@ -174,6 +187,7 @@ export const getBuildNomadPackCommand = (
 	return `
 set -e
 {
+	command -v nomad-pack >/dev/null 2>&1 || { echo "Error: nomad-pack is not installed on this host. Nomad Pack deploys run on the control plane — deploy this compose without a specific server, or install nomad-pack on the target."; exit 1; }
 	mkdir -p "${projectPath}"
 ${writeVars}${addRegistry}	nomad-pack run ${nomadPack}${registryFlag}${varFlag} --name "${appName}" 2>&1
 	echo "Nomad Pack deployed"

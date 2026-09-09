@@ -55,26 +55,83 @@ else:
 PY
 $SUDO systemctl reload docker 2>/dev/null || $SUDO kill -HUP "$(cat /var/run/docker.pid 2>/dev/null)" 2>/dev/null || true`;
 
+const shq = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
+
 /**
- * Allow the built-in (HTTP) registry on every node's Docker: the control plane
- * (so builds push) AND all worker peers (so their allocations can pull). Uses a
- * non-disruptive reload. Existing workers are covered here; new workers pick it
- * up on the next enable/reconfigure.
+ * Configure ONE node's Docker for the built-in (HTTP) registry: add it to
+ * `insecure-registries` (non-disruptive reload) AND `docker login` so the node
+ * can push/pull the auth-protected registry. `run` executes a shell command on
+ * that node (local for the control plane, execAsyncRemote for a mesh member).
  */
-const configureInsecureRegistry = async (addr: string, onLog: Log) => {
-	const script = insecureRegistryScript(addr);
-	onLog(`Allowing insecure registry ${addr} on the control plane…\n`);
-	await execAsync(script).catch((e) =>
-		onLog(
-			`⚠ insecure-registry config: ${e instanceof Error ? e.message : e}\n`,
-		),
+const applyRegistryToNode = async (
+	cfg: typeof zotRegistry.$inferSelect,
+	addr: string,
+	run: (cmd: string) => Promise<unknown>,
+	label: string,
+	onLog: Log,
+) => {
+	onLog(`Allowing built-in registry ${addr} on ${label}…\n`);
+	await run(insecureRegistryScript(addr)).catch((e) =>
+		onLog(`⚠ ${label} insecure-registry: ${e instanceof Error ? e.message : e}\n`),
 	);
-	for (const p of readCluster()?.peers ?? []) {
-		onLog(`Allowing insecure registry on worker ${p.name}…\n`);
-		await execAsyncRemote(p.serverId, script).catch((e) =>
-			onLog(`⚠ ${p.name}: ${e instanceof Error ? e.message : e}\n`),
+	// Nomad's docker driver reads /root/.docker/config.json, so each node needs
+	// its own login to pull from the htpasswd-protected registry.
+	if (cfg.password) {
+		await run(
+			`printf %s ${shq(cfg.password)} | docker login ${addr} -u ${shq(cfg.username)} --password-stdin`,
+		).catch((e) =>
+			onLog(`⚠ ${label} docker login: ${e instanceof Error ? e.message : e}\n`),
 		);
 	}
+};
+
+/**
+ * Configure the built-in registry on the control plane (so builds push) AND
+ * every mesh member — servers and workers both run Nomad clients that receive
+ * allocations, so all of them must be able to pull.
+ */
+const configureRegistryEverywhere = async (
+	cfg: typeof zotRegistry.$inferSelect,
+	addr: string,
+	onLog: Log,
+) => {
+	await applyRegistryToNode(cfg, addr, execAsync, "the control plane", onLog);
+	const cluster = readCluster();
+	const members = [...(cluster?.servers ?? []), ...(cluster?.peers ?? [])];
+	for (const m of members) {
+		if (!m.serverId) continue;
+		await applyRegistryToNode(
+			cfg,
+			addr,
+			(cmd) => execAsyncRemote(m.serverId as string, cmd),
+			m.name,
+			onLog,
+		);
+	}
+};
+
+/**
+ * Configure a single (newly-joined) node for the built-in registry, if the org
+ * has one enabled. Called from the cluster-join paths so a node added AFTER the
+ * registry was enabled can still pull images. No-op when no registry is enabled.
+ */
+export const configureNodeForZot = async (
+	organizationId: string,
+	serverId: string,
+	onLog: Log = () => {},
+): Promise<void> => {
+	const cfg = await db.query.zotRegistry.findFirst({
+		where: eq(zotRegistry.organizationId, organizationId),
+	});
+	if (!cfg?.enabled) return;
+	const addr = registryAddress(cfg.port);
+	await applyRegistryToNode(
+		cfg,
+		addr,
+		(cmd) => execAsyncRemote(serverId, cmd),
+		"the new node",
+		onLog,
+	);
 };
 
 /** Wait until the registry answers the OCI base endpoint (/v2/). */
@@ -126,16 +183,11 @@ export const enableZotRegistry = async (
 	const hash = await bcrypt.hash(cfg.password, 10);
 	onLog("Deploying registry (zot)…\n");
 	await execAsync(getZotDeployCommand(opts, `${cfg.username}:${hash}`));
-	await configureInsecureRegistry(addr, onLog);
 	await waitForRegistry(addr, onLog);
 
-	// docker login from the control plane so builds can push.
-	const shq = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
-	await execAsync(
-		`printf %s ${shq(cfg.password)} | docker login ${addr} -u ${shq(cfg.username)} --password-stdin`,
-	).catch((e) =>
-		onLog(`⚠ docker login: ${e instanceof Error ? e.message : e}\n`),
-	);
+	// Allow the insecure registry + docker login on the control plane AND every
+	// mesh member, so builds push and allocations on any node can pull.
+	await configureRegistryEverywhere(cfg, addr, onLog);
 
 	// Upsert the registry row (reuse the existing one if present).
 	let registryId = cfg.registryId || "";
