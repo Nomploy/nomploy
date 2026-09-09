@@ -41,7 +41,10 @@ WORKDIR /app
 # Set production
 ENV NODE_ENV=production
 
-RUN apt-get update && apt-get install -y curl unzip zip apache2-utils iproute2 rsync git-lfs wireguard-tools iptables && git lfs install && rm -rf /var/lib/apt/lists/*
+# python3 is used by in-container control-plane scripts (the built-in-registry
+# insecure-registries config and the post-deploy health probe), so the runtime
+# image needs it too — the build stage's python3 doesn't carry over.
+RUN apt-get update && apt-get install -y curl unzip zip apache2-utils iproute2 rsync git-lfs wireguard-tools iptables python3 && git lfs install && rm -rf /var/lib/apt/lists/*
 
 # Nomad CLI — the deploy pipeline runs `nomad job run` to submit jobs to the
 # control plane's own Nomad. (Remote-server deploys use that server's own CLI.)

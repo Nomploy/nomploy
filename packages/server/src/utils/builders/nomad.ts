@@ -128,8 +128,10 @@ sys.exit(0)
 
 // Shell that runs the probe after a deploy. mode "job" checks the job id == name;
 // mode "pack" resolves the pack's real jobs first. Base64 so no quoting hell.
+// Guarded on python3 so a host without it degrades to skipping the check rather
+// than failing an otherwise-successful deploy.
 const healthCheckSnippet = (name: string, mode: "job" | "pack"): string =>
-	`\techo "Verifying deployment health…"\n\techo "${encodeBase64(HEALTH_PROBE_PY)}" | base64 -d | python3 - "${name}" "${mode}"\n`;
+	`\tif command -v python3 >/dev/null 2>&1; then\n\t\techo "Verifying deployment health…"\n\t\techo "${encodeBase64(HEALTH_PROBE_PY)}" | base64 -d | python3 - "${name}" "${mode}"\n\telse\n\t\techo "Skipping health check (python3 unavailable)"\n\tfi\n`;
 
 // ─── Main Entry Point ────────────────────────────────────────────────────────
 
