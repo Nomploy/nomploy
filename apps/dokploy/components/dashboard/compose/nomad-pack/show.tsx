@@ -1,4 +1,4 @@
-import { Box, Save } from "lucide-react";
+import { Box, Loader2, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -113,7 +113,12 @@ export const ShowNomadPackForm = ({ composeId }: Props) => {
 				</div>
 				<div>
 					<Button type="button" onClick={save} disabled={update.isPending}>
-						<Save className="mr-2 h-4 w-4" /> Save
+						{update.isPending ? (
+							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+						) : (
+							<Save className="mr-2 h-4 w-4" />
+						)}
+						{update.isPending ? "Saving…" : "Save"}
 					</Button>
 				</div>
 			</CardContent>

@@ -1,4 +1,4 @@
-import { Activity, Save } from "lucide-react";
+import { Activity, Loader2, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -100,6 +100,11 @@ export const ShowApplicationAutoscaling = ({ applicationId }: Props) => {
 								value={min}
 								onChange={(e) => setMin(Number(e.target.value) || 0)}
 							/>
+							{min === 0 && (
+								<p className="text-amber-600 text-xs dark:text-amber-500">
+									0 lets the app scale down to zero replicas (fully stopped).
+								</p>
+							)}
 						</div>
 						<div className="space-y-1.5">
 							<Label>Max replicas</Label>
@@ -133,7 +138,12 @@ export const ShowApplicationAutoscaling = ({ applicationId }: Props) => {
 			)}
 			<CardContent>
 				<Button type="button" onClick={save} disabled={update.isPending}>
-					<Save className="mr-2 h-4 w-4" /> Save
+					{update.isPending ? (
+						<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+					) : (
+						<Save className="mr-2 h-4 w-4" />
+					)}
+					{update.isPending ? "Saving…" : "Save"}
 				</Button>
 			</CardContent>
 		</Card>

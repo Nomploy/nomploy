@@ -131,6 +131,9 @@ export const ShowCluster = () => {
 		data: members,
 		refetch: refetchMembers,
 		isRefetching,
+		isLoading: membersLoading,
+		isError: membersError,
+		error: membersErr,
 	} = api.nomad.getClusterMembers.useQuery(undefined, {
 		refetchOnWindowFocus: false,
 		refetchInterval: 20000,
@@ -329,18 +332,41 @@ export const ShowCluster = () => {
 							</div>
 						</div>
 						{!isHA && (
-							<Button
-								onClick={() => startProvision("server")}
-								disabled={busy || !canProvision}
-								className="shrink-0"
-							>
-								{isProvisioning && provisionRole === "server" ? (
-									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-								) : (
-									<Zap className="mr-2 h-4 w-4" />
-								)}
-								Add {serversToHA} server{serversToHA === 1 ? "" : "s"} for HA
-							</Button>
+							<TooltipProvider>
+								<Tooltip>
+									<TooltipTrigger asChild>
+										{/* span wrapper so the tooltip still fires when disabled */}
+										<span className="shrink-0">
+											<Button
+												onClick={() => startProvision("server")}
+												disabled={busy || !canProvision}
+											>
+												{isProvisioning && provisionRole === "server" ? (
+													<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+												) : (
+													<Zap className="mr-2 h-4 w-4" />
+												)}
+												Add {serversToHA} server{serversToHA === 1 ? "" : "s"}{" "}
+												for HA
+											</Button>
+										</span>
+									</TooltipTrigger>
+									{!canProvision && (
+										<TooltipContent className="max-w-xs">
+											Set a cloud provider token and SSH key in the{" "}
+											<Link
+												href="?tab=autoscale"
+												className="underline underline-offset-2"
+											>
+												Autoscaling tab
+											</Link>{" "}
+											to enable one-click node provisioning — or use{" "}
+											<span className="font-medium">Add existing server</span>{" "}
+											below.
+										</TooltipContent>
+									)}
+								</Tooltip>
+							</TooltipProvider>
 						)}
 					</div>
 					<div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -392,6 +418,8 @@ export const ShowCluster = () => {
 								type="button"
 								variant="ghost"
 								size="sm"
+								aria-label="Refresh cluster"
+								title="Refresh cluster"
 								onClick={() => refetchCluster()}
 								disabled={isRefetching}
 							>
@@ -529,7 +557,7 @@ export const ShowCluster = () => {
 						</div>
 					)}
 
-					<div className="rounded-lg border">
+					<div className="overflow-x-auto rounded-lg border">
 						<Table>
 							<TableHeader>
 								<TableRow>
@@ -542,7 +570,29 @@ export const ShowCluster = () => {
 								</TableRow>
 							</TableHeader>
 							<TableBody>
-								{members && members.length > 0 ? (
+								{membersLoading ? (
+									<TableRow>
+										<TableCell
+											colSpan={6}
+											className="text-center text-muted-foreground text-sm"
+										>
+											<span className="inline-flex items-center gap-2">
+												<Loader2 className="h-4 w-4 animate-spin" />
+												Loading cluster members…
+											</span>
+										</TableCell>
+									</TableRow>
+								) : membersError ? (
+									<TableRow>
+										<TableCell
+											colSpan={6}
+											className="text-center text-destructive text-sm"
+										>
+											Couldn't load cluster members:{" "}
+											{membersErr?.message ?? "unknown error"}
+										</TableCell>
+									</TableRow>
+								) : members && members.length > 0 ? (
 									members.map((m) => {
 										const src = SOURCE_LABEL[m.source] ?? {
 											label: m.source,
@@ -611,6 +661,8 @@ export const ShowCluster = () => {
 																	type="button"
 																	variant="ghost"
 																	size="sm"
+																	aria-label={`Actions for ${m.name}`}
+																	title="Node actions"
 																	disabled={busy}
 																>
 																	<MoreHorizontal className="h-4 w-4" />

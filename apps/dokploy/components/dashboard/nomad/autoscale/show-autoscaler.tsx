@@ -126,6 +126,10 @@ export const ShowAutoscaler = () => {
 		setForm((f) => ({ ...f, [k]: v }));
 
 	const save = async () => {
+		if (Number(form.maxNodes) < Number(form.minNodes)) {
+			toast.error("Max nodes must be ≥ min nodes");
+			return;
+		}
 		try {
 			await update.mutateAsync({
 				enabled: form.enabled,
@@ -165,9 +169,11 @@ export const ShowAutoscaler = () => {
 	};
 
 	const d = status?.decision;
-	const num = (k: keyof Form) => (
+	const num = (k: keyof Form, opts?: { min?: number; max?: number }) => (
 		<Input
 			type="number"
+			min={opts?.min}
+			max={opts?.max}
 			value={form[k] as number}
 			onChange={(e) => set(k, Number(e.target.value) as never)}
 		/>
@@ -360,15 +366,15 @@ export const ShowAutoscaler = () => {
 					<div className="grid grid-cols-3 gap-4">
 						<div className="space-y-2">
 							<Label>Min nodes</Label>
-							{num("minNodes")}
+							{num("minNodes", { min: 0 })}
 						</div>
 						<div className="space-y-2">
 							<Label>Max nodes</Label>
-							{num("maxNodes")}
+							{num("maxNodes", { min: 0 })}
 						</div>
 						<div className="space-y-2">
 							<Label>Cooldown (s)</Label>
-							{num("cooldownSeconds")}
+							{num("cooldownSeconds", { min: 0 })}
 						</div>
 					</div>
 					<div className="space-y-2">
@@ -400,14 +406,18 @@ export const ShowAutoscaler = () => {
 										<span className="w-28 text-muted-foreground">
 											scale up above
 										</span>
-										<div className="w-20">{num(p.up)}</div>
+										<div className="w-20">
+											{num(p.up, { min: 0, max: 100 })}
+										</div>
 										<span>%</span>
 									</div>
 									<div className="flex items-center gap-2 text-sm">
 										<span className="w-28 text-muted-foreground">
 											scale down below
 										</span>
-										<div className="w-20">{num(p.down)}</div>
+										<div className="w-20">
+											{num(p.down, { min: 0, max: 100 })}
+										</div>
 										<span>%</span>
 									</div>
 								</div>
@@ -465,7 +475,7 @@ export const ShowAutoscaler = () => {
 						)}
 					</div>
 
-					<div className="rounded-lg border">
+					<div className="overflow-x-auto rounded-lg border">
 						<Table>
 							<TableHeader>
 								<TableRow>
