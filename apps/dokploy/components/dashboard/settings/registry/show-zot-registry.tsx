@@ -196,7 +196,8 @@ export const ShowZotRegistry = () => {
 								<Copy className="mr-1 h-3.5 w-3.5" /> copy
 							</Button>
 							<span className="text-muted-foreground text-xs">
-								push: <code>docker push {address}/nomploy/&lt;image&gt;</code>
+								push:{" "}
+								<code>docker push {address}/&lt;project&gt;/&lt;image&gt;</code>
 							</span>
 						</div>
 					)}
