@@ -239,12 +239,15 @@ export const getBuildNomadPackCommand = (
 	const hasVars = !!composeFile && composeFile.trim().length > 0;
 	const encodedVars = encodeBase64(composeFile || "");
 	// A custom registry (git URL) is added under a fixed local name, then
-	// referenced with --registry. Tolerate a non-zero exit so re-deploys (where
-	// the registry already exists) don't fail.
+	// referenced with --registry. With no custom registry we deploy from the
+	// community registry — which must be added to the local cache first, or
+	// `nomad-pack run <pack>` fails with "Failed To Find Pack" on a fresh host
+	// (e.g. right after a panel roll). Both adds tolerate a non-zero exit so a
+	// re-deploy (registry already present) doesn't fail.
 	const registryName = "nomploy-custom";
 	const addRegistry = nomadPackRegistry
 		? `\tnomad-pack registry add ${registryName} "${nomadPackRegistry}" 2>&1 || true\n`
-		: "";
+		: "\tnomad-pack registry add default github.com/hashicorp/nomad-pack-community-registry 2>&1 || true\n";
 	const registryFlag = nomadPackRegistry ? ` --registry ${registryName}` : "";
 	const varFlag = hasVars ? ` --var-file="${varFile}"` : "";
 	const writeVars = hasVars
