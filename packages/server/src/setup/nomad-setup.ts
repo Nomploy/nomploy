@@ -218,9 +218,21 @@ const initializeNomadAutoscaler = async () => {
 
 	await execAsync(`docker rm -f ${name} 2>/dev/null || true`);
 
+	// Under Nomad ACLs the autoscaler must present a token or every Nomad API call
+	// is denied (403). It reads NOMAD_TOKEN from the environment (standard Nomad
+	// client var). Prefer a dedicated least-privilege NOMAD_AUTOSCALER_TOKEN
+	// (scale-job + node:write only); fall back to the panel's token so it still
+	// works before the least-priv token is wired. Empty/unset = no ACLs → no token.
+	const autoscalerToken =
+		process.env.NOMAD_AUTOSCALER_TOKEN || process.env.NOMAD_TOKEN;
+	const nomadTokenEnv = autoscalerToken
+		? `-e NOMAD_TOKEN=${autoscalerToken} `
+		: "";
+
 	await execAsync(`docker run -d --name ${name} \
 		--network host \
 		--restart unless-stopped \
+		${nomadTokenEnv}\
 		hashicorp/nomad-autoscaler:latest \
 		agent \
 		-nomad-address=${NOMAD_ADDRESS} \
