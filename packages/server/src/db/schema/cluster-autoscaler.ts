@@ -7,21 +7,35 @@ import { organization } from "./account";
 import { sshKeys } from "./ssh-key";
 
 /**
- * Phase C — cluster autoscaling config (one per organization). The reconcile
- * loop reads Nomad capacity + pending allocations and, within [minNodes,
- * maxNodes] and the cooldown, provisions worker VMs (cloud provider) + joins
- * them, or drains+removes+destroys idle ones. Only nodes it created (server rows
- * with autoscaled=true) are ever destroyed.
+ * An autoscaling group (Nomad node pool). Originally one config per org; now
+ * MANY per org — each group is its own worker pool with its own launch template
+ * (provider/serverType/location/…), min/max, thresholds, and cooldown, scaling
+ * independently based on pressure within its node pool. The reconcile loop, for
+ * each enabled group, reads that pool's Nomad capacity + pending allocations and,
+ * within [minNodes, maxNodes] and the cooldown, provisions worker VMs into the
+ * pool + joins them, or drains+removes+destroys idle ones. Only nodes it created
+ * (server rows with autoscaled=true) are ever destroyed; manual nodes are pinned.
+ *
+ * The table keeps its original name (`cluster_autoscaler`) but is no longer
+ * org-unique — `autoscalingGroup` is the meaningful alias. The built-in `default`
+ * pool is the default group (isDefault=true), which existing installs migrate to.
  */
 export const clusterAutoscaler = pgTable("cluster_autoscaler", {
 	autoscalerId: text("autoscalerId")
 		.notNull()
 		.primaryKey()
 		.$defaultFn(() => nanoid()),
+	// No longer unique per org — an org may have several groups.
 	organizationId: text("organizationId")
 		.notNull()
-		.unique()
 		.references(() => organization.id, { onDelete: "cascade" }),
+	// Human label for the group, e.g. "default", "memory", "gpu".
+	name: text("name").notNull().default("default"),
+	// Nomad node pool this group owns/scales (unique per org). Nodes join it and
+	// jobs target it via `node_pool`. The built-in pool is "default".
+	poolName: text("poolName").notNull().default("default"),
+	// The default group can't be deleted; it backs the built-in `default` pool.
+	isDefault: boolean("isDefault").notNull().default(false),
 	enabled: boolean("enabled").notNull().default(false),
 	provider: text("provider").notNull().default("hetzner"),
 	// Cloud API token. Stored like the other provider secrets in this schema
@@ -68,6 +82,8 @@ export const clusterAutoscalerEvents = pgTable("cluster_autoscaler_event", {
 	organizationId: text("organizationId")
 		.notNull()
 		.references(() => organization.id, { onDelete: "cascade" }),
+	// Which autoscaling group this event belongs to (nullable for legacy rows).
+	groupId: text("groupId"),
 	createdAt: text("createdAt")
 		.notNull()
 		.$defaultFn(() => new Date().toISOString()),
@@ -102,6 +118,9 @@ export const clusterAutoscalerRelations = relations(
 	}),
 );
 
+// `autoscalingGroup` is the meaningful name for the (now multi-row) table.
+export const autoscalingGroup = clusterAutoscaler;
+
 const createSchema = createInsertSchema(clusterAutoscaler);
 
 // Update input: token optional (only overwrite when provided) + never required.
@@ -127,3 +146,15 @@ export const apiUpdateClusterAutoscaler = createSchema
 		// Provided only when (re)setting the token; blank/undefined keeps existing.
 		token: z.string().optional(),
 	});
+
+// Upsert a group: groupId present = update that group, absent = create a new one.
+// name/poolName identify the group + its Nomad node pool.
+export const apiUpsertAutoscalingGroup = apiUpdateClusterAutoscaler.extend({
+	groupId: z.string().optional(),
+	name: z.string().min(1).optional(),
+	// Node pool: lowercase letters, digits, hyphen, underscore (Nomad-safe).
+	poolName: z
+		.string()
+		.regex(/^[a-z0-9][a-z0-9_-]*$/, "lowercase letters, digits, - or _")
+		.optional(),
+});

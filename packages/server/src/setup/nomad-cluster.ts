@@ -56,6 +56,11 @@ export interface ClusterWorkerJoinOptions {
 	 * pre-ACL cluster) the join scripts emit no acl blocks — backward compatible.
 	 */
 	aclTokens?: ClusterAclTokens;
+	/**
+	 * Nomad node pool this worker joins (its autoscaling group). Omitted/"default"
+	 * = the built-in default pool.
+	 */
+	nodePool?: string;
 }
 
 /** Cluster-wide ACL tokens read from /etc/nomploy/secrets (see readClusterAclTokens). */
@@ -200,6 +205,11 @@ export const getClusterWorkerJoinCommand = (
 	const consulRetryJoin = serverIps.map((ip) => `"${ip}"`).join(", ");
 	// The hub is the overlay gateway (/24); other servers are direct (/32).
 	const extraServerPeers = extraServers.map(serverPeerBlock).join("\n");
+	// Node pool (autoscaling group) this worker joins; omit for the default pool.
+	const nodePoolLine =
+		opts.nodePool && opts.nodePool !== "default"
+			? `\n  node_pool = "${opts.nodePool}"`
+			: "";
 
 	return `${installPreamble(cniVersion)}
 # ── WireGuard: join the overlay, peer with every server ────────────────────
@@ -256,7 +266,7 @@ client {
   # NIC, so Traefik on the control plane can reach services here (and ports are
   # never exposed publicly). Without this, Consul registers the node's public IP
   # and cross-node routing fails behind a cloud firewall.
-  network_interface = "wg0"
+  network_interface = "wg0"${nodePoolLine}
 }
 ${nomadAclBlock(opts.aclTokens)}consul { address = "127.0.0.1:8500"${nomadConsulTokenAttr(opts.aclTokens)} }
 plugin "docker" {

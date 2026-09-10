@@ -111,6 +111,9 @@ export const server = pgTable("server", {
 	// it only ever destroys its own VMs. providerNodeId is the cloud VM id.
 	autoscaled: boolean("autoscaled").notNull().default(false),
 	providerNodeId: text("providerNodeId"),
+	// Nomad node pool this worker belongs to (its autoscaling group). Used to scope
+	// per-group capacity/scaling. Null/"default" = the built-in default pool.
+	nodePool: text("nodePool"),
 });
 
 export const serverRelations = relations(server, ({ one, many }) => ({
@@ -197,6 +200,7 @@ export const apiUpdateServer = createSchema
 		wgPublicKey: z.string().nullish(),
 		autoscaled: z.boolean().optional(),
 		providerNodeId: z.string().nullish(),
+		nodePool: z.string().nullish(),
 	});
 
 export const apiUpdateServerMonitoring = createSchema
