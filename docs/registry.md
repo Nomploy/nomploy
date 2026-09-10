@@ -1,67 +1,65 @@
-# Built-in registry
+# Container registry
 
-nomploy can run its own OCI image registry on the control plane, so you can
-build → push → pull without signing up for an external registry. It's powered by
-**[zot](https://zotregistry.dev/)** (a single-binary, OCI-native, Apache-2.0
-registry) and stores images on the local disk or an S3-compatible bucket.
+nomploy has **no built-in registry**. You run your own OCI registry (as a normal
+service) and register it in **Settings → Registry → Add Registry**. This keeps the
+registry decoupled and replaceable, and it works with any registry — your own zot,
+a plain `registry:2`, GHCR, ECR, Docker Hub, etc.
 
-## Where it lives
+## Do you even need one?
 
-**Dashboard → Settings → Registry.** The card is titled **"Built-in registry
-(zot)"** with an **enabled** / **disabled** badge.
+Only for **build-from-source on a multi-node cluster**. The image is built on one
+node but Nomad may schedule the workload on any node, so a built image has to be
+pullable from somewhere every node can reach.
 
-## Configure
+You can skip a registry entirely when:
+- **Single-node** — build and run on the same box (local image store is enough).
+- **You only run pre-built images** (templates like `postgres`, `redis`, or
+  `image: ghcr.io/you/app`) — every node pulls from the public source directly.
 
-Fill in the settings, then enable:
+## Run a registry (zot) via the pack
 
-- **Storage** — *Local filesystem* or *S3-compatible* (default: local).
-- **Port** — the port the registry listens on (default **5000**).
-- **Username** — default `nomploy`.
-- **Password** — set one (required to enable). Leaving it blank on a later save
-  keeps the stored password.
-
-When **S3-compatible** is selected, an extra panel appears:
-
-- **Bucket**
-- **Region**
-- **Endpoint (S3-compatible; blank for AWS)** — e.g. `minio.example.com` or
-  `s3.eu-central-1.amazonaws.com`.
-- **Access key ID**
-- **Secret access key**
-
-Click **Save settings** to persist the config.
-
-> The registry is served over **HTTP** on the overlay network (not public TLS),
-> which is why nomploy adds it to each node's Docker `insecure-registries`.
-
-## Enable
-
-Click **Enable** (it becomes **Reconfigure** once running). nomploy will:
-
-1. Deploy the zot registry as a Nomad job on the control plane.
-2. Add the registry address to **every node's** Docker `insecure-registries`
-   (a non-disruptive reload — running containers aren't restarted).
-3. Wait for the registry's `/v2/` endpoint to answer.
-4. `docker login` from the control plane so builds can push.
-5. Register it as a nomploy registry named *Built-in registry (zot)* with the
-   image prefix `nomploy`, so your services can use it.
-
-Once enabled, the card shows the address (e.g. `10.10.0.1:5000`) with a copy
-button and a push hint:
+The quickest internal option is the **zot** pack from
+[`Nomploy/nomad-packs`](https://github.com/Nomploy/nomad-packs):
 
 ```bash
-docker push <address>/nomploy/<image>
+nomad-pack registry add nomploy github.com/Nomploy/nomad-packs
+# anonymous pull + authenticated push (recommended for an internal registry):
+#   htpasswd -bnBC10 pushuser 'a-strong-pass'
+nomad-pack run zot --registry nomploy \
+  --var 'htpasswd=pushuser:$2y$10$...' \
+  --var 'constraints=[{attribute="${meta.nomploy_control_plane}",operator="=",value="true"}]'
 ```
 
-## Disable
+Or in nomploy: a **Compose** service, type **Nomad Pack**, pack `zot`, custom
+registry `github.com/Nomploy/nomad-packs`. It comes up host-networked at
+`<node-ip>:5000` with anonymous pull / authenticated push. (You can equally run
+any other registry as a normal Docker service.)
 
-**Disable** stops and purges the registry job but **keeps your stored blobs and
-config**, so you can re-enable later without losing images.
+## Make the cluster trust + use it
 
-## S3 vs. local — which?
+Two things every node needs, and how nomploy handles them:
 
-- **Local filesystem** is the simplest — good for a single control plane.
-- **S3-compatible** keeps images off the node's disk and survives a control-plane
-  rebuild. Works with AWS S3 (leave the endpoint blank) or any S3-compatible
-  service like MinIO or Cloudflare R2 (set the endpoint). Credentials are written
-  into the registry's storage config.
+1. **Trust (TLS).** An HTTP registry needs `<addr>` in each node's Docker
+   `insecure-registries` (`/etc/docker/daemon.json` + `systemctl reload docker`).
+   This is a per-node **daemon** setting — there's no per-job way around it.
+   A registry with a real HTTPS cert removes this step entirely.
+2. **Auth (credentials).** Handled for you: **Add Registry** publishes the merged
+   docker auth to **Consul KV**, and **consul-template** on every node renders it
+   to `/root/.docker/config.json` (installed on join + by `install.sh`, refreshed
+   when you change a registry). So private images pull cluster-wide **without any
+   credentials in job specs** — the Nomad equivalent of Swarm's
+   `--with-registry-auth`.
+
+> Consul KV is plaintext, gated only by Consul ACLs — fine for a single-tenant
+> private (WireGuard) cluster; use Vault for a shared/multi-tenant one.
+
+## Add Registry
+
+**Settings → Registry → Add Registry:**
+- **Registry URL** — e.g. `10.10.0.1:5000` (or your registry's host)
+- **Username / Password** — the push credentials (self-hosted registries can be
+  anonymous-pull, so only push needs them)
+- **Image prefix** — e.g. `apps`
+
+Then build & deploy: nomploy pushes to `<registry>/<prefix>/<image>` from the
+control plane, and every node pulls it.

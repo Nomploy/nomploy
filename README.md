@@ -25,9 +25,10 @@ whole is licensed under the **GNU AGPL-3.0**; the upstream enterprise
   health.
 - **Autoscaling** — horizontal autoscaling on CPU/memory targets for both
   applications and compose services.
-- **Built-in image registry** — an optional bundled OCI registry (zot) with
-  local or S3-compatible storage, so you can build → push → pull without an
-  external registry (**Settings → Registry**).
+- **Bring-your-own registry** — register any OCI registry (your own zot/`registry:2`,
+  GHCR, ECR, …) in **Settings → Registry**; credentials are distributed to every
+  node via Consul KV + consul-template, so private images pull cluster-wide with
+  no credentials in job specs.
 - **GPU workloads** — request NVIDIA GPUs for a job via Nomad device plugins.
 - **Nomad dashboard** — view jobs, allocations, nodes, logs and cluster
   resources; scale or stop jobs from the UI. Pick which server's Nomad cluster to
@@ -71,7 +72,7 @@ Full guides live in [`docs/`](docs/README.md):
 - [Cluster management](docs/cluster.md) — high availability: add/remove nodes, drain, DNS health.
 - [Deploying](docs/deploying.md) — Compose, native Nomad HCL, and Nomad Pack.
 - [Autoscaling](docs/autoscaling.md) — scale apps and services on CPU/memory.
-- [Built-in registry](docs/registry.md) — the bundled OCI registry (zot).
+- [Container registry](docs/registry.md) — bring-your-own registry + cluster-wide auth.
 - [GPU workloads](docs/gpu.md) — requesting NVIDIA GPUs.
 
 ## 🧭 How nomploy differs from Dokploy
