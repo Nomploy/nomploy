@@ -8,6 +8,7 @@ import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 import type { z } from "zod";
 import { IS_CLOUD } from "../constants";
+import { syncRegistryAuthToConsul } from "../setup/registry-auth";
 
 export type Registry = typeof registry.$inferSelect;
 
@@ -31,7 +32,7 @@ export const createRegistry = async (
 	input: z.infer<typeof apiCreateRegistry>,
 	organizationId: string,
 ) => {
-	return await db.transaction(async (tx) => {
+	const created = await db.transaction(async (tx) => {
 		const newRegistry = await tx
 			.insert(registry)
 			.values({
@@ -67,6 +68,10 @@ export const createRegistry = async (
 
 		return newRegistry;
 	});
+	// Publish the merged registry auth to Consul KV → consul-template renders it
+	// to /root/.docker/config.json on every node (private multi-node pulls).
+	await syncRegistryAuthToConsul().catch(() => {});
+	return created;
 };
 
 export const removeRegistry = async (registryId: string) => {
@@ -88,6 +93,7 @@ export const removeRegistry = async (registryId: string) => {
 			await execAsync(`docker logout ${shEscape(response.registryUrl)}`);
 		}
 
+		await syncRegistryAuthToConsul().catch(() => {});
 		return response;
 	} catch (error) {
 		throw new TRPCError({
@@ -135,6 +141,7 @@ export const updateRegistry = async (
 			await execAsync(loginCommand);
 		}
 
+		await syncRegistryAuthToConsul().catch(() => {});
 		return response;
 	} catch (error) {
 		const message =
