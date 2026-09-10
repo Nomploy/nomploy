@@ -1,7 +1,7 @@
 import { findServerById, updateServerById } from "@nomploy/server";
 import { db } from "@nomploy/server/db";
 import {
-	apiUpdateClusterAutoscaler,
+	apiUpsertAutoscalingGroup,
 	clusterAutoscaler,
 	clusterAutoscalerEvents,
 	networkPolicies,
@@ -40,7 +40,7 @@ import {
 } from "@nomploy/server/utils/process/execAsync";
 import { TRPCError } from "@trpc/server";
 import { observable } from "@trpc/server/observable";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { createTRPCRouter, protectedProcedure, withPermission } from "../trpc";
 
@@ -1126,7 +1126,13 @@ export const nomadRouter = createTRPCRouter({
 	// config as the autoscaler) and auto-join it as a worker or server. Streams
 	// progress; rolls back the VM on failure.
 	provisionAndJoin: withPermission("server", "create")
-		.input(z.object({ role: z.enum(["server", "worker"]).default("worker") }))
+		.input(
+			z.object({
+				role: z.enum(["server", "worker"]).default("worker"),
+				// Which autoscaling group (node pool) to add the worker into.
+				groupId: z.string().optional(),
+			}),
+		)
 		.subscription(({ input, ctx }) => {
 			const org = ctx.session?.activeOrganizationId;
 			return observable<string>((emit) => {
@@ -1138,7 +1144,12 @@ export const nomadRouter = createTRPCRouter({
 							emit.complete();
 							return;
 						}
-						await provisionAndJoinNode(org, input.role, (l) => emit.next(l));
+						await provisionAndJoinNode(
+							org,
+							input.role,
+							(l) => emit.next(l),
+							input.groupId,
+						);
 						emit.complete();
 					} catch (err: unknown) {
 						emit.next(
@@ -1435,73 +1446,193 @@ export const nomadRouter = createTRPCRouter({
 
 	// ── Phase C: cluster autoscaling ────────────────────────────────────────
 	// Config for the org (token never returned — only whether one is set).
-	getAutoscalerConfig: protectedProcedure.query(async ({ ctx }) => {
+	// ── Autoscaling groups (Nomad node pools) ─────────────────────────────────
+	// Each group is its own worker pool with its own launch template + scaling
+	// policy. The built-in "default" pool is the default group (migrated from the
+	// old single config). Tokens are masked on read.
+	listAutoscalingGroups: protectedProcedure.query(async ({ ctx }) => {
 		const org = ctx.session?.activeOrganizationId;
 		if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
-		const cfg = await db.query.clusterAutoscaler.findFirst({
+		const groups = await db.query.clusterAutoscaler.findMany({
 			where: eq(clusterAutoscaler.organizationId, org),
+			orderBy: [desc(clusterAutoscaler.isDefault), asc(clusterAutoscaler.name)],
 		});
-		if (!cfg) return null;
-		const { token, ...rest } = cfg;
-		return { ...rest, hasToken: !!token };
+		return groups.map(({ token, ...rest }) => ({ ...rest, hasToken: !!token }));
 	}),
 
-	updateAutoscalerConfig: protectedProcedure
-		.input(apiUpdateClusterAutoscaler)
+	// Create (no groupId) or update (groupId) a group. Ensures the Nomad node pool
+	// exists so jobs can target it and nodes can join it.
+	upsertAutoscalingGroup: protectedProcedure
+		.input(apiUpsertAutoscalingGroup)
 		.mutation(async ({ input, ctx }) => {
 			const org = ctx.session?.activeOrganizationId;
 			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
-			// Only overwrite the token when a non-empty one is provided.
-			const { token, ...rest } = input;
+			const { groupId, token, poolName, name, ...rest } = input;
 			const setToken = token && token.length > 0 ? { token } : {};
-			const existing = await db.query.clusterAutoscaler.findFirst({
-				where: eq(clusterAutoscaler.organizationId, org),
-				columns: { autoscalerId: true },
-			});
-			if (existing) {
+
+			// poolName is the Nomad node pool — unique within the org.
+			if (poolName) {
+				const clash = await db.query.clusterAutoscaler.findFirst({
+					where: and(
+						eq(clusterAutoscaler.organizationId, org),
+						eq(clusterAutoscaler.poolName, poolName),
+						groupId ? ne(clusterAutoscaler.autoscalerId, groupId) : undefined,
+					),
+					columns: { autoscalerId: true },
+				});
+				if (clash)
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: `Node pool "${poolName}" is already used by another group.`,
+					});
+			}
+
+			let effectivePool = poolName;
+			if (groupId) {
+				const existing = await db.query.clusterAutoscaler.findFirst({
+					where: and(
+						eq(clusterAutoscaler.autoscalerId, groupId),
+						eq(clusterAutoscaler.organizationId, org),
+					),
+				});
+				if (!existing)
+					throw new TRPCError({
+						code: "NOT_FOUND",
+						message: "Group not found",
+					});
+				// The default group's pool name is fixed to "default".
+				const poolUpdate = poolName && !existing.isDefault ? { poolName } : {};
 				await db
 					.update(clusterAutoscaler)
-					.set({ ...rest, ...setToken })
-					.where(eq(clusterAutoscaler.organizationId, org));
+					.set({
+						...rest,
+						...(name ? { name } : {}),
+						...poolUpdate,
+						...setToken,
+					})
+					.where(eq(clusterAutoscaler.autoscalerId, groupId));
+				effectivePool = existing.isDefault
+					? "default"
+					: (poolName ?? existing.poolName);
 			} else {
-				await db
-					.insert(clusterAutoscaler)
-					.values({ organizationId: org, ...rest, ...setToken });
+				if (!name || !poolName)
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "A new group needs a name and a pool name.",
+					});
+				await db.insert(clusterAutoscaler).values({
+					organizationId: org,
+					name,
+					poolName,
+					...rest,
+					...setToken,
+				});
+				effectivePool = poolName;
+			}
+
+			// Create the Nomad node pool (Nomad also auto-creates it when a node joins,
+			// but do it eagerly so it appears + jobs can target it immediately).
+			if (effectivePool && effectivePool !== "default") {
+				try {
+					const cfg = await resolveNomad(ctx, undefined);
+					await nomadClient(cfg).request(
+						`/node/pool/${encodeURIComponent(effectivePool)}`,
+						{ method: "POST", body: JSON.stringify({ Name: effectivePool }) },
+					);
+				} catch {}
 			}
 			return { success: true };
 		}),
 
-	// Current cluster pressure + the autoscaled nodes we manage (for the UI).
+	deleteAutoscalingGroup: protectedProcedure
+		.input(z.object({ groupId: z.string() }))
+		.mutation(async ({ input, ctx }) => {
+			const org = ctx.session?.activeOrganizationId;
+			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+			const group = await db.query.clusterAutoscaler.findFirst({
+				where: and(
+					eq(clusterAutoscaler.autoscalerId, input.groupId),
+					eq(clusterAutoscaler.organizationId, org),
+				),
+			});
+			if (!group)
+				throw new TRPCError({ code: "NOT_FOUND", message: "Group not found" });
+			if (group.isDefault)
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "The default group can't be deleted.",
+				});
+			// Refuse while the pool still has nodes — scale/remove them first.
+			const nodes = await db.query.server.findMany({
+				where: and(
+					eq(serverTable.organizationId, org),
+					eq(serverTable.nodePool, group.poolName),
+				),
+				columns: { serverId: true },
+			});
+			if (nodes.length > 0)
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: `Pool "${group.poolName}" still has ${nodes.length} node(s). Remove them first.`,
+				});
+			await db
+				.delete(clusterAutoscaler)
+				.where(eq(clusterAutoscaler.autoscalerId, input.groupId));
+			if (group.poolName !== "default") {
+				try {
+					const cfg = await resolveNomad(ctx, undefined);
+					await nomadClient(cfg).request(
+						`/node/pool/${encodeURIComponent(group.poolName)}`,
+						{ method: "DELETE" },
+					);
+				} catch {}
+			}
+			return { success: true };
+		}),
+
+	// Per-group cluster pressure + the nodes in each group's pool (for the UI).
 	getAutoscalerStatus: protectedProcedure.query(async ({ ctx }) => {
 		const org = ctx.session?.activeOrganizationId;
 		if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
-		const cfg = await db.query.clusterAutoscaler.findFirst({
+		const groups = await db.query.clusterAutoscaler.findMany({
 			where: eq(clusterAutoscaler.organizationId, org),
+			orderBy: [desc(clusterAutoscaler.isDefault), asc(clusterAutoscaler.name)],
 		});
-		const nodes = await db.query.server.findMany({
-			where: and(
-				eq(serverTable.organizationId, org),
-				eq(serverTable.autoscaled, true),
-			),
-			columns: {
-				serverId: true,
-				name: true,
-				ipAddress: true,
-				wgIp: true,
-				clusterRole: true,
-			},
-		});
-		let decision: Awaited<ReturnType<typeof evaluateCluster>> | null = null;
-		if (cfg) {
-			try {
-				decision = await evaluateCluster(cfg);
-			} catch {}
-		}
-		return { enabled: !!cfg?.enabled, decision, nodes };
+		return Promise.all(
+			groups.map(async (g) => {
+				let decision: Awaited<ReturnType<typeof evaluateCluster>> | null = null;
+				try {
+					decision = await evaluateCluster(g);
+				} catch {}
+				const nodes = await db.query.server.findMany({
+					where: and(
+						eq(serverTable.organizationId, org),
+						eq(serverTable.nodePool, g.poolName),
+					),
+					columns: {
+						serverId: true,
+						name: true,
+						ipAddress: true,
+						wgIp: true,
+						clusterRole: true,
+						autoscaled: true,
+					},
+				});
+				return {
+					groupId: g.autoscalerId,
+					name: g.name,
+					poolName: g.poolName,
+					isDefault: g.isDefault,
+					enabled: g.enabled,
+					decision,
+					nodes,
+				};
+			}),
+		);
 	}),
 
-	// Manual reconcile trigger. Runs in the background (a scale-up can take
-	// minutes); returns the current decision immediately.
+	// Manual reconcile trigger (all groups). Runs in the background (a scale-up can
+	// take minutes); returns immediately.
 	reconcileAutoscalerNow: protectedProcedure.mutation(async ({ ctx }) => {
 		const org = ctx.session?.activeOrganizationId;
 		if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
@@ -1511,44 +1642,82 @@ export const nomadRouter = createTRPCRouter({
 		return { started: true };
 	}),
 
-	// Autoscaler activity feed (most recent first) — like a cloud ASG's history.
-	getAutoscalerEvents: protectedProcedure.query(async ({ ctx }) => {
-		const org = ctx.session?.activeOrganizationId;
-		if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
-		return db.query.clusterAutoscalerEvents.findMany({
-			where: eq(clusterAutoscalerEvents.organizationId, org),
-			orderBy: [desc(clusterAutoscalerEvents.createdAt)],
-			limit: 50,
-		});
-	}),
+	// Autoscaler activity feed (most recent first), optionally scoped to a group.
+	getAutoscalerEvents: protectedProcedure
+		.input(z.object({ groupId: z.string().optional() }).optional())
+		.query(async ({ ctx, input }) => {
+			const org = ctx.session?.activeOrganizationId;
+			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+			return db.query.clusterAutoscalerEvents.findMany({
+				where: and(
+					eq(clusterAutoscalerEvents.organizationId, org),
+					input?.groupId
+						? eq(clusterAutoscalerEvents.groupId, input.groupId)
+						: undefined,
+				),
+				orderBy: [desc(clusterAutoscalerEvents.createdAt)],
+				limit: 50,
+			});
+		}),
 
-	// List the cloud's locations / private networks / server types so the UI can
-	// offer dropdowns instead of free-text. Uses the saved token.
-	listProviderOptions: protectedProcedure.mutation(async ({ ctx }) => {
-		const org = ctx.session?.activeOrganizationId;
-		if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
-		const cfg = await db.query.clusterAutoscaler.findFirst({
-			where: eq(clusterAutoscaler.organizationId, org),
-		});
-		if (!cfg?.token)
-			throw new TRPCError({
-				code: "BAD_REQUEST",
-				message: "Save a provider API token first.",
-			});
-		try {
-			const provisioner = getProvisioner({
-				provider: cfg.provider,
-				token: cfg.token,
-				serverTypes: [],
-				location: cfg.location,
-				image: cfg.image,
-			});
-			return await provisioner.listOptions();
-		} catch (e) {
-			throw new TRPCError({
-				code: "BAD_REQUEST",
-				message: e instanceof Error ? e.message : "Failed to list options",
-			});
-		}
-	}),
+	// List the cloud's locations / private networks / server types for the config
+	// dropdowns. Uses the token being entered (input.token) or a saved group token.
+	listProviderOptions: protectedProcedure
+		.input(
+			z
+				.object({
+					groupId: z.string().optional(),
+					token: z.string().optional(),
+					provider: z.string().optional(),
+					location: z.string().optional(),
+					image: z.string().optional(),
+				})
+				.optional(),
+		)
+		.mutation(async ({ ctx, input }) => {
+			const org = ctx.session?.activeOrganizationId;
+			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+			let token = input?.token;
+			let provider = input?.provider || "hetzner";
+			let location = input?.location || "nbg1";
+			let image = input?.image || "ubuntu-24.04";
+			if (!token) {
+				const g = input?.groupId
+					? await db.query.clusterAutoscaler.findFirst({
+							where: and(
+								eq(clusterAutoscaler.autoscalerId, input.groupId),
+								eq(clusterAutoscaler.organizationId, org),
+							),
+						})
+					: await db.query.clusterAutoscaler.findFirst({
+							where: eq(clusterAutoscaler.organizationId, org),
+						});
+				if (g?.token) {
+					token = g.token;
+					provider = g.provider;
+					location = g.location;
+					image = g.image;
+				}
+			}
+			if (!token)
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Save or enter a provider API token first.",
+				});
+			try {
+				const provisioner = getProvisioner({
+					provider,
+					token,
+					serverTypes: [],
+					location,
+					image,
+				});
+				return await provisioner.listOptions();
+			} catch (e) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: e instanceof Error ? e.message : "Failed to list options",
+				});
+			}
+		}),
 });

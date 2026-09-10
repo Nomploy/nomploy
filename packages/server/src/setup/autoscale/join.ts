@@ -28,6 +28,7 @@ type Log = (s: string) => void;
 export const joinWorkerNode = async (
 	serverId: string,
 	onLog: Log = () => {},
+	nodePool?: string,
 ): Promise<{ wgIp: string; publicKey: string }> => {
 	const server = await findServerById(serverId);
 	const cluster = readCluster();
@@ -50,6 +51,7 @@ export const joinWorkerNode = async (
 			endpoint: s.endpoint,
 		})),
 		aclTokens: readClusterAclTokens(),
+		nodePool,
 	});
 
 	let pubkey = "";
@@ -74,6 +76,7 @@ export const joinWorkerNode = async (
 		clusterRole: "worker",
 		wgIp,
 		wgPublicKey: pubkey,
+		nodePool: nodePool || "default",
 	});
 	return { wgIp, publicKey: pubkey };
 };

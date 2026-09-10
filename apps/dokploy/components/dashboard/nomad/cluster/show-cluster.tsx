@@ -138,7 +138,13 @@ export const ShowCluster = () => {
 		refetchOnWindowFocus: false,
 		refetchInterval: 20000,
 	});
-	const { data: autoscaler } = api.nomad.getAutoscalerConfig.useQuery();
+	const { data: autoscalingGroups } =
+		api.nomad.listAutoscalingGroups.useQuery();
+	// One-click provisioning uses the first group with a token + SSH key
+	// (typically the default group).
+	const provisionGroup = autoscalingGroups?.find(
+		(g) => g.hasToken && g.sshKeyId,
+	);
 	const { data: dnsHealth, refetch: refetchDns } =
 		api.nomad.getClusterDnsHealth.useQuery(undefined, {
 			refetchOnWindowFocus: false,
@@ -153,15 +159,15 @@ export const ShowCluster = () => {
 
 	// One-click cloud provisioning is available only once a provider token + SSH
 	// key are configured (in the Autoscaling tab).
-	const canProvision = !!autoscaler?.hasToken && !!autoscaler?.sshKeyId;
-	const provider = autoscaler?.provider ?? "hetzner";
+	const canProvision = !!provisionGroup;
+	const provider = provisionGroup?.provider ?? "hetzner";
 
 	const [provisionRole, setProvisionRole] = useState<ClusterRole>("worker");
 	const [isProvisioning, setIsProvisioning] = useState(false);
 	const [provisionLogs, setProvisionLogs] = useState("");
 
 	api.nomad.provisionAndJoin.useSubscription(
-		{ role: provisionRole },
+		{ role: provisionRole, groupId: provisionGroup?.groupId },
 		{
 			enabled: isProvisioning,
 			onData(log) {

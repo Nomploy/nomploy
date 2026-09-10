@@ -1,4 +1,4 @@
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "../../db";
 import {
@@ -18,10 +18,11 @@ const recordEvent = (
 	type: "scale_up" | "scale_down" | "error" | "info",
 	message: string,
 	detail?: string,
+	groupId?: string,
 ) =>
 	db
 		.insert(clusterAutoscalerEvents)
-		.values({ organizationId, type, message, detail })
+		.values({ organizationId, groupId, type, message, detail })
 		.catch(() => {});
 
 /** Split the CSV server-type list into an ordered fallback array. */
@@ -69,14 +70,20 @@ export const evaluateCluster = async (cfg: {
 	memScaleUpThreshold: number;
 	memScaleDownThreshold: number;
 	organizationId: string;
+	/** Node pool this group scales — capacity, pressure + nodes are scoped to it. */
+	poolName?: string;
 }): Promise<Decision> => {
-	// Client nodes that can currently receive work.
-	const nodes = (await nomad("/nodes")) as {
+	const pool = cfg.poolName || "default";
+	// Client nodes IN THIS POOL that can currently receive work.
+	const allNodes = (await nomad("/nodes")) as {
 		ID: string;
 		Status: string;
 		SchedulingEligibility: string;
+		NodePool?: string;
 	}[];
-	const ready = nodes.filter(
+	const inPool = allNodes.filter((n) => (n.NodePool || "default") === pool);
+	const poolNodeIds = new Set(inPool.map((n) => n.ID));
+	const ready = inPool.filter(
 		(n) => n.Status === "ready" && n.SchedulingEligibility === "eligible",
 	);
 
@@ -96,6 +103,7 @@ export const evaluateCluster = async (cfg: {
 	}
 
 	const allocs = (await nomad("/allocations?resources=true")) as {
+		NodeID?: string;
 		ClientStatus: string;
 		AllocatedResources?: {
 			Tasks?: Record<
@@ -108,6 +116,8 @@ export const evaluateCluster = async (cfg: {
 	let memUsed = 0;
 	for (const a of allocs) {
 		if (a.ClientStatus !== "running") continue;
+		// Only allocations running on this pool's nodes.
+		if (!a.NodeID || !poolNodeIds.has(a.NodeID)) continue;
 		for (const t of Object.values(a.AllocatedResources?.Tasks || {})) {
 			cpuUsed += t?.Cpu?.CpuShares || 0;
 			memUsed += t?.Memory?.MemoryMB || 0;
@@ -116,20 +126,26 @@ export const evaluateCluster = async (cfg: {
 	const cpuReserved = Math.round(cpuTotal > 0 ? (cpuUsed / cpuTotal) * 100 : 0);
 	const memReserved = Math.round(memTotal > 0 ? (memUsed / memTotal) * 100 : 0);
 
-	// Blocked evaluations = allocations that could not be placed (needs capacity).
+	// Blocked evaluations (allocs that couldn't be placed) TARGETING THIS POOL.
 	let blockedEvals = 0;
 	try {
-		const evals = (await nomad("/evaluations")) as { Status: string }[];
-		blockedEvals = evals.filter((e) => e.Status === "blocked").length;
+		const evals = (await nomad("/evaluations")) as {
+			Status: string;
+			NodePool?: string;
+		}[];
+		blockedEvals = evals.filter(
+			(e) => e.Status === "blocked" && (e.NodePool || "default") === pool,
+		).length;
 	} catch {}
 
-	// Worker pool the autoscaler reasons about. minNodes/maxNodes bound the TOTAL
-	// worker count — autoscaler-provisioned AND manually-added (one-click) nodes —
-	// so the numbers match what you see in the UI. Auto nodes still joining
-	// (clusterRole=null) are counted too, so a slow join never provisions dups.
+	// Worker nodes in THIS pool. minNodes/maxNodes bound the TOTAL worker count for
+	// the pool — autoscaler-provisioned AND manually-added — so the numbers match
+	// the UI. Auto nodes still joining (clusterRole=null) are counted too, so a slow
+	// join never provisions dups.
 	const workers = await db.query.server.findMany({
 		where: and(
 			eq(serverTable.organizationId, cfg.organizationId),
+			eq(serverTable.nodePool, pool),
 			or(
 				eq(serverTable.clusterRole, "worker"),
 				and(eq(serverTable.autoscaled, true), isNull(serverTable.clusterRole)),
@@ -209,24 +225,50 @@ const waitForSsh = async (serverId: string, onLog: Log) => {
 	return false;
 };
 
+type GroupRow = typeof clusterAutoscaler.$inferSelect;
+
 /**
- * One reconcile tick for an org: evaluate pressure, then (respecting cooldown)
- * provision+join a worker or drain+remove+destroy an idle one. Idempotent and
- * safe to call on an interval. Returns a short status string.
+ * One reconcile tick for an ORG: reconcile each of its enabled autoscaling groups
+ * (node pools) independently. Failure-isolated per group.
  */
 export const reconcileAutoscaler = async (
 	organizationId: string,
 	onLog: Log = () => {},
 ): Promise<string> => {
-	const cfg = await db.query.clusterAutoscaler.findFirst({
-		where: eq(clusterAutoscaler.organizationId, organizationId),
+	const groups = await db.query.clusterAutoscaler.findMany({
+		where: and(
+			eq(clusterAutoscaler.organizationId, organizationId),
+			eq(clusterAutoscaler.enabled, true),
+		),
 	});
-	if (!cfg || !cfg.enabled) return "disabled";
+	if (groups.length === 0) return "disabled";
+	const results: string[] = [];
+	for (const g of groups) {
+		try {
+			results.push(`${g.name}: ${await reconcileGroup(g, onLog)}`);
+		} catch (e) {
+			results.push(`${g.name}: error ${e instanceof Error ? e.message : e}`);
+		}
+	}
+	return results.join(" | ");
+};
 
+/**
+ * Reconcile ONE autoscaling group (node pool): evaluate its pool pressure, then
+ * (respecting cooldown) provision+join a worker into the pool or
+ * drain+remove+destroy an idle one. Only ever touches this group's pool + its own
+ * (autoscaled) nodes.
+ */
+const reconcileGroup = async (
+	cfg: GroupRow,
+	onLog: Log = () => {},
+): Promise<string> => {
 	const decision = await evaluateCluster(cfg);
 	onLog(
-		`autoscaler: cpu=${decision.cpuReserved}% mem=${decision.memReserved}% blocked=${decision.blockedEvals} nodes=${decision.workerCount} → ${decision.action} (${decision.reason})\n`,
+		`autoscaler[${cfg.poolName}]: cpu=${decision.cpuReserved}% mem=${decision.memReserved}% blocked=${decision.blockedEvals} nodes=${decision.workerCount} → ${decision.action} (${decision.reason})\n`,
 	);
+	const organizationId = cfg.organizationId;
+	const groupId = cfg.autoscalerId;
 	if (decision.action === "none") return `none: ${decision.reason}`;
 
 	// Cooldown guard.
@@ -266,8 +308,9 @@ export const reconcileAutoscaler = async (
 		await recordEvent(
 			organizationId,
 			"scale_up",
-			`Provisioning ${name}`,
+			`Provisioning ${name} in pool ${cfg.poolName}`,
 			decision.reason,
+			groupId,
 		);
 		let node: Awaited<ReturnType<typeof provisioner.createNode>>;
 		try {
@@ -281,6 +324,7 @@ export const reconcileAutoscaler = async (
 				"error",
 				`Provision failed for ${name}`,
 				e instanceof Error ? e.message : String(e),
+				groupId,
 			);
 			throw e;
 		}
@@ -309,6 +353,7 @@ export const reconcileAutoscaler = async (
 					createdAt: new Date().toISOString(),
 					autoscaled: true,
 					providerNodeId: node.providerId,
+					nodePool: cfg.poolName,
 				})
 				.returning();
 		} catch (e) {
@@ -334,7 +379,7 @@ export const reconcileAutoscaler = async (
 			throw new Error("New node never became SSH-reachable; rolled back");
 		}
 		try {
-			await joinWorkerNode(row.serverId, onLog);
+			await joinWorkerNode(row.serverId, onLog, cfg.poolName);
 		} catch (e) {
 			onLog(
 				`❌ join failed: ${e instanceof Error ? e.message : String(e)} — rolling back\n`,
@@ -344,6 +389,7 @@ export const reconcileAutoscaler = async (
 				"error",
 				`Join failed for ${name} — rolled back`,
 				e instanceof Error ? e.message : String(e),
+				groupId,
 			);
 			await rollback();
 			throw e;
@@ -352,16 +398,19 @@ export const reconcileAutoscaler = async (
 		await recordEvent(
 			organizationId,
 			"scale_up",
-			`Added worker ${name} (${ip})`,
+			`Added worker ${name} (${ip}) to pool ${cfg.poolName}`,
 			decision.reason,
+			groupId,
 		);
 		return `scaled up: +${name}`;
 	}
 
-	// action === "down": pick an autoscaled worker with the fewest running allocs.
+	// action === "down": pick an autoscaled worker IN THIS POOL with the fewest
+	// running allocs (never a manual/pinned node).
 	const workers = await db.query.server.findMany({
 		where: and(
 			eq(serverTable.organizationId, organizationId),
+			eq(serverTable.nodePool, cfg.poolName),
 			eq(serverTable.autoscaled, true),
 			eq(serverTable.clusterRole, "worker"),
 		),
@@ -391,8 +440,9 @@ export const reconcileAutoscaler = async (
 	await recordEvent(
 		organizationId,
 		"scale_down",
-		`Removing worker ${victim.name}`,
+		`Removing worker ${victim.name} from pool ${cfg.poolName}`,
 		decision.reason,
+		groupId,
 	);
 	await removeWorkerNode(victim.serverId, onLog);
 	if (victim.providerNodeId) {
@@ -418,6 +468,7 @@ export const reconcileAutoscaler = async (
 		"scale_down",
 		`Removed worker ${victim.name}`,
 		decision.reason,
+		groupId,
 	);
 	return `scaled down: -${victim.name}`;
 };
@@ -433,10 +484,20 @@ export const provisionAndJoinNode = async (
 	organizationId: string,
 	role: "worker" | "server",
 	onLog: Log = () => {},
+	groupId?: string,
 ): Promise<string> => {
-	const cfg = await db.query.clusterAutoscaler.findFirst({
-		where: eq(clusterAutoscaler.organizationId, organizationId),
-	});
+	// Use the chosen group's launch template (or the default/first group's).
+	const cfg = groupId
+		? await db.query.clusterAutoscaler.findFirst({
+				where: and(
+					eq(clusterAutoscaler.autoscalerId, groupId),
+					eq(clusterAutoscaler.organizationId, organizationId),
+				),
+			})
+		: await db.query.clusterAutoscaler.findFirst({
+				where: eq(clusterAutoscaler.organizationId, organizationId),
+				orderBy: [desc(clusterAutoscaler.isDefault)],
+			});
 	if (!cfg?.token)
 		throw new Error(
 			"No cloud provider token configured — set one in the Autoscaling tab first.",
@@ -489,6 +550,9 @@ export const provisionAndJoinNode = async (
 				// kept so removal can also destroy the VM.
 				autoscaled: false,
 				providerNodeId: node.providerId,
+				// Workers join the group's pool (so it counts toward that group's total);
+				// servers stay in the default pool.
+				nodePool: role === "worker" ? cfg.poolName : "default",
 			})
 			.returning();
 	} catch (e) {
@@ -511,7 +575,7 @@ export const provisionAndJoinNode = async (
 	}
 	try {
 		if (role === "server") await joinServerNode(row.serverId, onLog);
-		else await joinWorkerNode(row.serverId, onLog);
+		else await joinWorkerNode(row.serverId, onLog, cfg.poolName);
 	} catch (e) {
 		onLog(
 			`❌ join failed: ${e instanceof Error ? e.message : String(e)} — rolling back\n`,
@@ -524,6 +588,7 @@ export const provisionAndJoinNode = async (
 		"scale_up",
 		`Added ${role} ${name} (${ip}) via ${cfg.provider}`,
 		"manual add",
+		cfg.autoscalerId,
 	);
 	onLog("PROVISION_DONE");
 	return `added ${role}: ${name}`;
@@ -544,10 +609,13 @@ export const startAutoscalerLoop = (intervalSeconds = 60): NodeJS.Timeout => {
 				where: eq(clusterAutoscaler.enabled, true),
 				columns: { organizationId: true },
 			});
-			for (const c of configs) {
-				await reconcileAutoscaler(c.organizationId, (l) =>
-					console.log(`[autoscaler:${c.organizationId}] ${l.trimEnd()}`),
-				).catch((e) => console.error(`[autoscaler:${c.organizationId}]`, e));
+			// One reconcile per ORG (it iterates that org's groups internally) — dedupe
+			// so multiple enabled groups in an org don't trigger duplicate passes.
+			const orgs = [...new Set(configs.map((c) => c.organizationId))];
+			for (const org of orgs) {
+				await reconcileAutoscaler(org, (l) =>
+					console.log(`[autoscaler:${org}] ${l.trimEnd()}`),
+				).catch((e) => console.error(`[autoscaler:${org}]`, e));
 			}
 		} catch (e) {
 			console.error("[autoscaler] loop error", e);
