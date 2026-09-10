@@ -365,11 +365,11 @@ export const ShowAutoscaler = () => {
 
 					<div className="grid grid-cols-3 gap-4">
 						<div className="space-y-2">
-							<Label>Min nodes</Label>
+							<Label>Min worker nodes</Label>
 							{num("minNodes", { min: 0 })}
 						</div>
 						<div className="space-y-2">
-							<Label>Max nodes</Label>
+							<Label>Max worker nodes</Label>
 							{num("maxNodes", { min: 0 })}
 						</div>
 						<div className="space-y-2">
@@ -377,6 +377,13 @@ export const ShowAutoscaler = () => {
 							{num("cooldownSeconds", { min: 0 })}
 						</div>
 					</div>
+					<p className="text-xs text-muted-foreground">
+						Min/Max bound the <strong>total</strong> worker nodes — both
+						autoscaler-provisioned and manually added. Manually-added
+						(one-click) nodes are pinned: they count toward the minimum but the
+						autoscaler never removes them; it only adds/removes its own nodes to
+						keep the total in range.
+					</p>
 					<div className="space-y-2">
 						<Label>Scaling policies</Label>
 						<p className="text-muted-foreground text-xs">
@@ -462,8 +469,8 @@ export const ShowAutoscaler = () => {
 									{d.blockedEvals} blocked evals
 								</Badge>
 								<Badge variant="secondary">
-									{d.autoscaledCount} autoscaled node
-									{d.autoscaledCount === 1 ? "" : "s"}
+									{d.workerCount} worker node
+									{d.workerCount === 1 ? "" : "s"}
 								</Badge>
 								<Badge
 									variant={d.action === "none" ? "outline" : "default"}
