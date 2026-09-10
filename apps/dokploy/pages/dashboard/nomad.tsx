@@ -11,6 +11,7 @@ import { ShowNomadLogs } from "@/components/dashboard/nomad/logs/show-nomad-logs
 import { ShowNetworkPolicies } from "@/components/dashboard/nomad/network/show-network-policies";
 import { ShowNodeTopology } from "@/components/dashboard/nomad/nodes/show-node-topology";
 import { ShowNomadNodes } from "@/components/dashboard/nomad/nodes/show-nomad-nodes";
+import { ShowScheduler } from "@/components/dashboard/nomad/nodes/show-scheduler";
 import { NomadOverview } from "@/components/dashboard/nomad/overview";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
 import {
@@ -79,6 +80,7 @@ const NomadDashboard = () => {
 					<ShowNomadJobs serverId={serverId} />
 				</TabsContent>
 				<TabsContent value="nodes" className="flex flex-col gap-4">
+					<ShowScheduler serverId={serverId} />
 					<ShowNodeTopology serverId={serverId} />
 					<ShowNomadNodes serverId={serverId} />
 				</TabsContent>

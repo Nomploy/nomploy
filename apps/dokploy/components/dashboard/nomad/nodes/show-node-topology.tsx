@@ -91,7 +91,12 @@ export const ShowNodeTopology = ({ serverId }: { serverId?: string }) => {
 						const memP = pct(node.memory.allocated, node.memory.total);
 						const sizeP = Math.round(((node.cpu.total || 0) / maxCpu) * 100);
 						const ready = node.Status === "ready";
-						const role = node.isControlPlane ? "Control plane" : "Worker";
+						const role =
+							node.role === "control-plane"
+								? "Control plane"
+								: node.role === "server"
+									? "Server"
+									: "Worker";
 						return (
 							<div
 								key={node.ID}
@@ -125,6 +130,11 @@ export const ShowNodeTopology = ({ serverId }: { serverId?: string }) => {
 								{/* Size + relative capacity bar */}
 								<div className="flex items-center gap-3 text-xs text-muted-foreground">
 									<Badge variant="outline">{role}</Badge>
+									{node.nodePool && node.nodePool !== "default" && (
+										<Badge variant="secondary" className="font-mono">
+											{node.nodePool}
+										</Badge>
+									)}
 									<span className="flex items-center gap-1">
 										<Cpu className="h-3 w-3" /> {ghz(node.cpu.total)} GHz
 									</span>

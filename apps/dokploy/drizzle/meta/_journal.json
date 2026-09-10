@@ -1282,6 +1282,13 @@
       "when": 1789044351598,
       "tag": "0182_careless_demogoblin",
       "breakpoints": true
+    },
+    {
+      "idx": 183,
+      "version": "7",
+      "when": 1789046394893,
+      "tag": "0183_parallel_onslaught",
+      "breakpoints": true
     }
   ]
 }
