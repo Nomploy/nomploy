@@ -28,6 +28,10 @@ const PANEL_ENV_KEYS = [
 	"BETTER_AUTH_SECRET",
 	"NOMAD_ADDRESS",
 	"CONSUL_ADDRESS",
+	// Nomad/Consul ACL tokens (empty until ACLs are enabled). Must be carried on
+	// self-update or a Reload would drop them and lock the panel out of the APIs.
+	"NOMAD_TOKEN",
+	"CONSUL_TOKEN",
 	// Single source of truth for the panel's own image repo, so a self-update can
 	// re-tag it (see resolvePanelImage). Passed through by install.sh.
 	"NOMPLOY_IMAGE",
