@@ -52,9 +52,13 @@ export const buildDockerConfigJson = (
 export const syncRegistryAuthToConsul = async (): Promise<void> => {
 	const regs = await db.query.registry.findMany();
 	const config = buildDockerConfigJson(regs);
+	// Under Consul ACLs, writing this KV needs a token (key:write). Empty when ACLs
+	// are off — harmless.
+	const consulToken = process.env.CONSUL_TOKEN || "";
 	const res = await fetch(consulKvUrl(REGISTRY_AUTH_KV), {
 		method: "PUT",
 		body: config,
+		headers: consulToken ? { "X-Consul-Token": consulToken } : {},
 	});
 	if (!res.ok)
 		throw new Error(`Consul KV write failed: ${res.status} ${res.statusText}`);

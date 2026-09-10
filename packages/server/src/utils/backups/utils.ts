@@ -140,7 +140,10 @@ export const getComposeContainerCommand = (
 	if (composeType === "nomad" || composeType === "nomad-pack") {
 		// The compose service is a Nomad task group: resolve its running alloc
 		// from the Nomad API, then match the container by the alloc-id label.
-		return `docker ps -q --filter "status=running" --filter "label=com.hashicorp.nomad.alloc_id=$(curl -s http://127.0.0.1:4646/v1/job/${appName}/allocations | python3 -c "import sys,json;a=json.load(sys.stdin);print(next((x['ID'] for x in a if x.get('TaskGroup')=='${serviceName}' and x.get('ClientStatus')=='running'),''))")" | head -n 1`;
+		const nomadAuth = process.env.NOMAD_TOKEN
+			? `-H "X-Nomad-Token: ${process.env.NOMAD_TOKEN}" `
+			: "";
+		return `docker ps -q --filter "status=running" --filter "label=com.hashicorp.nomad.alloc_id=$(curl -s ${nomadAuth}http://127.0.0.1:4646/v1/job/${appName}/allocations | python3 -c "import sys,json;a=json.load(sys.stdin);print(next((x['ID'] for x in a if x.get('TaskGroup')=='${serviceName}' and x.get('ClientStatus')=='running'),''))")" | head -n 1`;
 	}
 	return `docker ps -q --filter "status=running" --filter "label=com.docker.compose.project=${appName}" --filter "label=com.docker.compose.service=${serviceName}" | head -n 1`;
 };

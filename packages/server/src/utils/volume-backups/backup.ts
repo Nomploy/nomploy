@@ -22,7 +22,10 @@ const nomadScaleStopStart = (
 	fallbackCount: number,
 ) => {
 	const countVar = "VOLUME_BACKUP_SCALE_COUNT";
-	const capture = `${countVar}=$(curl -s http://127.0.0.1:4646/v1/job/${jobId}/scale 2>/dev/null | python3 -c "import sys,json;print(json.load(sys.stdin).get('TaskGroups',{}).get('${group}',{}).get('Desired',${fallbackCount}))" 2>/dev/null || echo ${fallbackCount})`;
+	const nomadAuth = process.env.NOMAD_TOKEN
+		? `-H "X-Nomad-Token: ${process.env.NOMAD_TOKEN}" `
+		: "";
+	const capture = `${countVar}=$(curl -s ${nomadAuth}http://127.0.0.1:4646/v1/job/${jobId}/scale 2>/dev/null | python3 -c "import sys,json;print(json.load(sys.stdin).get('TaskGroups',{}).get('${group}',{}).get('Desired',${fallbackCount}))" 2>/dev/null || echo ${fallbackCount})`;
 	return {
 		stop: `
 		${capture}
