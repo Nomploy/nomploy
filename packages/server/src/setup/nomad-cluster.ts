@@ -50,6 +50,22 @@ export interface ClusterWorkerJoinOptions {
 	servers?: MeshServerPeer[];
 	datacenter?: string;
 	cniVersion?: string;
+	/**
+	 * Consul/Nomad ACL tokens for a cluster with ACLs enabled. All cluster-wide
+	 * (node_prefix ""), so the hub's tokens work on every node. When omitted (a
+	 * pre-ACL cluster) the join scripts emit no acl blocks — backward compatible.
+	 */
+	aclTokens?: ClusterAclTokens;
+}
+
+/** Cluster-wide ACL tokens read from /etc/nomploy/secrets (see readClusterAclTokens). */
+export interface ClusterAclTokens {
+	/** Consul agent token (nomploy-agent: node:write/service:read) for anti-entropy. */
+	consulAgent: string;
+	/** Consul default token (nomploy-readonly) governing tokenless requests + DNS. */
+	consulDefault: string;
+	/** Nomad→Consul integration token (nomploy-nomad) to register alloc services. */
+	nomadConsul: string;
 }
 
 export interface ClusterServerJoinOptions {
@@ -68,7 +84,38 @@ export interface ClusterServerJoinOptions {
 	overlayCidr?: string;
 	datacenter?: string;
 	cniVersion?: string;
+	/** Cluster-wide ACL tokens (see ClusterWorkerJoinOptions.aclTokens). */
+	aclTokens?: ClusterAclTokens;
 }
+
+/**
+ * HCL for a Consul agent's acl block on a cluster with ACLs on. The tokens are
+ * set in-config (not via `consul acl set-agent-token`, which would itself need a
+ * management token the joining node doesn't have). Returns "" when tokens are
+ * absent (pre-ACL cluster) so the join stays backward compatible.
+ */
+const consulAclBlock = (t?: ClusterAclTokens): string =>
+	t
+		? `acl {
+  enabled                  = true
+  default_policy           = "deny"
+  down_policy              = "extend-cache"
+  enable_token_persistence = true
+  tokens {
+    agent   = "${t.consulAgent}"
+    default = "${t.consulDefault}"
+  }
+}
+`
+		: "";
+
+/** `acl { enabled = true }` for a Nomad agent, or "" when ACLs are off. */
+const nomadAclBlock = (t?: ClusterAclTokens): string =>
+	t ? "acl {\n  enabled = true\n}\n" : "";
+
+/** ` token = "..."` for a Nomad consul{} block, or "" when ACLs are off. */
+const nomadConsulTokenAttr = (t?: ClusterAclTokens): string =>
+	t ? ` token = "${t.nomadConsul}"` : "";
 
 /** Shared install steps (Docker + Consul + Nomad + CNI + WireGuard + docker auth). */
 const installPreamble = (cniVersion: string): string => `
@@ -185,7 +232,7 @@ datacenter  = "${datacenter}"
 server  = false
 encrypt = "${opts.gossipKey}"
 retry_join = [${consulRetryJoin}]
-# Connect mesh (Phase B): Envoy sidecars on this node reach the local agent's
+${consulAclBlock(opts.aclTokens)}# Connect mesh (Phase B): Envoy sidecars on this node reach the local agent's
 # xDS over gRPC (8502, bound to 127.0.0.1 via client_addr).
 connect { enabled = true }
 ports { grpc = 8502 }
@@ -211,7 +258,7 @@ client {
   # and cross-node routing fails behind a cloud firewall.
   network_interface = "wg0"
 }
-consul { address = "127.0.0.1:8500" }
+${nomadAclBlock(opts.aclTokens)}consul { address = "127.0.0.1:8500"${nomadConsulTokenAttr(opts.aclTokens)} }
 plugin "docker" {
   config {
     allow_privileged = true
@@ -271,7 +318,7 @@ server           = true
 bootstrap_expect = ${opts.bootstrapExpect}
 encrypt = "${opts.gossipKey}"
 retry_join = [${consulRetryJoin}]
-# Connect mesh (Phase B): enable service mesh + Envoy xDS gRPC on this server.
+${consulAclBlock(opts.aclTokens)}# Connect mesh (Phase B): enable service mesh + Envoy xDS gRPC on this server.
 connect { enabled = true }
 ports { grpc = 8502 }
 CONSUL
@@ -298,7 +345,7 @@ client {
   enabled = true
   network_interface = "wg0"
 }
-consul { address = "127.0.0.1:8500" }
+${nomadAclBlock(opts.aclTokens)}consul { address = "127.0.0.1:8500"${nomadConsulTokenAttr(opts.aclTokens)} }
 plugin "docker" {
   config {
     allow_privileged = true
