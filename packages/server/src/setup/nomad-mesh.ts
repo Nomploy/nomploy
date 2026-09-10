@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execAsync, execAsyncRemote } from "../utils/process/execAsync";
+import type { ClusterAclTokens } from "./nomad-cluster";
 
 /**
  * Cluster membership + WireGuard mesh orchestration for the multi-node,
@@ -64,6 +65,29 @@ export const readCluster = (): ClusterState | null => {
 
 export const writeCluster = (c: ClusterState): void => {
 	writeFileSync(CLUSTER_FILE, JSON.stringify(c, null, 2));
+};
+
+/** Directory install.sh writes ACL tokens to (bind-mounted into the panel). */
+export const SECRETS_DIR = "/etc/nomploy/secrets";
+
+/**
+ * Read the cluster-wide ACL tokens the installer minted (Consul agent + default
+ * + the Nomad→Consul integration token) so join scripts can configure a new
+ * node's agents under ACLs. Returns undefined when the cluster has no ACLs (the
+ * secret files are absent) — the join then emits no acl blocks, staying backward
+ * compatible with pre-ACL installs.
+ */
+export const readClusterAclTokens = (): ClusterAclTokens | undefined => {
+	const read = (f: string): string | undefined => {
+		const p = `${SECRETS_DIR}/${f}`;
+		if (!existsSync(p)) return undefined;
+		return readFileSync(p, "utf8").trim() || undefined;
+	};
+	const consulAgent = read("consul-agent.token");
+	const consulDefault = read("consul-readonly.token");
+	const nomadConsul = read("consul-nomad.token");
+	if (!consulAgent || !consulDefault || !nomadConsul) return undefined;
+	return { consulAgent, consulDefault, nomadConsul };
 };
 
 /** All Nomad/Consul servers including the implicit hub (hub first). */

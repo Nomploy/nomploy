@@ -29,6 +29,7 @@ import {
 	allocateWgIp,
 	allServers,
 	readCluster,
+	readClusterAclTokens,
 	removePeerEverywhere,
 	serverMeshMembers,
 	writeCluster,
@@ -751,6 +752,7 @@ export const nomadRouter = createTRPCRouter({
 									publicKey: p.publicKey,
 								})),
 								overlayCidr,
+								aclTokens: readClusterAclTokens(),
 							});
 							let pubkey = "";
 							await execAsyncRemote(input.serverId, script, (log) => {
@@ -815,6 +817,7 @@ export const nomadRouter = createTRPCRouter({
 								publicKey: s.publicKey,
 								endpoint: s.endpoint,
 							})),
+							aclTokens: readClusterAclTokens(),
 						});
 						let pubkey = "";
 						await execAsyncRemote(input.serverId, script, (log) => {

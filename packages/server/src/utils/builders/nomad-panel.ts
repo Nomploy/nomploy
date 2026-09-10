@@ -32,6 +32,9 @@ const PANEL_ENV_KEYS = [
 	// self-update or a Reload would drop them and lock the panel out of the APIs.
 	"NOMAD_TOKEN",
 	"CONSUL_TOKEN",
+	// Least-privilege token the panel re-launches the Nomad Autoscaler with
+	// (initializeNomadAutoscaler); carried so a self-update doesn't drop it.
+	"NOMAD_AUTOSCALER_TOKEN",
 	// Single source of truth for the panel's own image repo, so a self-update can
 	// re-tag it (see resolvePanelImage). Passed through by install.sh.
 	"NOMPLOY_IMAGE",

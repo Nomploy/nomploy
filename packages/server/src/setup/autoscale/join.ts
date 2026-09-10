@@ -10,6 +10,7 @@ import {
 	allocateWgIp,
 	allServers,
 	readCluster,
+	readClusterAclTokens,
 	removePeerEverywhere,
 	serverMeshMembers,
 	writeCluster,
@@ -48,6 +49,7 @@ export const joinWorkerNode = async (
 			publicKey: s.publicKey,
 			endpoint: s.endpoint,
 		})),
+		aclTokens: readClusterAclTokens(),
 	});
 
 	let pubkey = "";
@@ -110,6 +112,7 @@ export const joinServerNode = async (
 			publicKey: p.publicKey,
 		})),
 		overlayCidr,
+		aclTokens: readClusterAclTokens(),
 	});
 
 	let pubkey = "";

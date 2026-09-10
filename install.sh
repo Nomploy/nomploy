@@ -158,6 +158,16 @@ ui_config { enabled = true }
 # intentions. gRPC (8502) is Envoy's xDS channel to the local agent.
 connect { enabled = true }
 ports { grpc = 8502 }
+# ACLs on by default (secure-by-default). default_policy=deny means every request
+# needs a token; the ACL bootstrap block after Consul starts mints least-privilege
+# tokens for each consumer. Keep the policy rules in sync with the join scripts
+# (setup/nomad-cluster.ts) and setup/registry-auth.ts.
+acl {
+  enabled                  = true
+  default_policy           = "deny"
+  down_policy              = "extend-cache"
+  enable_token_persistence = true
+}
 CONSULHCL
 
 $SUDO tee /etc/nomad.d/nomad.hcl >/dev/null <<NOMADHCL
@@ -191,8 +201,16 @@ client {
   }
 }
 
+acl {
+  enabled = true
+}
+
 consul {
   address = "127.0.0.1:8500"
+  # Nomad→Consul integration token (nomploy-nomad policy: register services + read
+  # KV for template blocks). The placeholder is replaced by the ACL bootstrap block
+  # after Consul is up and before Nomad starts.
+  token = "__NOMAD_CONSUL_TOKEN__"
 }
 
 plugin "docker" {
@@ -296,8 +314,115 @@ $SUDO systemctl daemon-reload
 $SUDO systemctl enable consul nomad >/dev/null 2>&1 || true
 $SUDO systemctl restart --no-block consul
 wait_api Consul "http://127.0.0.1:8500/v1/status/leader"
+
+# ── ACL bootstrap (Consul) ──────────────────────────────────────────────────
+# Consul is up with default_policy=deny. Bootstrap the ACL system and mint one
+# least-privilege token per consumer, persisted under /etc/nomploy/secrets (0700).
+# The panel bind-mounts /etc/nomploy, so it reads these to authenticate to
+# Consul/Nomad AND to hand joining nodes their agent tokens. Idempotent: a rerun
+# reuses the stored tokens (bootstrap itself can run only once).
+SECRETS=/etc/nomploy/secrets
+$SUDO mkdir -p "$SECRETS"; $SUDO chmod 700 "$SECRETS"
+
+if [ ! -s "$SECRETS/consul-mgmt.token" ]; then
+  echo "==> Bootstrapping Consul ACLs"
+  i=0; BOOT=""
+  while [ "$i" -lt 30 ]; do
+    BOOT="$(consul acl bootstrap 2>/dev/null)" && [ -n "$BOOT" ] && break
+    i=$((i + 1)); sleep 2
+  done
+  echo "$BOOT" | awk '/SecretID/{print $2}' | $SUDO tee "$SECRETS/consul-mgmt.token" >/dev/null
+fi
+export CONSUL_HTTP_TOKEN="$($SUDO cat "$SECRETS/consul-mgmt.token")"
+
+mint_consul_policy() { # name  rules
+  consul acl policy read -name "$1" >/dev/null 2>&1 || \
+    consul acl policy create -name "$1" -rules "$2" >/dev/null 2>&1 || true
+}
+mint_consul_token() { # file  policy-name   (reuse if the file already exists)
+  if [ ! -s "$SECRETS/$1" ]; then
+    consul acl token create -policy-name "$2" 2>/dev/null \
+      | awk '/SecretID/{print $2}' | $SUDO tee "$SECRETS/$1" >/dev/null
+  fi
+  $SUDO cat "$SECRETS/$1"
+}
+
+# Policy rules mirror the live cluster exactly.
+mint_consul_policy nomploy-agent    'node_prefix "" { policy = "write" } service_prefix "" { policy = "read" } agent_prefix "" { policy = "write" } session_prefix "" { policy = "write" }'
+mint_consul_policy nomploy-readonly 'node_prefix "" { policy = "read" } service_prefix "" { policy = "read" }'
+mint_consul_policy nomploy-ct       'key_prefix "nomploy/docker-auth" { policy = "read" }'
+mint_consul_policy nomploy-nomad    'service_prefix "" { policy = "write" } key_prefix "" { policy = "read" } node_prefix "" { policy = "read" } agent_prefix "" { policy = "read" }'
+
+C_AGENT="$(mint_consul_token   consul-agent.token    nomploy-agent)"
+C_RO="$(mint_consul_token      consul-readonly.token nomploy-readonly)"
+C_CT="$(mint_consul_token      consul-ct.token       nomploy-ct)"
+C_NOMAD="$(mint_consul_token   consul-nomad.token    nomploy-nomad)"
+C_TRAEFIK="$(mint_consul_token consul-traefik.token  nomploy-readonly)"
+# Panel: management — it reads the catalog/KV, writes intentions + the registry KV,
+# and mints node tokens on join.
+C_PANEL="$(mint_consul_token   consul-panel.token    global-management)"
+
+# The agent's own token (anti-entropy/registration) + the DEFAULT token that
+# governs tokenless requests and DNS. Default is read-only, so DNS resolves but a
+# tokenless caller can neither write nor control agents.
+consul acl set-agent-token agent   "$C_AGENT" >/dev/null 2>&1 || true
+consul acl set-agent-token default "$C_RO"    >/dev/null 2>&1 || true
+
+# Give registry-auth consul-template its token so it can read the KV under deny.
+$SUDO tee /etc/consul-template.d/docker-auth.hcl >/dev/null <<CT
+consul { address = "127.0.0.1:8500" token = "$C_CT" }
+template {
+  source      = "/etc/consul-template.d/docker-auth.tpl"
+  destination = "/root/.docker/config.json"
+  perms       = "0600"
+}
+CT
+$SUDO systemctl restart nomploy-registry-auth.service 2>&1 || true
+
+# Inject the Nomad→Consul integration token before Nomad starts.
+$SUDO sed -i "s|__NOMAD_CONSUL_TOKEN__|$C_NOMAD|" /etc/nomad.d/nomad.hcl
+
 $SUDO systemctl restart --no-block nomad
 wait_api Nomad "http://127.0.0.1:4646/v1/agent/health"
+
+# ── ACL bootstrap (Nomad) ───────────────────────────────────────────────────
+if [ ! -s "$SECRETS/nomad-mgmt.token" ]; then
+  echo "==> Bootstrapping Nomad ACLs"
+  i=0; NBOOT=""
+  while [ "$i" -lt 30 ]; do
+    NBOOT="$(nomad acl bootstrap 2>/dev/null)" && [ -n "$NBOOT" ] && break
+    i=$((i + 1)); sleep 2
+  done
+  echo "$NBOOT" | awk '/Secret ID/{print $4}' | $SUDO tee "$SECRETS/nomad-mgmt.token" >/dev/null
+fi
+export NOMAD_TOKEN="$($SUDO cat "$SECRETS/nomad-mgmt.token")"
+
+# Panel token = management (deploy/scale/drain/exec/logs + mint node tokens on join).
+if [ ! -s "$SECRETS/nomad-panel.token" ]; then
+  nomad acl token create -type=management -name=nomploy-panel 2>/dev/null \
+    | awk '/Secret ID/{print $4}' | $SUDO tee "$SECRETS/nomad-panel.token" >/dev/null
+fi
+N_PANEL="$($SUDO cat "$SECRETS/nomad-panel.token")"
+
+# Autoscaler token = least-privilege (scale jobs + drain nodes for cluster scaling).
+if ! nomad acl policy info nomad-autoscaler >/dev/null 2>&1; then
+  $SUDO tee /tmp/nomploy-autoscaler.policy.hcl >/dev/null <<'ASP'
+namespace "*" {
+  policy       = "read"
+  capabilities = ["scale-job", "read-job", "list-jobs", "read-logs"]
+}
+node { policy = "write" }
+operator { policy = "read" }
+ASP
+  nomad acl policy apply -description "nomad-autoscaler least-priv" nomad-autoscaler /tmp/nomploy-autoscaler.policy.hcl >/dev/null 2>&1 || true
+  $SUDO rm -f /tmp/nomploy-autoscaler.policy.hcl
+fi
+if [ ! -s "$SECRETS/nomad-autoscaler.token" ]; then
+  nomad acl token create -name=nomad-autoscaler -policy=nomad-autoscaler 2>/dev/null \
+    | awk '/Secret ID/{print $4}' | $SUDO tee "$SECRETS/nomad-autoscaler.token" >/dev/null
+fi
+N_AS="$($SUDO cat "$SECRETS/nomad-autoscaler.token")"
+$SUDO chmod 600 "$SECRETS"/*.token 2>/dev/null || true
 
 # ── Cluster DNS (dnsmasq) ───────────────────────────────────────────────────
 # Nomad allocations point their DNS at the hub's WireGuard IP so they can resolve
@@ -377,6 +502,10 @@ certificatesResolvers:
         entryPoint: web
 TRAEFIKYML
 
+# Traefik reads the Consul catalog under ACLs — give its provider the read-only
+# token (service:read + node:read) so it can still discover routes.
+$SUDO sed -i "s|address: \"http://127.0.0.1:8500\"|address: \"http://127.0.0.1:8500\"\n      token: \"$C_TRAEFIK\"|" "$TRAEFIK_DIR/traefik.yml"
+
 if [ ! -f "$TRAEFIK_DIR/acme.json" ]; then
   $SUDO touch "$TRAEFIK_DIR/acme.json"
   $SUDO chmod 600 "$TRAEFIK_DIR/acme.json"
@@ -397,6 +526,7 @@ run_container nomploy-traefik \
 echo "==> Starting Nomad Autoscaler"
 run_container nomad-autoscaler \
   --network host \
+  -e NOMAD_TOKEN="$N_AS" \
   hashicorp/nomad-autoscaler:latest \
   agent -nomad-address=http://127.0.0.1:4646 -http-bind-address=127.0.0.1 -http-bind-port=8081
 
@@ -498,6 +628,13 @@ job "nomploy" {
         NOMAD_ADDRESS      = "http://127.0.0.1:4646"
         CONSUL_ADDRESS     = "http://127.0.0.1:8500"
         NOMPLOY_IMAGE      = "$NOMPLOY_IMAGE"
+        # ACL tokens (secure-by-default). CONSUL_TOKEN/NOMAD_TOKEN are management
+        # so the panel drives both APIs and mints node tokens on join;
+        # NOMAD_AUTOSCALER_TOKEN is the least-priv token the panel re-launches the
+        # autoscaler with. Carried across self-update by PANEL_ENV_KEYS.
+        CONSUL_TOKEN           = "$C_PANEL"
+        NOMAD_TOKEN            = "$N_PANEL"
+        NOMAD_AUTOSCALER_TOKEN = "$N_AS"
       }
 
       kill_timeout = "30s"
