@@ -134,6 +134,7 @@ export const generateApplicationNomadJob = (
 		application.environment?.project?.isolated
 			? { projectId: application.environment.projectId }
 			: undefined,
+		application.nodePool,
 	);
 
 /**

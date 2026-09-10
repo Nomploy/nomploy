@@ -10,6 +10,7 @@ import { api } from "@/utils/api";
 import { ShowNomadPackForm } from "../nomad-pack/show";
 import { ComposeActions } from "./actions";
 import { ShowProviderFormCompose } from "./generic/show";
+import { ShowComposeNodePool } from "./node-pool";
 
 interface Props {
 	composeId: string;
@@ -52,6 +53,9 @@ export const ShowGeneralCompose = ({ composeId }: Props) => {
 				<ShowNomadPackForm composeId={composeId} />
 			) : (
 				<ShowProviderFormCompose composeId={composeId} />
+			)}
+			{data?.composeType === "nomad" && (
+				<ShowComposeNodePool composeId={composeId} />
 			)}
 		</>
 	);

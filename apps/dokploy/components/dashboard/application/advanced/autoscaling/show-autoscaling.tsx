@@ -11,6 +11,13 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/utils/api";
 
@@ -25,6 +32,7 @@ interface Props {
  */
 export const ShowApplicationAutoscaling = ({ applicationId }: Props) => {
 	const { data, refetch } = api.application.one.useQuery({ applicationId });
+	const { data: groups } = api.nomad.listAutoscalingGroups.useQuery();
 	const update = api.application.update.useMutation();
 
 	const [enabled, setEnabled] = useState(false);
@@ -32,6 +40,7 @@ export const ShowApplicationAutoscaling = ({ applicationId }: Props) => {
 	const [max, setMax] = useState(3);
 	const [cpu, setCpu] = useState<string>("");
 	const [mem, setMem] = useState<string>("");
+	const [nodePool, setNodePool] = useState("default");
 
 	useEffect(() => {
 		if (!data) return;
@@ -46,6 +55,7 @@ export const ShowApplicationAutoscaling = ({ applicationId }: Props) => {
 				? String(data.autoscaleMemoryTarget)
 				: "",
 		);
+		setNodePool(data.nodePool || "default");
 	}, [data]);
 
 	const save = async () => {
@@ -65,6 +75,7 @@ export const ShowApplicationAutoscaling = ({ applicationId }: Props) => {
 				maxReplicas: max,
 				autoscaleCpuTarget: cpu ? Number(cpu) : null,
 				autoscaleMemoryTarget: mem ? Number(mem) : null,
+				nodePool: nodePool === "default" ? null : nodePool,
 			});
 			toast.success("Autoscaling saved — redeploy to apply");
 			await refetch();
@@ -137,6 +148,28 @@ export const ShowApplicationAutoscaling = ({ applicationId }: Props) => {
 					</div>
 				</CardContent>
 			)}
+			<CardContent className="space-y-1.5">
+				<Label>Node pool (autoscaling group)</Label>
+				<Select value={nodePool} onValueChange={setNodePool}>
+					<SelectTrigger className="sm:max-w-xs">
+						<SelectValue />
+					</SelectTrigger>
+					<SelectContent>
+						<SelectItem value="default">default</SelectItem>
+						{groups
+							?.filter((g) => !g.isDefault)
+							.map((g) => (
+								<SelectItem key={g.groupId} value={g.poolName}>
+									{g.name} (pool: {g.poolName})
+								</SelectItem>
+							))}
+					</SelectContent>
+				</Select>
+				<p className="text-muted-foreground text-xs">
+					Which autoscaling group's node pool this app runs in. Its own scaling
+					policy then reacts to this app's load. Redeploy to apply.
+				</p>
+			</CardContent>
 			<CardContent>
 				<Button type="button" onClick={save} disabled={update.isPending}>
 					{update.isPending ? (
