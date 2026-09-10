@@ -186,6 +186,13 @@ set -e
 	echo "Nomad Job Deployed: ✅"
 } || {
 	echo "Error: ❌ Nomad database deployment failed"
+	# Surface the container's own logs — the deployment error alone rarely shows
+	# WHY the task died (e.g. mongo:8 refusing to boot on a new kernel). Best-effort.
+	echo "----- recent logs from ${db.appName} -----"
+	nomad alloc logs -job -stderr -tail -n 40 "${db.appName}" 2>/dev/null \
+		|| nomad alloc logs -job -tail -n 40 "${db.appName}" 2>/dev/null \
+		|| echo "(no allocation logs available — the task may not have started)"
+	echo "-------------------------------------------"
 	exit 1
 }
 `;

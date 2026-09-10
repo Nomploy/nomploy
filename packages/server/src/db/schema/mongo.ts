@@ -33,7 +33,10 @@ export const mongo = pgTable("mongo", {
 	description: text("description"),
 	databaseUser: text("databaseUser").notNull(),
 	databasePassword: text("databasePassword").notNull(),
-	dockerImage: text("dockerImage").notNull().default("mongo:8"),
+	// mongo:8 hard-refuses to boot on Linux kernels >= 6.19 (SERVER-121912); mongo:7
+	// runs on both old and new kernels, so it's the safe default. Override per-service
+	// if your host kernel supports mongo:8.
+	dockerImage: text("dockerImage").notNull().default("mongo:7"),
 	command: text("command"),
 	args: text("args").array(),
 	env: text("env"),
@@ -87,7 +90,7 @@ const createSchema = createInsertSchema(mongo, {
 		message: DATABASE_PASSWORD_MESSAGE,
 	}),
 	databaseUser: z.string().min(1),
-	dockerImage: z.string().default("mongo:15"),
+	dockerImage: z.string().default("mongo:7"),
 	command: z.string().optional(),
 	args: z.array(z.string()).optional(),
 	env: z.string().optional(),

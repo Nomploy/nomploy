@@ -523,6 +523,13 @@ export const nomadRouter = createTRPCRouter({
 			const allocs: any[] = await client.get(
 				withNs("/allocations?resources=true", cfg.namespace),
 			);
+			// Distinguish HA servers (raft) from plain workers — both run as Nomad
+			// clients, so /v1/nodes lists them identically. cluster.json is the source
+			// of truth: allServers() = hub + HA servers, peers = workers.
+			const cluster = readCluster();
+			const serverWgIps = new Set(
+				(cluster ? allServers(cluster) : []).map((s) => s.wgIp),
+			);
 
 			return Promise.all(
 				nodes.map(async (node: any) => {
@@ -536,6 +543,12 @@ export const nomadRouter = createTRPCRouter({
 						memTotal = res.Memory?.MemoryMB || 0;
 						isControlPlane = detail.Meta?.nomploy_control_plane === "true";
 					} catch {}
+					// node.Address is the node's overlay (WireGuard) IP.
+					const role = isControlPlane
+						? "control-plane"
+						: serverWgIps.has(node.Address)
+							? "server"
+							: "worker";
 
 					let cpuAllocated = 0;
 					let memAllocated = 0;
@@ -578,6 +591,8 @@ export const nomadRouter = createTRPCRouter({
 						drain: !!node.Drain,
 						eligibility: node.SchedulingEligibility as string,
 						isControlPlane,
+						role,
+						nodePool: (node.NodePool as string) || "default",
 						cpu: { total: cpuTotal, allocated: cpuAllocated },
 						memory: { total: memTotal, allocated: memAllocated },
 						allocs: nodeAllocs,
@@ -1160,6 +1175,47 @@ export const nomadRouter = createTRPCRouter({
 					}
 				})();
 			});
+		}),
+
+	// Cluster-wide scheduler placement algorithm: "binpack" (default — pack allocs
+	// onto fewest nodes, best for autoscaling scale-down) or "spread" (distribute
+	// across nodes for resilience).
+	getSchedulerConfig: withPermission("server", "read")
+		.input(serverInput)
+		.query(async ({ input, ctx }) => {
+			const cfg = await resolveNomad(ctx, input.serverId);
+			const data: any = await nomadClient(cfg).get(
+				"/operator/scheduler/configuration",
+			);
+			const sc = data.SchedulerConfig ?? {};
+			return {
+				algorithm: (sc.SchedulerAlgorithm as string) ?? "binpack",
+				memoryOversubscription: !!sc.MemoryOversubscriptionEnabled,
+			};
+		}),
+
+	setSchedulerAlgorithm: withPermission("server", "create")
+		.input(serverInput.extend({ algorithm: z.enum(["binpack", "spread"]) }))
+		.mutation(async ({ input, ctx }) => {
+			const cfg = await resolveNomad(ctx, input.serverId);
+			const client = nomadClient(cfg);
+			// Read-modify-write so we preserve the other scheduler settings — most
+			// importantly MemoryOversubscriptionEnabled, which the panel relies on.
+			const cur: any = await client.get("/operator/scheduler/configuration");
+			const sc = {
+				...(cur.SchedulerConfig ?? {}),
+				SchedulerAlgorithm: input.algorithm,
+			};
+			const res = await client.request("/operator/scheduler/configuration", {
+				method: "POST",
+				body: JSON.stringify(sc),
+			});
+			if (!res.ok)
+				throw new TRPCError({
+					code: "INTERNAL_SERVER_ERROR",
+					message: `Nomad rejected the scheduler config: ${res.status}`,
+				});
+			return { success: true, algorithm: input.algorithm };
 		}),
 
 	// List cluster members (hub + servers + workers) with live Nomad status.

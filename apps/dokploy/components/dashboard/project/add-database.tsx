@@ -57,7 +57,9 @@ import { APP_NAME_MESSAGE, APP_NAME_REGEX } from "@/utils/schema";
 type DbType = z.infer<typeof mySchema>["type"];
 
 const dockerImageDefaultPlaceholder: Record<DbType, string> = {
-	mongo: "mongo:8",
+	// mongo:8 won't boot on Linux kernels >= 6.19 (SERVER-121912); mongo:7 works on
+	// both, so it's the safe default (override per-service if your kernel allows 8).
+	mongo: "mongo:7",
 	libsql: "ghcr.io/tursodatabase/libsql-server:v0.24.32",
 	mariadb: "mariadb:11",
 	mysql: "mysql:8",
