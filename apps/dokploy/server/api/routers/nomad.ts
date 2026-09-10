@@ -511,6 +511,81 @@ export const nomadRouter = createTRPCRouter({
 			);
 		}),
 
+	// Per-node infrastructure view: each node's size (CPU/mem capacity), role, and
+	// the list of allocations actually running on it — powers the Infrastructure
+	// topology graph ("what's running on which node").
+	getNodeTopology: withPermission("server", "read")
+		.input(serverInput)
+		.query(async ({ input, ctx }) => {
+			const cfg = await resolveNomad(ctx, input.serverId);
+			const client = nomadClient(cfg);
+			const nodes: any[] = await client.get("/nodes");
+			const allocs: any[] = await client.get(
+				withNs("/allocations?resources=true", cfg.namespace),
+			);
+
+			return Promise.all(
+				nodes.map(async (node: any) => {
+					let cpuTotal = 0;
+					let memTotal = 0;
+					let isControlPlane = false;
+					try {
+						const detail: any = await client.get(`/node/${node.ID}`);
+						const res = detail.NodeResources || {};
+						cpuTotal = res.Cpu?.CpuShares || 0;
+						memTotal = res.Memory?.MemoryMB || 0;
+						isControlPlane = detail.Meta?.nomploy_control_plane === "true";
+					} catch {}
+
+					let cpuAllocated = 0;
+					let memAllocated = 0;
+					const nodeAllocs: {
+						id: string;
+						jobId: string;
+						taskGroup: string;
+						name: string;
+						cpu: number;
+						memory: number;
+					}[] = [];
+					for (const alloc of allocs) {
+						if (alloc.NodeID !== node.ID) continue;
+						if (alloc.ClientStatus !== "running") continue;
+						let aCpu = 0;
+						let aMem = 0;
+						const tasks = alloc.AllocatedResources?.Tasks || {};
+						for (const task of Object.values(tasks) as any[]) {
+							aCpu += task?.Cpu?.CpuShares || 0;
+							aMem += task?.Memory?.MemoryMB || 0;
+						}
+						cpuAllocated += aCpu;
+						memAllocated += aMem;
+						nodeAllocs.push({
+							id: alloc.ID as string,
+							jobId: alloc.JobID as string,
+							taskGroup: alloc.TaskGroup as string,
+							name: alloc.Name as string,
+							cpu: aCpu,
+							memory: aMem,
+						});
+					}
+					nodeAllocs.sort((a, b) => a.jobId.localeCompare(b.jobId));
+
+					return {
+						ID: node.ID as string,
+						Name: node.Name as string,
+						Status: node.Status as string,
+						Datacenter: node.Datacenter as string,
+						drain: !!node.Drain,
+						eligibility: node.SchedulingEligibility as string,
+						isControlPlane,
+						cpu: { total: cpuTotal, allocated: cpuAllocated },
+						memory: { total: memTotal, allocated: memAllocated },
+						allocs: nodeAllocs,
+					};
+				}),
+			);
+		}),
+
 	getClusterResources: withPermission("server", "read")
 		.input(serverInput)
 		.query(async ({ input, ctx }) => {

@@ -9,6 +9,7 @@ import { ShowConsul } from "@/components/dashboard/nomad/consul/show-consul";
 import { ShowNomadJobs } from "@/components/dashboard/nomad/jobs/show-nomad-jobs";
 import { ShowNomadLogs } from "@/components/dashboard/nomad/logs/show-nomad-logs";
 import { ShowNetworkPolicies } from "@/components/dashboard/nomad/network/show-network-policies";
+import { ShowNodeTopology } from "@/components/dashboard/nomad/nodes/show-node-topology";
 import { ShowNomadNodes } from "@/components/dashboard/nomad/nodes/show-nomad-nodes";
 import { NomadOverview } from "@/components/dashboard/nomad/overview";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
@@ -77,7 +78,8 @@ const NomadDashboard = () => {
 				<TabsContent value="jobs">
 					<ShowNomadJobs serverId={serverId} />
 				</TabsContent>
-				<TabsContent value="nodes">
+				<TabsContent value="nodes" className="flex flex-col gap-4">
+					<ShowNodeTopology serverId={serverId} />
 					<ShowNomadNodes serverId={serverId} />
 				</TabsContent>
 				<TabsContent value="consul">
