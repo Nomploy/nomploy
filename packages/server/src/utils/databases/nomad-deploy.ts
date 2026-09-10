@@ -23,15 +23,22 @@ const nodeNameFromSelf = (self: NomadAgentSelf): string => {
 export const resolveNomadNodeName = async (
 	serverId?: string | null,
 ): Promise<string> => {
+	// Under Nomad ACLs, /v1/agent/self needs a token or Nomad returns
+	// "Permission denied" (which then breaks JSON.parse). Pass the panel's token
+	// (empty when ACLs are off — harmless). The token is cluster-wide.
+	const token = process.env.NOMAD_TOKEN || "";
 	if (serverId) {
+		const authHeader = token ? `-H "X-Nomad-Token: ${token}" ` : "";
 		const { stdout } = await execAsyncRemote(
 			serverId,
-			"curl -s http://127.0.0.1:4646/v1/agent/self",
+			`curl -s ${authHeader}http://127.0.0.1:4646/v1/agent/self`,
 		);
 		return nodeNameFromSelf(JSON.parse(stdout));
 	}
 	const addr = process.env.NOMAD_ADDRESS || "http://127.0.0.1:4646";
-	const res = await fetch(`${addr}/v1/agent/self`);
+	const res = await fetch(`${addr}/v1/agent/self`, {
+		headers: token ? { "X-Nomad-Token": token } : {},
+	});
 	return nodeNameFromSelf((await res.json()) as NomadAgentSelf);
 };
 

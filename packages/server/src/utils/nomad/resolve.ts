@@ -20,17 +20,21 @@ export const getJobAllocations = async (
 	appName: string,
 	serverId?: string | null,
 ): Promise<NomadAlloc[]> => {
+	// Nomad ACLs (when enabled) require a token; empty otherwise. Cluster-wide.
+	const token = process.env.NOMAD_TOKEN || "";
 	try {
 		if (serverId) {
+			const authHeader = token ? `-H "X-Nomad-Token: ${token}" ` : "";
 			const { stdout } = await execAsyncRemote(
 				serverId,
-				`curl -s http://127.0.0.1:4646/v1/job/${appName}/allocations`,
+				`curl -s ${authHeader}http://127.0.0.1:4646/v1/job/${appName}/allocations`,
 			);
 			return JSON.parse(stdout) as NomadAlloc[];
 		}
 		const addr = process.env.NOMAD_ADDRESS || "http://127.0.0.1:4646";
 		const res = await fetch(
 			`${addr}/v1/job/${encodeURIComponent(appName)}/allocations`,
+			{ headers: token ? { "X-Nomad-Token": token } : {} },
 		);
 		if (!res.ok) return [];
 		return (await res.json()) as NomadAlloc[];
