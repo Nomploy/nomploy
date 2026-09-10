@@ -7,7 +7,7 @@ page explains the moving parts so the rest of the docs make sense.
 
 | Component | Role |
 |---|---|
-| **Nomad** | Schedules and runs every workload as a *job* (the panel, your apps, databases, compose services, the built-in registry). |
+| **Nomad** | Schedules and runs every workload as a *job* (the panel, your apps, databases, compose services). |
 | **Consul** | Service discovery + health, and the source Traefik reads routes from (Consul Catalog). |
 | **Traefik** | Edge router. Services register in Consul with Traefik tags and are routed automatically, with Let's Encrypt TLS. |
 | **Postgres + Redis** | The panel's own state and queues. Single-node, on the control plane. |

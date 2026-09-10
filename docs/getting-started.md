@@ -72,5 +72,5 @@ high availability or more capacity, add more nodes from the **Cluster** tab — 
 
 - [Deploying](deploying.md) — compose, native HCL, and Nomad Pack.
 - [Autoscaling](autoscaling.md) — scale apps and services on CPU/memory.
-- [Built-in registry](registry.md) — push/pull images without an external registry.
+- [Container registry](registry.md) — register your own registry for build → push → pull across nodes.
 - [Cluster management](cluster.md) — high availability and capacity.
