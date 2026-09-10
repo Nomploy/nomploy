@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "../../db";
 import {
@@ -50,7 +50,8 @@ interface Decision {
 	/** Memory reserved as a % of cluster memory capacity. */
 	memReserved: number;
 	blockedEvals: number;
-	autoscaledCount: number;
+	/** Total worker nodes (autoscaler-managed + manually pinned). */
+	workerCount: number;
 }
 
 /**
@@ -122,36 +123,42 @@ export const evaluateCluster = async (cfg: {
 		blockedEvals = evals.filter((e) => e.Status === "blocked").length;
 	} catch {}
 
-	// Autoscaled nodes we currently manage. Count ALL of them (a VM that is
-	// provisioned but not yet joined still has a server row with clusterRole=null)
-	// so a slow join never causes us to provision duplicates on the next tick.
-	const autoscaled = await db.query.server.findMany({
+	// Worker pool the autoscaler reasons about. minNodes/maxNodes bound the TOTAL
+	// worker count — autoscaler-provisioned AND manually-added (one-click) nodes —
+	// so the numbers match what you see in the UI. Auto nodes still joining
+	// (clusterRole=null) are counted too, so a slow join never provisions dups.
+	const workers = await db.query.server.findMany({
 		where: and(
 			eq(serverTable.organizationId, cfg.organizationId),
-			eq(serverTable.autoscaled, true),
+			or(
+				eq(serverTable.clusterRole, "worker"),
+				and(eq(serverTable.autoscaled, true), isNull(serverTable.clusterRole)),
+			),
 		),
-		columns: { serverId: true, clusterRole: true },
+		columns: { autoscaled: true, clusterRole: true },
 	});
-	const autoscaledCount = autoscaled.length;
+	const workerCount = workers.length;
+	// Nodes the loop may actually remove on scale-down: its own (autoscaled) joined
+	// workers. Manual/one-click nodes (autoscaled=false) are a pinned floor — they
+	// count toward the total but are never reclaimed.
+	const autoRemovable = workers.filter(
+		(w) => w.autoscaled && w.clusterRole === "worker",
+	).length;
 
-	const base = { cpuReserved, memReserved, blockedEvals, autoscaledCount };
-	// Floor first: always keep at least minNodes autoscaled workers, even with no
-	// pressure. (Also caps runaway scale-up from a permanently-unplaceable alloc,
-	// since the pressure branch below still respects maxNodes.)
-	if (autoscaledCount < cfg.minNodes) {
+	const base = { cpuReserved, memReserved, blockedEvals, workerCount };
+	// Floor first: keep at least minNodes total workers. Manual nodes count toward
+	// the floor, so this only provisions an auto node when the total is short.
+	if (workerCount < cfg.minNodes) {
 		return {
 			action: "up",
-			reason: `below min nodes (${autoscaledCount} < ${cfg.minNodes})`,
+			reason: `below min nodes (${workerCount} < ${cfg.minNodes})`,
 			...base,
 		};
 	}
-	// Two independent reservation checks — scale up if EITHER binds.
+	// Two independent reservation checks — scale up if EITHER binds (respecting max).
 	const cpuHigh = cpuReserved >= cfg.scaleUpThreshold;
 	const memHigh = memReserved >= cfg.memScaleUpThreshold;
-	if (
-		(blockedEvals > 0 || cpuHigh || memHigh) &&
-		autoscaledCount < cfg.maxNodes
-	) {
+	if ((blockedEvals > 0 || cpuHigh || memHigh) && workerCount < cfg.maxNodes) {
 		const reasons: string[] = [];
 		if (blockedEvals > 0) reasons.push(`${blockedEvals} blocked eval(s)`);
 		if (cpuHigh) reasons.push(`cpu ${cpuReserved}% ≥ ${cfg.scaleUpThreshold}%`);
@@ -159,18 +166,26 @@ export const evaluateCluster = async (cfg: {
 			reasons.push(`mem ${memReserved}% ≥ ${cfg.memScaleUpThreshold}%`);
 		return { action: "up", reason: reasons.join(", "), ...base };
 	}
-	// Scale down only if BOTH resources are slack.
-	if (
+	// Scale down only if both resources are slack, we're above the floor, and there
+	// is an auto node to remove (never a pinned/manual one).
+	const slack =
 		cpuReserved <= cfg.scaleDownThreshold &&
 		memReserved <= cfg.memScaleDownThreshold &&
-		autoscaledCount > cfg.minNodes &&
-		blockedEvals === 0
-	) {
+		blockedEvals === 0;
+	if (slack && workerCount > cfg.minNodes && autoRemovable > 0) {
 		return {
 			action: "down",
 			reason: `cpu ${cpuReserved}% ≤ ${cfg.scaleDownThreshold}% & mem ${memReserved}% ≤ ${cfg.memScaleDownThreshold}%`,
 			...base,
 		};
+	}
+	// Above min + slack but the extras are all pinned/manual nodes we won't touch.
+	if (slack && workerCount > cfg.minNodes && autoRemovable === 0) {
+		return { action: "none", reason: "only pinned nodes above min", ...base };
+	}
+	// At or below the floor, or manual nodes exactly satisfy min.
+	if (workerCount <= cfg.minNodes) {
+		return { action: "none", reason: "at min-nodes floor", ...base };
 	}
 	return { action: "none", reason: "within thresholds", ...base };
 };
@@ -210,7 +225,7 @@ export const reconcileAutoscaler = async (
 
 	const decision = await evaluateCluster(cfg);
 	onLog(
-		`autoscaler: cpu=${decision.cpuReserved}% mem=${decision.memReserved}% blocked=${decision.blockedEvals} nodes=${decision.autoscaledCount} → ${decision.action} (${decision.reason})\n`,
+		`autoscaler: cpu=${decision.cpuReserved}% mem=${decision.memReserved}% blocked=${decision.blockedEvals} nodes=${decision.workerCount} → ${decision.action} (${decision.reason})\n`,
 	);
 	if (decision.action === "none") return `none: ${decision.reason}`;
 
