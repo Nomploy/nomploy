@@ -182,7 +182,13 @@ export const getBuildNomadCommand = async (
 		const segmentation = compose.environment?.project?.isolated
 			? { projectId: compose.environment.projectId }
 			: undefined;
-		jobSpec = generateNomadJobSpec(appName, services, domains, segmentation);
+		jobSpec = generateNomadJobSpec(
+			appName,
+			services,
+			domains,
+			segmentation,
+			compose.nodePool,
+		);
 	}
 	const encodedJobSpec = encodeBase64(jobSpec);
 
@@ -310,6 +316,7 @@ export const generateNomadJobSpec = (
 	services: NomadServiceSpec[],
 	domains: Domain[],
 	segmentation?: NomadSegmentation,
+	nodePool?: string | null,
 ): string => {
 	const taskGroups = services
 		.map((service) =>
@@ -317,10 +324,15 @@ export const generateNomadJobSpec = (
 		)
 		.join("\n\n");
 
+	// Target an autoscaling group's Nomad node pool when the service selects one;
+	// unset/"default" runs in the built-in default pool.
+	const nodePoolLine =
+		nodePool && nodePool !== "default" ? `  node_pool = "${nodePool}"` : "";
+
 	return `job "${appName}" {
   namespace = "default"
   type      = "service"
-
+${nodePoolLine}
   update {
     max_parallel     = 1
     health_check     = "checks"

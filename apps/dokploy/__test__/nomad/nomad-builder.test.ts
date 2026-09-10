@@ -178,4 +178,38 @@ services:
 		expect(hcl).toContain("cpu    = 2000");
 		expect(hcl).toContain("memory = 4096");
 	});
+
+	it("emits node_pool only when the compose targets an autoscaling group", async () => {
+		// No pool → the job runs in the default pool (no node_pool stanza).
+		const defCmd = await getBuildNomadCommand(compose);
+		const defHcl = Buffer.from(
+			defCmd.match(/echo "([A-Za-z0-9+/=]+)" \| base64 -d/)?.[1] ?? "",
+			"base64",
+		).toString("utf8");
+		expect(defHcl).not.toContain("node_pool");
+
+		// A group's pool → node_pool stanza at the job level.
+		const poolCmd = await getBuildNomadCommand({
+			...compose,
+			appName: "poolapp",
+			nodePool: "memory",
+		});
+		const poolHcl = Buffer.from(
+			poolCmd.match(/echo "([A-Za-z0-9+/=]+)" \| base64 -d/)?.[1] ?? "",
+			"base64",
+		).toString("utf8");
+		expect(poolHcl).toContain('node_pool = "memory"');
+
+		// "default" is the built-in pool — treated as no explicit targeting.
+		const explicitDefault = await getBuildNomadCommand({
+			...compose,
+			appName: "defpoolapp",
+			nodePool: "default",
+		});
+		const defPoolHcl = Buffer.from(
+			explicitDefault.match(/echo "([A-Za-z0-9+/=]+)" \| base64 -d/)?.[1] ?? "",
+			"base64",
+		).toString("utf8");
+		expect(defPoolHcl).not.toContain("node_pool");
+	});
 });

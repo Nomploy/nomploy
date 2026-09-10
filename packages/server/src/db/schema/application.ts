@@ -163,6 +163,9 @@ export const applications = pgTable("application", {
 	// isn't used. At least one should be set when autoscaling is enabled.
 	autoscaleCpuTarget: integer("autoscaleCpuTarget"),
 	autoscaleMemoryTarget: integer("autoscaleMemoryTarget"),
+	// Nomad node pool (autoscaling group) to run this app in. Null/"default" = the
+	// built-in default pool. Emitted as the job's `node_pool`.
+	nodePool: text("nodePool"),
 	applicationStatus: applicationStatus("applicationStatus")
 		.notNull()
 		.default("idle"),
