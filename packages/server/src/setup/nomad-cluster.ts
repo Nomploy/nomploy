@@ -18,6 +18,8 @@
  * the node connects as soon as the peers are added.
  */
 
+import { consulTemplateSetupScript } from "./registry-auth";
+
 /** A server this node must dial (full mesh / worker→server): needs an endpoint. */
 export interface MeshServerPeer {
 	wgIp: string;
@@ -119,6 +121,7 @@ fi
 # Docker auth config (docker driver needs this file to exist, even for public pulls)
 $SUDO mkdir -p /root/.docker
 [ -s /root/.docker/config.json ] || echo '{"auths":{}}' | $SUDO tee /root/.docker/config.json >/dev/null
+${consulTemplateSetupScript()}
 `;
 
 /** wg [Peer] block with an endpoint (a server we dial). */

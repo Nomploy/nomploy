@@ -233,6 +233,37 @@ CJSON
 $SUDO mkdir -p /root/.docker
 [ -s /root/.docker/config.json ] || echo '{"auths":{}}' | $SUDO tee /root/.docker/config.json >/dev/null
 
+# Registry auth via consul-template: render /root/.docker/config.json from Consul
+# KV (nomploy/docker-auth) so private-registry pulls work cluster-wide with no
+# credentials in job specs. Keep in sync with setup/registry-auth.ts.
+if ! command -v consul-template >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then $SUDO apt-get install -y consul-template 2>&1 || true;
+  elif command -v yum >/dev/null 2>&1; then $SUDO yum install -y consul-template 2>&1 || true; fi
+fi
+$SUDO mkdir -p /etc/consul-template.d
+printf '%s\n' '{{ keyOrDefault "nomploy/docker-auth" "{}" }}' | $SUDO tee /etc/consul-template.d/docker-auth.tpl >/dev/null
+$SUDO tee /etc/consul-template.d/docker-auth.hcl >/dev/null <<'CT'
+consul { address = "127.0.0.1:8500" }
+template {
+  source      = "/etc/consul-template.d/docker-auth.tpl"
+  destination = "/root/.docker/config.json"
+  perms       = "0600"
+}
+CT
+$SUDO tee /etc/systemd/system/nomploy-registry-auth.service >/dev/null <<'UNIT'
+[Unit]
+Description=nomploy registry auth (consul-template renders docker config)
+After=consul.service network-online.target
+[Service]
+ExecStart=/usr/bin/consul-template -config /etc/consul-template.d/docker-auth.hcl
+Restart=on-failure
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+UNIT
+$SUDO systemctl daemon-reload 2>/dev/null || true
+$SUDO systemctl enable --now nomploy-registry-auth.service 2>&1 || true
+
 # Start via --no-block and poll the HTTP APIs for readiness. The packaged units
 # are Type=notify; if the agent doesn't signal systemd, a blocking `restart`
 # would hang and (under set -e) abort the install even though the agent is up.
