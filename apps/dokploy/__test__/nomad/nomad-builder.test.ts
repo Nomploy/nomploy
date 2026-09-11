@@ -241,6 +241,10 @@ services:
 		expect(withSecrets).toContain("template {");
 		expect(withSecrets).toContain('nomadVar "nomad/jobs/secretapp"');
 		expect(withSecrets).toContain("env         = true");
-		expect(withSecrets).toContain("change_mode = \"restart\"");
+		expect(withSecrets).toContain('change_mode = "restart"');
+		// nomadVar returns the items map directly — range over `.`, not `.Items`
+		// (verified on-cluster: `.Items` fails to iterate). Guard the regression.
+		expect(withSecrets).toContain("range $k, $v := .");
+		expect(withSecrets).not.toContain(".Items");
 	});
 });

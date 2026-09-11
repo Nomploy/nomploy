@@ -687,6 +687,18 @@ export const nomadRouter = createTRPCRouter({
 				);
 				const usedBytes = stats?.ResourceUsage?.MemoryStats?.Usage || 0;
 				const usedMB = Math.round(usedBytes / 1048576);
+				// Some Nomad clients (e.g. cgroup-v2 hosts where the driver doesn't
+				// publish per-task stats) return a 200 with all-zero usage. A running
+				// container always uses some memory, so all-zero means "not collected"
+				// — report unavailable rather than draw misleading 0% bars.
+				if (usedMhz === 0 && usedMB === 0) {
+					return {
+						allocId: input.allocId,
+						ok: false,
+						cpu: { usedMhz: 0, reservedMhz: 0, percent: 0 },
+						memory: { usedMB: 0, reservedMB: 0, percent: 0 },
+					};
+				}
 				return {
 					allocId: input.allocId,
 					ok: true,

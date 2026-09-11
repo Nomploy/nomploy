@@ -472,7 +472,7 @@ const generateSecretsTemplate = (appName: string): string => {
         change_mode = "restart"
         data        = <<EOTPL
 {{- with nomadVar "nomad/jobs/${appName}" }}
-{{- range $k, $v := .Items }}
+{{- range $k, $v := . }}
 {{ $k }}={{ $v.Value }}
 {{- end }}
 {{- end }}
