@@ -651,6 +651,63 @@ export const nomadRouter = createTRPCRouter({
 			);
 		}),
 
+	// Live per-allocation usage: actual CPU (MHz) and memory (bytes) a running
+	// allocation is consuming right now, versus what it reserved. The real-time
+	// drill-down complement to getClusterMetrics (node-level) — answers "is this
+	// one app actually using what it asked for". Reserved comes from the alloc's
+	// AllocatedResources (summed across its tasks).
+	getAllocationMetrics: withPermission("server", "read")
+		.input(serverInput.extend({ allocId: z.string() }))
+		.query(async ({ input, ctx }) => {
+			const cfg = await resolveNomad(ctx, input.serverId);
+			const client = nomadClient(cfg);
+			try {
+				const [stats, alloc] = await Promise.all([
+					client.get(
+						`/client/allocation/${input.allocId}/stats`,
+					) as Promise<any>,
+					client.get(`/allocation/${input.allocId}`) as Promise<any>,
+				]);
+				// Reserved: sum CpuShares (MHz) + MemoryMB across the alloc's tasks.
+				const tasks = alloc?.AllocatedResources?.Tasks || {};
+				let reservedMhz = 0;
+				let reservedMB = 0;
+				for (const t of Object.values(tasks) as any[]) {
+					reservedMhz += t?.Cpu?.CpuShares || 0;
+					reservedMB += t?.Memory?.MemoryMB || 0;
+				}
+				const usedMhz = Math.round(
+					stats?.ResourceUsage?.CpuStats?.TotalTicks || 0,
+				);
+				const usedBytes = stats?.ResourceUsage?.MemoryStats?.Usage || 0;
+				const usedMB = Math.round(usedBytes / 1048576);
+				return {
+					allocId: input.allocId,
+					ok: true,
+					cpu: {
+						usedMhz,
+						reservedMhz,
+						percent: reservedMhz
+							? Math.round((usedMhz / reservedMhz) * 100)
+							: 0,
+					},
+					memory: {
+						usedMB,
+						reservedMB,
+						percent: reservedMB ? Math.round((usedMB / reservedMB) * 100) : 0,
+					},
+				};
+			} catch {
+				// Alloc not running, node unreachable, or stats not yet available.
+				return {
+					allocId: input.allocId,
+					ok: false,
+					cpu: { usedMhz: 0, reservedMhz: 0, percent: 0 },
+					memory: { usedMB: 0, reservedMB: 0, percent: 0 },
+				};
+			}
+		}),
+
 	getClusterResources: withPermission("server", "read")
 		.input(serverInput)
 		.query(async ({ input, ctx }) => {
@@ -1563,7 +1620,13 @@ export const nomadRouter = createTRPCRouter({
 			where: eq(clusterAutoscaler.organizationId, org),
 			orderBy: [desc(clusterAutoscaler.isDefault), asc(clusterAutoscaler.name)],
 		});
-		return groups.map(({ token, ...rest }) => ({ ...rest, hasToken: !!token }));
+		// Expose the PK as `groupId` (the public group identifier the UI + the
+		// other group endpoints use); never leak the provider token.
+		return groups.map(({ token, autoscalerId, ...rest }) => ({
+			...rest,
+			groupId: autoscalerId,
+			hasToken: !!token,
+		}));
 	}),
 
 	// Create (no groupId) or update (groupId) a group. Ensures the Nomad node pool

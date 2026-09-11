@@ -1,4 +1,10 @@
-import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
+import {
+	AlertTriangle,
+	Cpu,
+	Loader2,
+	MemoryStick,
+	RefreshCw,
+} from "lucide-react";
 import { useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +15,7 @@ import {
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Progress } from "@/components/ui/progress";
 import {
 	Select,
 	SelectContent,
@@ -115,7 +122,8 @@ const AllocationRow = ({
 
 				<CollapsibleContent>
 					{alloc.ClientStatus === "running" && (
-						<div className="mt-3 space-y-2">
+						<div className="mt-3 space-y-3">
+							<AllocMetrics allocId={alloc.ID} serverId={serverId} />
 							<div className="flex gap-2">
 								<Select
 									value={logType}
@@ -141,6 +149,51 @@ const AllocationRow = ({
 				</CollapsibleContent>
 			</div>
 		</Collapsible>
+	);
+};
+
+// Live per-allocation resource usage — actual CPU (MHz) / memory (MB) this
+// running alloc is consuming, versus its reservation. Polled every 5s.
+const AllocMetrics = ({
+	allocId,
+	serverId,
+}: {
+	allocId: string;
+	serverId?: string;
+}) => {
+	const { data: m } = api.nomad.getAllocationMetrics.useQuery(
+		{ allocId, serverId },
+		{ refetchInterval: 5000 },
+	);
+
+	if (!m?.ok) {
+		return (
+			<p className="text-xs text-muted-foreground italic">
+				live metrics unavailable
+			</p>
+		);
+	}
+
+	return (
+		<div className="space-y-1.5">
+			<div className="flex items-center gap-2">
+				<Cpu className="h-3 w-3 shrink-0 text-muted-foreground" />
+				<Progress value={Math.min(m.cpu.percent, 100)} className="h-2 flex-1" />
+				<span className="text-xs text-muted-foreground w-32 text-right tabular-nums">
+					{m.cpu.usedMhz}/{m.cpu.reservedMhz} MHz · {m.cpu.percent}%
+				</span>
+			</div>
+			<div className="flex items-center gap-2">
+				<MemoryStick className="h-3 w-3 shrink-0 text-muted-foreground" />
+				<Progress
+					value={Math.min(m.memory.percent, 100)}
+					className="h-2 flex-1"
+				/>
+				<span className="text-xs text-muted-foreground w-32 text-right tabular-nums">
+					{m.memory.usedMB}/{m.memory.reservedMB} MB · {m.memory.percent}%
+				</span>
+			</div>
+		</div>
 	);
 };
 
