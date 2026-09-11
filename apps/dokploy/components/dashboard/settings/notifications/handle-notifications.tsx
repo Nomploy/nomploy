@@ -59,6 +59,7 @@ const notificationBaseSchema = z.object({
 	dokployRestart: z.boolean().default(false),
 	dockerCleanup: z.boolean().default(false),
 	serverThreshold: z.boolean().default(false),
+	clusterAlert: z.boolean().default(false),
 });
 
 export const notificationSchema = z.discriminatedUnion("type", [
@@ -364,6 +365,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 					name: notification.name,
 					type: notification.notificationType,
 					serverThreshold: notification.serverThreshold,
+					clusterAlert: notification.clusterAlert,
 				});
 			} else if (notification.notificationType === "telegram") {
 				form.reset({
@@ -380,6 +382,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 					name: notification.name,
 					dockerCleanup: notification.dockerCleanup,
 					serverThreshold: notification.serverThreshold,
+					clusterAlert: notification.clusterAlert,
 				});
 			} else if (notification.notificationType === "discord") {
 				form.reset({
@@ -395,6 +398,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 					name: notification.name,
 					dockerCleanup: notification.dockerCleanup,
 					serverThreshold: notification.serverThreshold,
+					clusterAlert: notification.clusterAlert,
 				});
 			} else if (notification.notificationType === "email") {
 				form.reset({
@@ -414,6 +418,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 					name: notification.name,
 					dockerCleanup: notification.dockerCleanup,
 					serverThreshold: notification.serverThreshold,
+					clusterAlert: notification.clusterAlert,
 				});
 			} else if (notification.notificationType === "resend") {
 				form.reset({
@@ -430,6 +435,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 					name: notification.name,
 					dockerCleanup: notification.dockerCleanup,
 					serverThreshold: notification.serverThreshold,
+					clusterAlert: notification.clusterAlert,
 				});
 			} else if (notification.notificationType === "gotify") {
 				form.reset({
@@ -463,6 +469,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 					name: notification.name,
 					dockerCleanup: notification.dockerCleanup,
 					serverThreshold: notification.serverThreshold,
+					clusterAlert: notification.clusterAlert,
 				});
 			} else if (notification.notificationType === "mattermost") {
 				form.reset({
@@ -479,6 +486,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 					name: notification.name,
 					dockerCleanup: notification.dockerCleanup,
 					serverThreshold: notification.serverThreshold,
+					clusterAlert: notification.clusterAlert,
 				});
 			} else if (notification.notificationType === "lark") {
 				form.reset({
@@ -493,6 +501,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 					dockerCleanup: notification.dockerCleanup,
 					volumeBackup: notification.volumeBackup,
 					serverThreshold: notification.serverThreshold,
+					clusterAlert: notification.clusterAlert,
 				});
 			} else if (notification.notificationType === "teams") {
 				form.reset({
@@ -507,6 +516,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 					name: notification.name,
 					dockerCleanup: notification.dockerCleanup,
 					serverThreshold: notification.serverThreshold,
+					clusterAlert: notification.clusterAlert,
 				});
 			} else if (notification.notificationType === "custom") {
 				form.reset({
@@ -529,6 +539,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 					volumeBackup: notification.volumeBackup,
 					dockerCleanup: notification.dockerCleanup,
 					serverThreshold: notification.serverThreshold,
+					clusterAlert: notification.clusterAlert,
 				});
 			} else if (notification.notificationType === "pushover") {
 				form.reset({
@@ -547,6 +558,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 					name: notification.name,
 					dockerCleanup: notification.dockerCleanup,
 					serverThreshold: notification.serverThreshold,
+					clusterAlert: notification.clusterAlert,
 				});
 			}
 		} else {
@@ -579,6 +591,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 			volumeBackup,
 			dockerCleanup,
 			serverThreshold,
+			clusterAlert,
 		} = data;
 		let promise: Promise<unknown> | null = null;
 		if (data.type === "slack") {
@@ -596,6 +609,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 				slackId: notification?.slackId || "",
 				notificationId: notificationId || "",
 				serverThreshold: serverThreshold,
+				clusterAlert: clusterAlert,
 			});
 		} else if (data.type === "telegram") {
 			promise = telegramMutation.mutateAsync({
@@ -613,6 +627,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 				notificationId: notificationId || "",
 				telegramId: notification?.telegramId || "",
 				serverThreshold: serverThreshold,
+				clusterAlert: clusterAlert,
 			});
 		} else if (data.type === "discord") {
 			promise = discordMutation.mutateAsync({
@@ -629,6 +644,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 				notificationId: notificationId || "",
 				discordId: notification?.discordId || "",
 				serverThreshold: serverThreshold,
+				clusterAlert: clusterAlert,
 			});
 		} else if (data.type === "email") {
 			promise = emailMutation.mutateAsync({
@@ -649,6 +665,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 				notificationId: notificationId || "",
 				emailId: notification?.emailId || "",
 				serverThreshold: serverThreshold,
+				clusterAlert: clusterAlert,
 			});
 		} else if (data.type === "resend") {
 			promise = resendMutation.mutateAsync({
@@ -666,6 +683,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 				notificationId: notificationId || "",
 				resendId: notification?.resendId || "",
 				serverThreshold: serverThreshold,
+				clusterAlert: clusterAlert,
 			});
 		} else if (data.type === "gotify") {
 			promise = gotifyMutation.mutateAsync({
@@ -717,6 +735,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 				notificationId: notificationId || "",
 				mattermostId: notification?.mattermostId || "",
 				serverThreshold: serverThreshold,
+				clusterAlert: clusterAlert,
 			});
 		} else if (data.type === "lark") {
 			promise = larkMutation.mutateAsync({
@@ -732,6 +751,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 				notificationId: notificationId || "",
 				larkId: notification?.larkId || "",
 				serverThreshold: serverThreshold,
+				clusterAlert: clusterAlert,
 			});
 		} else if (data.type === "teams") {
 			promise = teamsMutation.mutateAsync({
@@ -747,6 +767,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 				notificationId: notificationId || "",
 				teamsId: notification?.teamsId || "",
 				serverThreshold: serverThreshold,
+				clusterAlert: clusterAlert,
 			});
 		} else if (data.type === "custom") {
 			// Convert headers array to object
@@ -773,6 +794,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 				name: data.name,
 				dockerCleanup: dockerCleanup,
 				serverThreshold: serverThreshold,
+				clusterAlert: clusterAlert,
 				notificationId: notificationId || "",
 				customId: notification?.customId || "",
 			});
@@ -796,6 +818,7 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 				name: data.name,
 				dockerCleanup: dockerCleanup,
 				serverThreshold: serverThreshold,
+				clusterAlert: clusterAlert,
 				notificationId: notificationId || "",
 				pushoverId: notification?.pushoverId || "",
 			});
@@ -1992,6 +2015,28 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 										)}
 									/>
 								)}
+
+								<FormField
+									control={form.control}
+									name="clusterAlert"
+									render={({ field }) => (
+										<FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm gap-2">
+											<div className="space-y-0.5">
+												<FormLabel>Cluster Alerts</FormLabel>
+												<FormDescription>
+													Trigger the action when the cluster autoscaler adds or
+													removes a node, or fails to provision one.
+												</FormDescription>
+											</div>
+											<FormControl>
+												<Switch
+													checked={field.value}
+													onCheckedChange={field.onChange}
+												/>
+											</FormControl>
+										</FormItem>
+									)}
+								/>
 							</div>
 						</div>
 					</form>
