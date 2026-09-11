@@ -166,6 +166,11 @@ export const applications = pgTable("application", {
 	// Nomad node pool (autoscaling group) to run this app in. Null/"default" = the
 	// built-in default pool. Emitted as the job's `node_pool`.
 	nodePool: text("nodePool"),
+	// Secrets are stored in a Nomad Variable at nomad/jobs/<appName> (never in the
+	// job HCL); the task reads them via its workload identity + a template block.
+	// This flag gates emitting that template — opt-in per app so a cluster without
+	// workload-identity variable access can't break every deploy at once.
+	nomadSecretsEnabled: boolean("nomadSecretsEnabled").notNull().default(false),
 	applicationStatus: applicationStatus("applicationStatus")
 		.notNull()
 		.default("idle"),

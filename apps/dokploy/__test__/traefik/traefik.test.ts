@@ -115,6 +115,8 @@ const baseApp: ApplicationNested = {
 	maxReplicas: 3,
 	autoscaleCpuTarget: null,
 	autoscaleMemoryTarget: null,
+	nodePool: null,
+	nomadSecretsEnabled: false,
 	repository: null,
 	security: [],
 	sourceType: "git",
