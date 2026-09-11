@@ -1,4 +1,8 @@
-import { getBuildNomadCommand } from "@nomploy/server/utils/builders/nomad";
+import {
+	generateNomadJobSpec,
+	getBuildNomadCommand,
+	type NomadServiceSpec,
+} from "@nomploy/server/utils/builders/nomad";
 import { describe, expect, it } from "vitest";
 
 // A realistic compose: a web service (ports, env with a ${VAR}, healthcheck,
@@ -211,5 +215,32 @@ services:
 			"base64",
 		).toString("utf8");
 		expect(defPoolHcl).not.toContain("node_pool");
+	});
+
+	it("emits the secrets template only when a service opts in", () => {
+		const base: NomadServiceSpec = {
+			name: "app",
+			image: "nginx:latest",
+			ports: [],
+			replicas: 1,
+			env: { FOO: "bar" },
+		};
+
+		// No secrets → no template block, no Nomad Variable reference.
+		const without = generateNomadJobSpec("secretapp", [base], []);
+		expect(without).not.toContain("template {");
+		expect(without).not.toContain("nomadVar");
+
+		// Opted in → a template reads the job's own variable and injects it as env.
+		// The secret VALUES are never inlined — only the reference to the variable.
+		const withSecrets = generateNomadJobSpec(
+			"secretapp",
+			[{ ...base, secrets: true }],
+			[],
+		);
+		expect(withSecrets).toContain("template {");
+		expect(withSecrets).toContain('nomadVar "nomad/jobs/secretapp"');
+		expect(withSecrets).toContain("env         = true");
+		expect(withSecrets).toContain("change_mode = \"restart\"");
 	});
 });

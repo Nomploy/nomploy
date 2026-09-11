@@ -44,6 +44,12 @@ export interface NomadServiceSpec {
 		cooldown?: string;
 		evaluationInterval?: string;
 	};
+	/**
+	 * Inject secrets from the job's Nomad Variable (nomad/jobs/<appName>) as env,
+	 * via a template block read by the task's workload identity. Opt-in: the value
+	 * never appears in the job HCL. See generateSecretsTemplate.
+	 */
+	secrets?: boolean;
 }
 
 // Allocation DNS servers: every server node (hub + HA servers) runs a dnsmasq on
@@ -353,6 +359,9 @@ const generateTaskGroup = (
 	segmentation?: NomadSegmentation,
 ): string => {
 	const envBlock = generateEnvBlock(service.env);
+	const secretsBlock = service.secrets
+		? `\n\n${generateSecretsTemplate(appName)}`
+		: "";
 	const consulServices = generateConsulServices(
 		appName,
 		service,
@@ -425,7 +434,7 @@ ${consulServices}
         image = "${service.image}"${portsConfig}${entrypointLine}
       }
 
-${envBlock}
+${envBlock}${secretsBlock}
 
 ${resourcesBlock}
     }
@@ -439,6 +448,35 @@ const generateEnvBlock = (env: Record<string, string>): string => {
 
 	return `      env {
 ${lines}
+      }`;
+};
+
+/**
+ * A template block that renders the job's secrets (stored in the Nomad Variable
+ * nomad/jobs/<appName>) into an env file and loads them as environment variables.
+ * The secret VALUES never appear in the job HCL — only this reference — so
+ * `nomad job inspect` / the panel DB never expose them. The task reads the
+ * variable through its automatic workload identity, which Nomad implicitly
+ * grants read access to variables under its own nomad/jobs/<jobID> path (even
+ * under an ACL deny-by-default policy). change_mode="restart" makes a secret
+ * change roll the task without a redeploy once this block is present.
+ *
+ * Uses consul-template syntax ({{ }}) which HCL does not interpolate; the only
+ * ${} here is the JS-side appName. Multi-line secret values aren't supported by
+ * env-file injection (each line is one KEY=VALUE).
+ */
+const generateSecretsTemplate = (appName: string): string => {
+	return `      template {
+        destination = "secrets/nomploy.env"
+        env         = true
+        change_mode = "restart"
+        data        = <<EOTPL
+{{- with nomadVar "nomad/jobs/${appName}" }}
+{{- range $k, $v := .Items }}
+{{ $k }}={{ $v.Value }}
+{{- end }}
+{{- end }}
+EOTPL
       }`;
 };
 

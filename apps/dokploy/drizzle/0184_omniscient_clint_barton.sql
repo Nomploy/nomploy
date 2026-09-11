@@ -1,0 +1,1 @@
+ALTER TABLE "application" ADD COLUMN "nomadSecretsEnabled" boolean DEFAULT false NOT NULL;

@@ -1289,6 +1289,13 @@
       "when": 1789046394893,
       "tag": "0183_parallel_onslaught",
       "breakpoints": true
+    },
+    {
+      "idx": 184,
+      "version": "7",
+      "when": 1789131587382,
+      "tag": "0184_omniscient_clint_barton",
+      "breakpoints": true
     }
   ]
 }

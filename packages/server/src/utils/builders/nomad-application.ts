@@ -114,6 +114,8 @@ export const applicationToNomadSpec = (
 		entrypoint: entrypoint.length > 0 ? entrypoint : undefined,
 		resources: cpu || memory ? { cpu, memory } : undefined,
 		scaling,
+		// Inject secrets from nomad/jobs/<appName> when the app opted in.
+		secrets: !!application.nomadSecretsEnabled,
 	};
 };
 

@@ -8,6 +8,11 @@ import {
 	projects,
 	server as serverTable,
 } from "@nomploy/server/db/schema";
+import {
+	findApplicationById,
+	updateApplication,
+} from "@nomploy/server/services/application";
+import { checkServicePermissionAndAccess } from "@nomploy/server/services/permission";
 import { getProvisioner } from "@nomploy/server/setup/autoscale";
 import {
 	evaluateCluster,
@@ -42,6 +47,7 @@ import { TRPCError } from "@trpc/server";
 import { observable } from "@trpc/server/observable";
 import { and, asc, desc, eq, ne } from "drizzle-orm";
 import { z } from "zod";
+import { audit } from "@/server/api/utils/audit";
 import { createTRPCRouter, protectedProcedure, withPermission } from "../trpc";
 
 // Control-plane-local Nomad (used when no serverId is given).
@@ -706,6 +712,104 @@ export const nomadRouter = createTRPCRouter({
 					memory: { usedMB: 0, reservedMB: 0, percent: 0 },
 				};
 			}
+		}),
+
+	// ── App secrets (Nomad Variables) ─────────────────────────────────────────
+	// Secrets live in the Nomad Variable nomad/jobs/<appName>, injected into the
+	// task as env via a template block (see generateSecretsTemplate). The values
+	// never touch the job HCL. First enable requires a redeploy to add the
+	// template; after that, updates roll the task automatically (change_mode).
+
+	getAppSecrets: protectedProcedure
+		.input(z.object({ applicationId: z.string() }))
+		.query(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.applicationId, {
+				envVars: ["read"],
+			});
+			const application = await findApplicationById(input.applicationId);
+			const cfg = await resolveNomad(ctx, application.serverId ?? undefined);
+			const res = await nomadClient(cfg).request(
+				withNs(`/var/nomad/jobs/${application.appName}`, cfg.namespace),
+			);
+			if (res.status === 404) {
+				return {
+					items: {} as Record<string, string>,
+					enabled: application.nomadSecretsEnabled,
+				};
+			}
+			if (!res.ok) {
+				throw new TRPCError({
+					code: "INTERNAL_SERVER_ERROR",
+					message: `Nomad variable read failed: ${res.status} ${res.statusText}`,
+				});
+			}
+			const v = (await res.json()) as { Items?: Record<string, string> };
+			return {
+				items: v.Items ?? {},
+				enabled: application.nomadSecretsEnabled,
+			};
+		}),
+
+	// Replace the whole secret set (like saveEnvironment). Empty = delete the
+	// variable and disable the template. Flips nomadSecretsEnabled so the builder
+	// knows whether to emit the secrets template on the next deploy.
+	setAppSecrets: protectedProcedure
+		.input(
+			z.object({
+				applicationId: z.string(),
+				items: z.record(z.string(), z.string()),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.applicationId, {
+				envVars: ["write"],
+			});
+			const application = await findApplicationById(input.applicationId);
+			const cfg = await resolveNomad(ctx, application.serverId ?? undefined);
+			const client = nomadClient(cfg);
+			const path = `/var/nomad/jobs/${application.appName}`;
+			const keys = Object.keys(input.items);
+
+			if (keys.length === 0) {
+				const del = await client.request(withNs(path, cfg.namespace), {
+					method: "DELETE",
+				});
+				if (!del.ok && del.status !== 404) {
+					throw new TRPCError({
+						code: "INTERNAL_SERVER_ERROR",
+						message: `Nomad variable delete failed: ${del.status} ${del.statusText}`,
+					});
+				}
+				await updateApplication(input.applicationId, {
+					nomadSecretsEnabled: false,
+				});
+			} else {
+				const put = await client.request(withNs(path, cfg.namespace), {
+					method: "PUT",
+					body: JSON.stringify({
+						Path: `nomad/jobs/${application.appName}`,
+						Items: input.items,
+					}),
+				});
+				if (!put.ok) {
+					const detail = await put.text().catch(() => "");
+					throw new TRPCError({
+						code: "INTERNAL_SERVER_ERROR",
+						message: `Nomad variable write failed: ${put.status} ${detail}`,
+					});
+				}
+				await updateApplication(input.applicationId, {
+					nomadSecretsEnabled: true,
+				});
+			}
+
+			await audit(ctx, {
+				action: "update",
+				resourceType: "application",
+				resourceId: application.applicationId,
+				resourceName: application.appName,
+			});
+			return { enabled: keys.length > 0, count: keys.length };
 		}),
 
 	getClusterResources: withPermission("server", "read")
