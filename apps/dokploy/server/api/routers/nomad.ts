@@ -601,6 +601,56 @@ export const nomadRouter = createTRPCRouter({
 			);
 		}),
 
+	// Live (actual) per-node resource usage from Nomad's client-stats API — the
+	// real-time complement to getNodeTopology's reservations. Poll on an interval.
+	getClusterMetrics: withPermission("server", "read")
+		.input(serverInput)
+		.query(async ({ input, ctx }) => {
+			const cfg = await resolveNomad(ctx, input.serverId);
+			const client = nomadClient(cfg);
+			const nodes: any[] = await client.get("/nodes");
+			const ready = nodes.filter((n: any) => n.Status === "ready");
+			return Promise.all(
+				ready.map(async (n: any) => {
+					try {
+						const s: any = await client.get(`/client/stats?node_id=${n.ID}`);
+						const cores: any[] = s.CPU || [];
+						const cpuPercent = cores.length
+							? Math.round(
+									cores.reduce(
+										(a: number, c: any) => a + (c.TotalPercent || 0),
+										0,
+									) / cores.length,
+								)
+							: 0;
+						const memTotal = s.Memory?.Total || 0;
+						const memUsed = s.Memory?.Used || 0;
+						return {
+							nodeId: n.ID as string,
+							name: n.Name as string,
+							ok: true,
+							cpuPercent,
+							memUsedMB: Math.round(memUsed / 1048576),
+							memTotalMB: Math.round(memTotal / 1048576),
+							memPercent: memTotal ? Math.round((memUsed / memTotal) * 100) : 0,
+						};
+					} catch {
+						// A node whose client API is unreachable (draining, down) — report
+						// it as unavailable rather than failing the whole query.
+						return {
+							nodeId: n.ID as string,
+							name: n.Name as string,
+							ok: false,
+							cpuPercent: 0,
+							memUsedMB: 0,
+							memTotalMB: 0,
+							memPercent: 0,
+						};
+					}
+				}),
+			);
+		}),
+
 	getClusterResources: withPermission("server", "read")
 		.input(serverInput)
 		.query(async ({ input, ctx }) => {

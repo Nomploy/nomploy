@@ -35,6 +35,12 @@ export const ShowNodeTopology = ({ serverId }: { serverId?: string }) => {
 		refetch,
 		isRefetching,
 	} = api.nomad.getNodeTopology.useQuery({ serverId });
+	// Live (actual) usage, polled — the real-time complement to reservations.
+	const { data: metrics } = api.nomad.getClusterMetrics.useQuery(
+		{ serverId },
+		{ refetchInterval: 5000 },
+	);
+	const liveByNode = new Map((metrics ?? []).map((m) => [m.nodeId, m]));
 
 	if (isLoading) {
 		return (
@@ -58,6 +64,16 @@ export const ShowNodeTopology = ({ serverId }: { serverId?: string }) => {
 	// Largest node's CPU capacity drives the relative "size" bar across the fleet.
 	const maxCpu = Math.max(1, ...(nodes ?? []).map((n) => n.cpu.total || 0));
 
+	// Cluster-wide live totals (from the polled metrics).
+	const liveNodes = (metrics ?? []).filter((m) => m.ok);
+	const avgCpu = liveNodes.length
+		? Math.round(
+				liveNodes.reduce((a, m) => a + m.cpuPercent, 0) / liveNodes.length,
+			)
+		: null;
+	const totMemUsed = liveNodes.reduce((a, m) => a + m.memUsedMB, 0);
+	const totMemTotal = liveNodes.reduce((a, m) => a + m.memTotalMB, 0);
+
 	return (
 		<Card className="bg-sidebar rounded-xl">
 			<CardHeader className="flex flex-row items-center justify-between">
@@ -66,6 +82,13 @@ export const ShowNodeTopology = ({ serverId }: { serverId?: string }) => {
 					<p className="text-sm text-muted-foreground">
 						Node sizes and what's running on each — {nodes?.length ?? 0} node
 						{(nodes?.length ?? 0) === 1 ? "" : "s"}
+						{avgCpu != null && (
+							<>
+								{" · live "}
+								{avgCpu}% cpu · {(totMemUsed / 1024).toFixed(1)}/
+								{(totMemTotal / 1024).toFixed(1)} GB mem
+							</>
+						)}
 					</p>
 				</div>
 				<Button
@@ -97,6 +120,7 @@ export const ShowNodeTopology = ({ serverId }: { serverId?: string }) => {
 								: node.role === "server"
 									? "Server"
 									: "Worker";
+						const live = liveByNode.get(node.ID);
 						return (
 							<div
 								key={node.ID}
@@ -147,26 +171,38 @@ export const ShowNodeTopology = ({ serverId }: { serverId?: string }) => {
 									<Progress value={sizeP} className="h-1" />
 								</div>
 
-								{/* Utilization */}
+								{/* Utilization — live (actual) usage is the bar; reserved shown
+								     below. Falls back to reserved if the node's stats are down. */}
 								<div className="space-y-1.5">
 									<div className="flex items-center gap-2">
 										<span className="text-xs w-8 text-muted-foreground">
 											CPU
 										</span>
-										<Progress value={cpuP} className="h-2 flex-1" />
-										<span className="text-xs text-muted-foreground w-9 text-right">
-											{cpuP}%
+										<Progress
+											value={live?.ok ? live.cpuPercent : cpuP}
+											className="h-2 flex-1"
+										/>
+										<span className="text-xs text-muted-foreground w-16 text-right">
+											{live?.ok ? `${live.cpuPercent}% live` : `${cpuP}% res`}
 										</span>
 									</div>
 									<div className="flex items-center gap-2">
 										<span className="text-xs w-8 text-muted-foreground">
 											RAM
 										</span>
-										<Progress value={memP} className="h-2 flex-1" />
-										<span className="text-xs text-muted-foreground w-9 text-right">
-											{memP}%
+										<Progress
+											value={live?.ok ? live.memPercent : memP}
+											className="h-2 flex-1"
+										/>
+										<span className="text-xs text-muted-foreground w-16 text-right">
+											{live?.ok ? `${live.memPercent}% live` : `${memP}% res`}
 										</span>
 									</div>
+									<p className="text-[11px] text-muted-foreground">
+										{live?.ok
+											? `reserved ${cpuP}% cpu · ${memP}% mem`
+											: "live metrics unavailable"}
+									</p>
 								</div>
 
 								{/* Running allocations */}
