@@ -6,6 +6,7 @@ import {
 	clusterAutoscalerEvents,
 	server as serverTable,
 } from "../../db/schema";
+import { sendClusterAlertNotifications } from "../../utils/notifications/cluster-alert";
 import { execAsyncRemote } from "../../utils/process/execAsync";
 import { getProvisioner } from "./index";
 import { joinServerNode, joinWorkerNode, removeWorkerNode } from "./join";
@@ -19,11 +20,22 @@ const recordEvent = (
 	message: string,
 	detail?: string,
 	groupId?: string,
-) =>
-	db
+) => {
+	// Surface the meaningful transitions (a node came or went, or provisioning
+	// failed) as cluster-alert notifications; "info" is bookkeeping, not alertable.
+	if (type !== "info") {
+		sendClusterAlertNotifications(organizationId, {
+			EventType: type,
+			Message: message,
+			Detail: detail,
+			Timestamp: new Date().toISOString(),
+		}).catch(() => {});
+	}
+	return db
 		.insert(clusterAutoscalerEvents)
 		.values({ organizationId, groupId, type, message, detail })
 		.catch(() => {});
+};
 
 /** Split the CSV server-type list into an ordered fallback array. */
 const serverTypeList = (csv: string): string[] =>

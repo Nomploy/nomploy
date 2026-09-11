@@ -1,0 +1,1 @@
+ALTER TABLE "notification" ADD COLUMN "clusterAlert" boolean DEFAULT false NOT NULL;
