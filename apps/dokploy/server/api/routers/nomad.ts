@@ -427,6 +427,113 @@ export const nomadRouter = createTRPCRouter({
 			return { success: true };
 		}),
 
+	// ── Canary deployments ─────────────────────────────────────────────────────
+	// The most recent deployment for a job, with its per-group canary/promotion
+	// state — so the UI can show "canaries healthy, awaiting promotion" and offer
+	// a Promote button when auto_promote is off (health-gated deploys).
+	getLatestDeployment: withPermission("server", "read")
+		.input(serverInput.extend({ jobId: z.string() }))
+		.query(async ({ input, ctx }) => {
+			const cfg = await resolveNomad(ctx, input.serverId);
+			const res = await nomadClient(cfg).request(
+				withNs(`/job/${input.jobId}/deployment`, cfg.namespace),
+			);
+			// 200 with an empty body means the job has no deployment yet.
+			if (!res.ok) return null;
+			const text = await res.text();
+			if (!text) return null;
+			const d = JSON.parse(text) as {
+				ID: string;
+				Status: string;
+				StatusDescription: string;
+				TaskGroups?: Record<
+					string,
+					{
+						DesiredCanaries?: number;
+						PlacedCanaries?: string[] | null;
+						Promoted?: boolean;
+						HealthyAllocs?: number;
+						DesiredTotal?: number;
+					}
+				>;
+			};
+			const groups = Object.entries(d.TaskGroups ?? {}).map(([name, g]) => ({
+				name,
+				desiredCanaries: g.DesiredCanaries ?? 0,
+				placedCanaries: g.PlacedCanaries?.length ?? 0,
+				promoted: g.Promoted ?? false,
+				healthyAllocs: g.HealthyAllocs ?? 0,
+				desiredTotal: g.DesiredTotal ?? 0,
+			}));
+			// A deployment awaits a manual promote when it's running and at least one
+			// group has unpromoted canaries that are all healthy.
+			const awaitingPromotion =
+				d.Status === "running" &&
+				groups.some(
+					(g) =>
+						g.desiredCanaries > 0 &&
+						!g.promoted &&
+						g.placedCanaries >= g.desiredCanaries &&
+						g.healthyAllocs >= g.desiredCanaries,
+				);
+			return {
+				id: d.ID,
+				status: d.Status,
+				description: d.StatusDescription,
+				groups,
+				awaitingPromotion,
+			};
+		}),
+
+	// Promote a canary deployment (all task groups). Nomad then rolls the old
+	// allocations out and the canaries become the running version.
+	promoteDeployment: withPermission("server", "create")
+		.input(serverInput.extend({ deploymentId: z.string() }))
+		.mutation(async ({ input, ctx }) => {
+			const cfg = await resolveNomad(ctx, input.serverId);
+			const res = await nomadClient(cfg).request(
+				`/deployment/promote/${input.deploymentId}`,
+				{
+					method: "POST",
+					body: JSON.stringify({
+						DeploymentID: input.deploymentId,
+						All: true,
+					}),
+				},
+			);
+			if (!res.ok) {
+				const detail = await res.text().catch(() => "");
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: `Promote failed: ${res.status} ${detail}`,
+				});
+			}
+			return { success: true };
+		}),
+
+	// Cancel/fail a running canary deployment — reverts to the prior version
+	// (auto_revert). Used when canaries are unhealthy or the deploy is unwanted.
+	failDeployment: withPermission("server", "create")
+		.input(serverInput.extend({ deploymentId: z.string() }))
+		.mutation(async ({ input, ctx }) => {
+			const cfg = await resolveNomad(ctx, input.serverId);
+			const res = await nomadClient(cfg).request(
+				`/deployment/fail/${input.deploymentId}`,
+				{
+					method: "POST",
+					body: JSON.stringify({ DeploymentID: input.deploymentId }),
+				},
+			);
+			if (!res.ok) {
+				const detail = await res.text().catch(() => "");
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: `Fail deployment failed: ${res.status} ${detail}`,
+				});
+			}
+			return { success: true };
+		}),
+
 	getAllocations: withPermission("server", "read")
 		.input(serverInput)
 		.query(async ({ input, ctx }) => {

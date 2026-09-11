@@ -247,4 +247,38 @@ services:
 		expect(withSecrets).toContain("range $k, $v := .");
 		expect(withSecrets).not.toContain(".Items");
 	});
+
+	it("emits canary/update stanza only when a strategy is set", () => {
+		const base: NomadServiceSpec = {
+			name: "app",
+			image: "nginx:latest",
+			ports: [],
+			replicas: 3,
+			env: {},
+		};
+
+		// Default: rolling, one at a time, no canary lines (unchanged behavior).
+		const rolling = generateNomadJobSpec("rollapp", [base], []);
+		expect(rolling).toContain("max_parallel     = 1");
+		expect(rolling).not.toContain("canary");
+		expect(rolling).toContain("auto_revert      = true");
+
+		// Canary with manual promotion.
+		const canary = generateNomadJobSpec("canapp", [base], [], undefined, null, {
+			maxParallel: 2,
+			canary: 3,
+			autoPromote: false,
+		});
+		expect(canary).toContain("max_parallel     = 2");
+		expect(canary).toContain("canary           = 3");
+		expect(canary).toContain("auto_promote     = false");
+
+		// Canary with auto-promotion.
+		const auto = generateNomadJobSpec("autoapp", [base], [], undefined, null, {
+			maxParallel: 1,
+			canary: 1,
+			autoPromote: true,
+		});
+		expect(auto).toContain("auto_promote     = true");
+	});
 });

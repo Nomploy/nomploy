@@ -171,6 +171,13 @@ export const applications = pgTable("application", {
 	// This flag gates emitting that template — opt-in per app so a cluster without
 	// workload-identity variable access can't break every deploy at once.
 	nomadSecretsEnabled: boolean("nomadSecretsEnabled").notNull().default(false),
+	// Deployment strategy → the job's Nomad `update` stanza. Defaults reproduce
+	// today's rolling deploy exactly. canaryCount > 0 enables canary deploys:
+	// N canaries run beside the old version until healthy, then promote (auto or
+	// manual). See generateUpdateBlock.
+	updateMaxParallel: integer("updateMaxParallel").notNull().default(1),
+	canaryCount: integer("canaryCount").notNull().default(0),
+	autoPromote: boolean("autoPromote").notNull().default(false),
 	applicationStatus: applicationStatus("applicationStatus")
 		.notNull()
 		.default("idle"),

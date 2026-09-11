@@ -137,6 +137,11 @@ export const generateApplicationNomadJob = (
 			? { projectId: application.environment.projectId }
 			: undefined,
 		application.nodePool,
+		{
+			maxParallel: application.updateMaxParallel ?? 1,
+			canary: application.canaryCount ?? 0,
+			autoPromote: application.autoPromote ?? false,
+		},
 	);
 
 /**
