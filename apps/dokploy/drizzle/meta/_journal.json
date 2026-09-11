@@ -1303,6 +1303,13 @@
       "when": 1789135294225,
       "tag": "0185_gray_bullseye",
       "breakpoints": true
+    },
+    {
+      "idx": 186,
+      "version": "7",
+      "when": 1789137974973,
+      "tag": "0186_chubby_hedge_knight",
+      "breakpoints": true
     }
   ]
 }

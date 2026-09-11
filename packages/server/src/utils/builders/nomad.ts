@@ -317,12 +317,45 @@ export interface NomadSegmentation {
 // project-level segmentation. Value: `${NOMPLOY_PROJECT_TAG}<projectId>`.
 export const NOMPLOY_PROJECT_TAG = "nomploy-project=";
 
+/**
+ * Deployment strategy for a job's `update` stanza. Absent = today's default
+ * (rolling, one alloc at a time). `canary > 0` runs N canary allocations
+ * alongside the running version and holds the new version until they're healthy;
+ * `autoPromote` promotes automatically once healthy, otherwise it waits for a
+ * manual promote (health-gated). auto_revert stays on either way.
+ */
+export interface NomadUpdateConfig {
+	maxParallel?: number;
+	canary?: number;
+	autoPromote?: boolean;
+}
+
+const generateUpdateBlock = (update?: NomadUpdateConfig): string => {
+	const maxParallel =
+		update?.maxParallel && update.maxParallel > 0 ? update.maxParallel : 1;
+	const canary = update?.canary && update.canary > 0 ? update.canary : 0;
+	// Canary lines only when canary > 0 — otherwise the stanza is byte-identical
+	// to the historical rolling default, so existing apps are unaffected.
+	const canaryLines =
+		canary > 0
+			? `\n    canary           = ${canary}\n    auto_promote     = ${update?.autoPromote ? "true" : "false"}`
+			: "";
+	return `  update {
+    max_parallel     = ${maxParallel}
+    health_check     = "checks"
+    min_healthy_time = "10s"
+    healthy_deadline = "5m"
+    auto_revert      = true${canaryLines}
+  }`;
+};
+
 export const generateNomadJobSpec = (
 	appName: string,
 	services: NomadServiceSpec[],
 	domains: Domain[],
 	segmentation?: NomadSegmentation,
 	nodePool?: string | null,
+	update?: NomadUpdateConfig,
 ): string => {
 	const taskGroups = services
 		.map((service) =>
@@ -339,13 +372,7 @@ export const generateNomadJobSpec = (
   namespace = "default"
   type      = "service"
 ${nodePoolLine}
-  update {
-    max_parallel     = 1
-    health_check     = "checks"
-    min_healthy_time = "10s"
-    healthy_deadline = "5m"
-    auto_revert      = true
-  }
+${generateUpdateBlock(update)}
 
 ${taskGroups}
 }

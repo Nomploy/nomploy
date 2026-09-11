@@ -19,6 +19,7 @@ import { ShowPorts } from "@/components/dashboard/application/advanced/ports/sho
 import { ShowRedirects } from "@/components/dashboard/application/advanced/redirects/show-redirects";
 import { ShowSecurity } from "@/components/dashboard/application/advanced/security/show-security";
 import { ShowBuildServer } from "@/components/dashboard/application/advanced/show-build-server";
+import { ShowDeployStrategy } from "@/components/dashboard/application/advanced/show-deploy-strategy";
 import { ShowResources } from "@/components/dashboard/application/advanced/show-resources";
 import { ShowTraefikConfig } from "@/components/dashboard/application/advanced/traefik/show-traefik-config";
 import { ShowVolumes } from "@/components/dashboard/application/advanced/volumes/show-volumes";
@@ -422,6 +423,11 @@ const Service = (
 												/>
 												<ShowNomadScaling
 													appName={data?.appName || ""}
+													serverId={data?.serverId || undefined}
+												/>
+												<ShowDeployStrategy
+													applicationId={applicationId}
+													appName={data?.appName || undefined}
 													serverId={data?.serverId || undefined}
 												/>
 												<ShowBuildServer applicationId={applicationId} />

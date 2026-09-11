@@ -427,6 +427,35 @@ export const applicationRouter = createTRPCRouter({
 			});
 			return true;
 		}),
+	// Persist the Nomad deploy strategy (rolling vs canary). Applied on the next
+	// redeploy via the job's update{} stanza.
+	saveDeployStrategy: protectedProcedure
+		.input(
+			z.object({
+				applicationId: z.string().min(1),
+				updateMaxParallel: z.number().int().min(1).max(50),
+				canaryCount: z.number().int().min(0).max(50),
+				autoPromote: z.boolean(),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.applicationId, {
+				service: ["create"],
+			});
+			await updateApplication(input.applicationId, {
+				updateMaxParallel: input.updateMaxParallel,
+				canaryCount: input.canaryCount,
+				autoPromote: input.autoPromote,
+			});
+			const application = await findApplicationById(input.applicationId);
+			await audit(ctx, {
+				action: "update",
+				resourceType: "application",
+				resourceId: application.applicationId,
+				resourceName: application.appName,
+			});
+			return true;
+		}),
 	saveGithubProvider: protectedProcedure
 		.input(apiSaveGithubProvider)
 		.mutation(async ({ input, ctx }) => {
