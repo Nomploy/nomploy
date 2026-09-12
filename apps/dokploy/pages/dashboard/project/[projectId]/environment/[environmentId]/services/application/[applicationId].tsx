@@ -21,6 +21,7 @@ import { ShowSecurity } from "@/components/dashboard/application/advanced/securi
 import { ShowBuildServer } from "@/components/dashboard/application/advanced/show-build-server";
 import { ShowDeployStrategy } from "@/components/dashboard/application/advanced/show-deploy-strategy";
 import { ShowResources } from "@/components/dashboard/application/advanced/show-resources";
+import { ShowVersionHistory } from "@/components/dashboard/application/advanced/show-version-history";
 import { ShowTraefikConfig } from "@/components/dashboard/application/advanced/traefik/show-traefik-config";
 import { ShowVolumes } from "@/components/dashboard/application/advanced/volumes/show-volumes";
 import { ShowDeployments } from "@/components/dashboard/application/deployments/show-deployments";
@@ -427,6 +428,10 @@ const Service = (
 												/>
 												<ShowDeployStrategy
 													applicationId={applicationId}
+													appName={data?.appName || undefined}
+													serverId={data?.serverId || undefined}
+												/>
+												<ShowVersionHistory
 													appName={data?.appName || undefined}
 													serverId={data?.serverId || undefined}
 												/>
