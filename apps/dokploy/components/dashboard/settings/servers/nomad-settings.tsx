@@ -8,7 +8,7 @@ import {
 	Terminal,
 	Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -36,6 +36,8 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -96,6 +98,10 @@ export const NomadSettings = ({ serverId }: Props) => {
 
 	const [isBootstrapping, setIsBootstrapping] = useState(false);
 	const [bootstrapLogs, setBootstrapLogs] = useState<string>("");
+	// When set, a successful bootstrap chains straight into a cluster join with
+	// this role — the one-click "Bootstrap & join" path for a fresh server. A ref
+	// (not state) so the subscription callback always reads the current target.
+	const chainJoinRef = useRef<ClusterRole | null>(null);
 
 	api.nomad.bootstrapServer.useSubscription(
 		{ serverId },
@@ -104,8 +110,15 @@ export const NomadSettings = ({ serverId }: Props) => {
 			onData(log) {
 				if (log === "BOOTSTRAP_DONE") {
 					setIsBootstrapping(false);
-					toast.success("Nomad bootstrapped on this server");
 					refetch();
+					const chained = chainJoinRef.current;
+					chainJoinRef.current = null;
+					if (chained) {
+						toast.success("Nomad bootstrapped — joining the cluster…");
+						startJoin(chained);
+					} else {
+						toast.success("Nomad bootstrapped on this server");
+					}
 					return;
 				}
 				if (log.includes(OP_ENDED)) {
@@ -116,12 +129,21 @@ export const NomadSettings = ({ serverId }: Props) => {
 			},
 			onError(error) {
 				setIsBootstrapping(false);
+				chainJoinRef.current = null; // don't join on a failed bootstrap
 				toast.error(error.message || "Bootstrap failed");
 			},
 		},
 	);
 
 	const startBootstrap = () => {
+		chainJoinRef.current = null;
+		setBootstrapLogs("");
+		setIsBootstrapping(true);
+	};
+
+	// One-click: bootstrap Nomad on a fresh server, then join as `role`.
+	const startBootstrapAndJoin = (role: ClusterRole) => {
+		chainJoinRef.current = role;
 		setBootstrapLogs("");
 		setIsBootstrapping(true);
 	};
@@ -311,6 +333,27 @@ export const NomadSettings = ({ serverId }: Props) => {
 								</Button>
 							</DropdownMenuTrigger>
 							<DropdownMenuContent align="end">
+								<DropdownMenuLabel>Fresh server (one-click)</DropdownMenuLabel>
+								<DropdownMenuItem
+									onClick={() => startBootstrapAndJoin("worker")}
+								>
+									<Network className="mr-2 h-4 w-4" />
+									Bootstrap &amp; join as worker
+									<span className="ml-2 text-xs text-muted-foreground">
+										installs Nomad, then joins
+									</span>
+								</DropdownMenuItem>
+								<DropdownMenuItem
+									onClick={() => startBootstrapAndJoin("server")}
+								>
+									<ServerIcon className="mr-2 h-4 w-4" />
+									Bootstrap &amp; join as server
+									<span className="ml-2 text-xs text-muted-foreground">
+										installs Nomad, adds HA raft
+									</span>
+								</DropdownMenuItem>
+								<DropdownMenuSeparator />
+								<DropdownMenuLabel>Already bootstrapped</DropdownMenuLabel>
 								<DropdownMenuItem onClick={() => startJoin("worker")}>
 									<Network className="mr-2 h-4 w-4" />
 									Join as worker
