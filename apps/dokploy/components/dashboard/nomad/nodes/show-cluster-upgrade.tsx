@@ -24,11 +24,8 @@ interface VersionNode {
 	status: string;
 	nomadVersion: string | null;
 	consulVersion: string | null;
-}
-interface Member {
-	name: string;
 	role: "server" | "worker";
-	isLeader?: boolean;
+	isLeader: boolean;
 }
 
 /**
@@ -43,9 +40,6 @@ export const ShowClusterUpgrade = ({ serverId }: { serverId?: string }) => {
 		{ serverId },
 		{ refetchInterval: 30000 },
 	);
-	const { data: membersRaw } = api.nomad.getClusterMembers.useQuery(undefined, {
-		refetchOnWindowFocus: false,
-	});
 
 	if (isLoading || !data) {
 		return (
@@ -58,18 +52,16 @@ export const ShowClusterUpgrade = ({ serverId }: { serverId?: string }) => {
 	}
 
 	const nodes = data.nodes as VersionNode[];
-	const members = (membersRaw ?? []) as Member[];
-	const roleOf = new Map(members.map((m) => [m.name, m]));
 	const latest = data.latestNomad;
 
 	const needsUpdate = (v: string | null) => !!latest && !!v && v !== latest;
 
 	// Quorum-safe order: workers first (drain, order-independent), then server
-	// followers one at a time, leader last.
-	const workers = nodes.filter((n) => roleOf.get(n.name)?.role === "worker");
-	const servers = nodes.filter((n) => roleOf.get(n.name)?.role !== "worker");
-	const serverFollowers = servers.filter((n) => !roleOf.get(n.name)?.isLeader);
-	const leader = servers.find((n) => roleOf.get(n.name)?.isLeader);
+	// followers one at a time, leader last. Role + leader come from the endpoint.
+	const workers = nodes.filter((n) => n.role === "worker");
+	const servers = nodes.filter((n) => n.role === "server");
+	const serverFollowers = servers.filter((n) => !n.isLeader);
+	const leader = servers.find((n) => n.isLeader);
 
 	return (
 		<Card className="bg-sidebar rounded-xl">
@@ -111,19 +103,18 @@ export const ShowClusterUpgrade = ({ serverId }: { serverId?: string }) => {
 						</TableHeader>
 						<TableBody>
 							{nodes.map((n) => {
-								const m = roleOf.get(n.name);
 								return (
 									<TableRow key={n.name}>
 										<TableCell className="font-medium">
 											<span className="flex items-center gap-1.5">
-												{m?.isLeader && (
+												{n.isLeader && (
 													<Crown className="h-3.5 w-3.5 text-primary" />
 												)}
 												{n.name}
 											</span>
 										</TableCell>
 										<TableCell className="text-muted-foreground">
-											{m?.role ?? "—"}
+											{n.role}
 										</TableCell>
 										<TableCell>
 											<span className="flex items-center gap-1.5">

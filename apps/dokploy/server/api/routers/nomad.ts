@@ -534,36 +534,54 @@ export const nomadRouter = createTRPCRouter({
 			return { success: true };
 		}),
 
-	// ── Version history / rollback ─────────────────────────────────────────────
-	// Nomad keeps every submitted version of a job. This lists them so the UI can
-	// show a deploy history and offer an instant one-click revert to a prior spec
-	// (image + env + resources), with no rebuild.
 	// ── Cluster versions / upgrade readiness ───────────────────────────────────
-	// Per-node Nomad/Consul versions (from node attributes) + the latest Nomad
-	// release (HashiCorp checkpoint API), so the UI can flag version skew and
-	// whether an upgrade is available. The actual rolling upgrade stays a guided,
-	// quorum-safe operation (drain → upgrade → rejoin) rather than a blind sweep.
+	// Per-node Nomad/Consul versions (from node attributes) + role/leader + the
+	// latest Nomad release (HashiCorp checkpoint API), so the UI can flag version
+	// skew, whether an upgrade is available, and lay out a quorum-safe order. The
+	// actual rolling upgrade stays a guided, one-node-at-a-time operation (drain →
+	// upgrade → rejoin) rather than a blind cluster-wide sweep.
 	getClusterVersions: withPermission("server", "read")
 		.input(serverInput)
 		.query(async ({ input, ctx }) => {
 			const cfg = await resolveNomad(ctx, input.serverId);
 			const client = nomadClient(cfg);
 			const stubs: any[] = await client.get("/nodes");
+			// Same source of truth as getNodeTopology: cluster.json says which overlay
+			// IPs are raft servers; everything else is a worker. Derive role here so
+			// the UI doesn't have to join on names (Nomad node names ≠ panel names).
+			const cluster = readCluster();
+			const serverWgIps = new Set(
+				(cluster ? allServers(cluster) : []).map((s) => s.wgIp),
+			);
+			// Raft leader's overlay IP (strip the :port from status/leader).
+			let leaderIp = "";
+			try {
+				const leader = (await client.get("/status/leader")) as string;
+				leaderIp = (leader || "").split(":")[0] ?? "";
+			} catch {}
+
 			const nodes = await Promise.all(
 				stubs.map(async (n: any) => {
 					let nomadVersion: string | null = null;
 					let consulVersion: string | null = null;
+					let isControlPlane = false;
 					try {
 						const detail: any = await client.get(`/node/${n.ID}`);
 						const attrs = detail.Attributes || {};
 						nomadVersion = attrs["nomad.version"] ?? null;
 						consulVersion = attrs["consul.version"] ?? null;
+						isControlPlane = detail.Meta?.nomploy_control_plane === "true";
 					} catch {}
+					// n.Address is the node's overlay (WireGuard) IP.
+					const role: "server" | "worker" =
+						isControlPlane || serverWgIps.has(n.Address) ? "server" : "worker";
 					return {
 						name: n.Name as string,
 						status: n.Status as string,
 						nomadVersion,
 						consulVersion,
+						role,
+						isLeader: !!n.Address && n.Address === leaderIp,
 					};
 				}),
 			);
@@ -595,6 +613,10 @@ export const nomadRouter = createTRPCRouter({
 			};
 		}),
 
+	// ── Version history / rollback ─────────────────────────────────────────────
+	// Nomad keeps every submitted version of a job. This lists them so the UI can
+	// show a deploy history and offer an instant one-click revert to a prior spec
+	// (image + env + resources), with no rebuild.
 	getJobVersions: withPermission("server", "read")
 		.input(serverInput.extend({ jobId: z.string() }))
 		.query(async ({ input, ctx }) => {
