@@ -534,6 +534,71 @@ export const nomadRouter = createTRPCRouter({
 			return { success: true };
 		}),
 
+	// ── Version history / rollback ─────────────────────────────────────────────
+	// Nomad keeps every submitted version of a job. This lists them so the UI can
+	// show a deploy history and offer an instant one-click revert to a prior spec
+	// (image + env + resources), with no rebuild.
+	getJobVersions: withPermission("server", "read")
+		.input(serverInput.extend({ jobId: z.string() }))
+		.query(async ({ input, ctx }) => {
+			const cfg = await resolveNomad(ctx, input.serverId);
+			const res = await nomadClient(cfg).request(
+				withNs(`/job/${input.jobId}/versions`, cfg.namespace),
+			);
+			if (!res.ok) return [];
+			const body = (await res.json()) as {
+				Versions?: Array<{
+					Version: number;
+					SubmitTime?: number;
+					Stable?: boolean;
+					TaskGroups?: Array<{
+						Tasks?: Array<{ Config?: { image?: string } }>;
+					}>;
+				}>;
+			};
+			const versions = body.Versions ?? [];
+			// Highest version number is what's running now.
+			const current = versions.reduce((m, v) => Math.max(m, v.Version), 0);
+			return versions
+				.map((v) => ({
+					version: v.Version,
+					// Nomad SubmitTime is unix nanoseconds.
+					submitTime: v.SubmitTime
+						? Math.round(v.SubmitTime / 1_000_000)
+						: null,
+					stable: v.Stable ?? false,
+					current: v.Version === current,
+					image: v.TaskGroups?.[0]?.Tasks?.[0]?.Config?.image ?? null,
+				}))
+				.sort((a, b) => b.version - a.version);
+		}),
+
+	// Revert a job to a prior version — Nomad re-submits that version's spec as a
+	// new deployment (auto_revert / health checks still apply on the way in).
+	revertJob: withPermission("server", "create")
+		.input(serverInput.extend({ jobId: z.string(), version: z.number().int() }))
+		.mutation(async ({ input, ctx }) => {
+			const cfg = await resolveNomad(ctx, input.serverId);
+			const res = await nomadClient(cfg).request(
+				withNs(`/job/${input.jobId}/revert`, cfg.namespace),
+				{
+					method: "POST",
+					body: JSON.stringify({
+						JobID: input.jobId,
+						JobVersion: input.version,
+					}),
+				},
+			);
+			if (!res.ok) {
+				const detail = await res.text().catch(() => "");
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: `Revert failed: ${res.status} ${detail}`,
+				});
+			}
+			return { success: true };
+		}),
+
 	getAllocations: withPermission("server", "read")
 		.input(serverInput)
 		.query(async ({ input, ctx }) => {
