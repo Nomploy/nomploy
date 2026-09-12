@@ -9,6 +9,7 @@ import { ShowConsul } from "@/components/dashboard/nomad/consul/show-consul";
 import { ShowNomadJobs } from "@/components/dashboard/nomad/jobs/show-nomad-jobs";
 import { ShowNomadLogs } from "@/components/dashboard/nomad/logs/show-nomad-logs";
 import { ShowNetworkPolicies } from "@/components/dashboard/nomad/network/show-network-policies";
+import { ShowClusterUpgrade } from "@/components/dashboard/nomad/nodes/show-cluster-upgrade";
 import { ShowNodeTopology } from "@/components/dashboard/nomad/nodes/show-node-topology";
 import { ShowNomadNodes } from "@/components/dashboard/nomad/nodes/show-nomad-nodes";
 import { ShowScheduler } from "@/components/dashboard/nomad/nodes/show-scheduler";
@@ -80,6 +81,7 @@ const NomadDashboard = () => {
 					<ShowNomadJobs serverId={serverId} />
 				</TabsContent>
 				<TabsContent value="nodes" className="flex flex-col gap-4">
+					<ShowClusterUpgrade serverId={serverId} />
 					<ShowScheduler serverId={serverId} />
 					<ShowNodeTopology serverId={serverId} />
 					<ShowNomadNodes serverId={serverId} />
