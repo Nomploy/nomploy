@@ -538,6 +538,63 @@ export const nomadRouter = createTRPCRouter({
 	// Nomad keeps every submitted version of a job. This lists them so the UI can
 	// show a deploy history and offer an instant one-click revert to a prior spec
 	// (image + env + resources), with no rebuild.
+	// ── Cluster versions / upgrade readiness ───────────────────────────────────
+	// Per-node Nomad/Consul versions (from node attributes) + the latest Nomad
+	// release (HashiCorp checkpoint API), so the UI can flag version skew and
+	// whether an upgrade is available. The actual rolling upgrade stays a guided,
+	// quorum-safe operation (drain → upgrade → rejoin) rather than a blind sweep.
+	getClusterVersions: withPermission("server", "read")
+		.input(serverInput)
+		.query(async ({ input, ctx }) => {
+			const cfg = await resolveNomad(ctx, input.serverId);
+			const client = nomadClient(cfg);
+			const stubs: any[] = await client.get("/nodes");
+			const nodes = await Promise.all(
+				stubs.map(async (n: any) => {
+					let nomadVersion: string | null = null;
+					let consulVersion: string | null = null;
+					try {
+						const detail: any = await client.get(`/node/${n.ID}`);
+						const attrs = detail.Attributes || {};
+						nomadVersion = attrs["nomad.version"] ?? null;
+						consulVersion = attrs["consul.version"] ?? null;
+					} catch {}
+					return {
+						name: n.Name as string,
+						status: n.Status as string,
+						nomadVersion,
+						consulVersion,
+					};
+				}),
+			);
+
+			// Latest stable Nomad, best-effort. Never fail the query on a network hiccup.
+			let latestNomad: string | null = null;
+			try {
+				const r = await fetch(
+					"https://checkpoint-api.hashicorp.com/v1/check/nomad",
+					{ signal: AbortSignal.timeout(5000) },
+				);
+				if (r.ok) {
+					const j = (await r.json()) as { current_version?: string };
+					latestNomad = j.current_version ?? null;
+				}
+			} catch {}
+
+			const running = [
+				...new Set(nodes.map((n) => n.nomadVersion).filter(Boolean)),
+			] as string[];
+			return {
+				nodes,
+				latestNomad,
+				// Nodes disagree on Nomad version — a rolling upgrade left half-done.
+				skew: running.length > 1,
+				// Every node is on the latest release.
+				upToDate:
+					!!latestNomad && running.length === 1 && running[0] === latestNomad,
+			};
+		}),
+
 	getJobVersions: withPermission("server", "read")
 		.input(serverInput.extend({ jobId: z.string() }))
 		.query(async ({ input, ctx }) => {
