@@ -1,5 +1,9 @@
 import { and, desc, eq, isNull, or } from "drizzle-orm";
-import { nanoid } from "nanoid";
+import { customAlphabet, nanoid } from "nanoid";
+
+// Cloud VM names must be valid hostnames ([a-z0-9-]): the default nanoid alphabet
+// includes "_" and "-", and Hetzner rejects "_" with a 422 (invalid hostname).
+const hostSuffix = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 6);
 import { db } from "../../db";
 import {
 	clusterAutoscaler,
@@ -353,7 +357,7 @@ const reconcileGroup = async (
 			image: cfg.image,
 			networkId: cfg.networkId || undefined,
 		});
-		const name = `nomploy-auto-${nanoid(6).toLowerCase()}`;
+		const name = `nomploy-auto-${hostSuffix()}`;
 		onLog(`Provisioning ${cfg.provider} node ${name} …\n`);
 		await recordEvent(
 			organizationId,
@@ -567,7 +571,7 @@ export const provisionAndJoinNode = async (
 		image: cfg.image,
 		networkId: cfg.networkId || undefined,
 	});
-	const name = `nomploy-${role}-${nanoid(6).toLowerCase()}`;
+	const name = `nomploy-${role}-${hostSuffix()}`;
 	onLog(`Provisioning ${cfg.provider} ${role} ${name} …\n`);
 	const node = await provisioner.createNode({
 		name,
