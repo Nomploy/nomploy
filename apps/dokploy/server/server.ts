@@ -78,6 +78,11 @@ void app.prepare().then(async () => {
 				"@nomploy/server/setup/autoscale/schedule"
 			);
 			await initAutoscalingSchedules();
+			// Cluster health monitor (node down / raft leader → cluster alerts).
+			const { startClusterHealthLoop } = await import(
+				"@nomploy/server/setup/monitoring/cluster-health"
+			);
+			startClusterHealthLoop(60);
 		}
 		await initEnterpriseBackupCronJobs();
 
