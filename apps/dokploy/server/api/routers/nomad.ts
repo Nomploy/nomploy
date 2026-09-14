@@ -560,6 +560,22 @@ export const nomadRouter = createTRPCRouter({
 				leaderIp = (leader || "").split(":")[0] ?? "";
 			} catch {}
 
+			// Map overlay IP → server record, so the UI can drive an assisted upgrade
+			// over that server's SSH. The control-plane hub has no server row (the
+			// panel runs on it) → no serverId → upgraded manually.
+			const org = ctx.session?.activeOrganizationId;
+			const serverRows = org
+				? await db.query.server.findMany({
+						where: eq(serverTable.organizationId, org),
+						columns: { serverId: true, wgIp: true },
+					})
+				: [];
+			const serverIdByIp = new Map(
+				serverRows
+					.filter((s) => s.wgIp)
+					.map((s) => [s.wgIp as string, s.serverId]),
+			);
+
 			const nodes = await Promise.all(
 				stubs.map(async (n: any) => {
 					let nomadVersion: string | null = null;
@@ -582,6 +598,8 @@ export const nomadRouter = createTRPCRouter({
 						consulVersion,
 						role,
 						isLeader: !!n.Address && n.Address === leaderIp,
+						// null for the hub (no server row) → manual upgrade.
+						serverId: serverIdByIp.get(n.Address) ?? null,
 					};
 				}),
 			);
@@ -610,6 +628,41 @@ export const nomadRouter = createTRPCRouter({
 				// Every node is on the latest release.
 				upToDate:
 					!!latestNomad && running.length === 1 && running[0] === latestNomad,
+			};
+		}),
+
+	// Assisted upgrade of one node's Nomad package over its SSH connection. Only
+	// restarts the agent if apt actually upgraded the package (so running it with
+	// nothing newer available is a safe no-op — no gratuitous scheduler restart).
+	// The control-plane hub has no server record (the panel runs on it) so it is
+	// not upgradable here — upgrade it manually. Callers drive one node at a time
+	// in quorum-safe order (workers, then followers, leader last).
+	upgradeNode: withPermission("server", "create")
+		.input(z.object({ serverId: z.string() }))
+		.mutation(async ({ input, ctx }) => {
+			const server = await findServerById(input.serverId);
+			if (server.organizationId !== ctx.session?.activeOrganizationId) {
+				throw new TRPCError({ code: "UNAUTHORIZED" });
+			}
+			// $before/$after are shell vars; \${Version} is a literal dpkg format
+			// string (escaped so JS doesn't interpolate it).
+			const cmd = `set -e
+before=$(dpkg-query -W -f='\${Version}' nomad 2>/dev/null || echo none)
+apt-get update -qq
+DEBIAN_FRONTEND=noninteractive apt-get install -y --only-upgrade nomad
+after=$(dpkg-query -W -f='\${Version}' nomad 2>/dev/null || echo none)
+if [ "$before" != "$after" ]; then
+  systemctl restart nomad
+  echo "UPGRADED nomad $before -> $after (agent restarted)"
+else
+  echo "NOOP nomad already at $after (no restart)"
+fi`;
+			const { stdout, stderr } = await execAsyncRemote(input.serverId, cmd);
+			const output = `${stdout}${stderr}`.trim();
+			return {
+				success: true,
+				changed: /^UPGRADED/m.test(output),
+				output: output.slice(-4000),
 			};
 		}),
 
