@@ -1,9 +1,5 @@
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { customAlphabet, nanoid } from "nanoid";
-
-// Cloud VM names must be valid hostnames ([a-z0-9-]): the default nanoid alphabet
-// includes "_" and "-", and Hetzner rejects "_" with a 422 (invalid hostname).
-const hostSuffix = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 6);
 import { db } from "../../db";
 import {
 	clusterAutoscaler,
@@ -14,6 +10,10 @@ import { sendClusterAlertNotifications } from "../../utils/notifications/cluster
 import { execAsyncRemote } from "../../utils/process/execAsync";
 import { getProvisioner } from "./index";
 import { joinServerNode, joinWorkerNode, removeWorkerNode } from "./join";
+
+// Cloud VM names must be valid hostnames ([a-z0-9-]): the default nanoid alphabet
+// includes "_" and "-", and Hetzner rejects "_" with a 422 (invalid hostname).
+const hostSuffix = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 6);
 
 type Log = (s: string) => void;
 
