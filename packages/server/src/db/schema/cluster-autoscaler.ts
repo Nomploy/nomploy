@@ -53,6 +53,11 @@ export const clusterAutoscaler = pgTable("cluster_autoscaler", {
 	}),
 	minNodes: integer("minNodes").notNull().default(0),
 	maxNodes: integer("maxNodes").notNull().default(3),
+	// Target total worker count the autoscaler drives toward (clamped to
+	// [minNodes, maxNodes]). Set manually, by reactive pressure, or (later) on a
+	// schedule; the reconcile loop converges the actual count to it. Manual nodes
+	// count toward it but are never removed. Null = fall back to minNodes.
+	desiredNodes: integer("desiredNodes"),
 	// Reservation-based scaling, evaluated per resource (two independent checks).
 	// "Reservation" = sum of allocs' requested CPU/mem over cluster capacity (what
 	// Nomad schedules on), NOT live usage. Scale UP if EITHER resource's reserved
@@ -135,6 +140,7 @@ export const apiUpdateClusterAutoscaler = createSchema
 		sshKeyId: true,
 		minNodes: true,
 		maxNodes: true,
+		desiredNodes: true,
 		scaleUpThreshold: true,
 		scaleDownThreshold: true,
 		memScaleUpThreshold: true,
@@ -157,4 +163,10 @@ export const apiUpsertAutoscalingGroup = apiUpdateClusterAutoscaler.extend({
 		.string()
 		.regex(/^[a-z0-9][a-z0-9_-]*$/, "lowercase letters, digits, - or _")
 		.optional(),
+});
+
+// Manually set a group's desired node count (clamped to [min,max] server-side).
+export const apiSetDesiredCount = z.object({
+	groupId: z.string().min(1),
+	desiredNodes: z.number().int().min(0),
 });

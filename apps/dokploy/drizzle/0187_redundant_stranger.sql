@@ -1,0 +1,1 @@
+ALTER TABLE "cluster_autoscaler" ADD COLUMN "desiredNodes" integer;

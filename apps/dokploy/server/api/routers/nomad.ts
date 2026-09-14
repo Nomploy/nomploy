@@ -1,6 +1,7 @@
 import { findServerById, updateServerById } from "@nomploy/server";
 import { db } from "@nomploy/server/db";
 import {
+	apiSetDesiredCount,
 	apiUpsertAutoscalingGroup,
 	clusterAutoscaler,
 	clusterAutoscalerEvents,
@@ -2051,6 +2052,36 @@ fi`;
 
 	// Create (no groupId) or update (groupId) a group. Ensures the Nomad node pool
 	// exists so jobs can target it and nodes can join it.
+	// Manually set a group's desired node count. Clamped to [min,max]; the reconcile
+	// loop then converges the actual worker count to it (adding/removing auto nodes;
+	// manual nodes stay pinned). Kicks a reconcile so it takes effect promptly.
+	setDesiredCount: protectedProcedure
+		.input(apiSetDesiredCount)
+		.mutation(async ({ input, ctx }) => {
+			const org = ctx.session?.activeOrganizationId;
+			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+			const group = await db.query.clusterAutoscaler.findFirst({
+				where: and(
+					eq(clusterAutoscaler.autoscalerId, input.groupId),
+					eq(clusterAutoscaler.organizationId, org),
+				),
+				columns: { minNodes: true, maxNodes: true },
+			});
+			if (!group) throw new TRPCError({ code: "NOT_FOUND" });
+			const desired = Math.max(
+				group.minNodes,
+				Math.min(group.maxNodes, input.desiredNodes),
+			);
+			await db
+				.update(clusterAutoscaler)
+				.set({ desiredNodes: desired })
+				.where(eq(clusterAutoscaler.autoscalerId, input.groupId));
+			void reconcileAutoscaler(org, (l) =>
+				console.log(`[autoscaler:${org}] ${l.trimEnd()}`),
+			).catch((e) => console.error(`[autoscaler:${org}]`, e));
+			return { desired };
+		}),
+
 	upsertAutoscalingGroup: protectedProcedure
 		.input(apiUpsertAutoscalingGroup)
 		.mutation(async ({ input, ctx }) => {

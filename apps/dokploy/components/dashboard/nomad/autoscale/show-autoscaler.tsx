@@ -95,6 +95,10 @@ const GroupCard = ({
 	const upsert = api.nomad.upsertAutoscalingGroup.useMutation();
 	const remove = api.nomad.deleteAutoscalingGroup.useMutation();
 	const loadOptions = api.nomad.listProviderOptions.useMutation();
+	const setDesired = api.nomad.setDesiredCount.useMutation();
+	const [desiredInput, setDesiredInput] = useState<number>(
+		group?.desiredNodes ?? group?.minNodes ?? 0,
+	);
 
 	const [form, setForm] = useState<Form>({
 		...DEFAULTS,
@@ -519,6 +523,57 @@ const GroupCard = ({
 						>
 							next: {d.action}
 						</Badge>
+					</div>
+				)}
+
+				{/* Desired count — the target the autoscaler converges to. Reactive
+				    pressure + schedules move it too; manual nodes count but stay pinned. */}
+				{group && (
+					<div className="flex flex-wrap items-center gap-2 rounded-lg border p-3">
+						<Label className="text-sm">Desired nodes</Label>
+						<Input
+							type="number"
+							min={group.minNodes}
+							max={group.maxNodes}
+							value={desiredInput}
+							onChange={(e) =>
+								setDesiredInput(
+									Number.isNaN(e.target.valueAsNumber)
+										? 0
+										: e.target.valueAsNumber,
+								)
+							}
+							className="w-20"
+						/>
+						<span className="text-xs text-muted-foreground">
+							range {group.minNodes}–{group.maxNodes}
+							{d ? ` · ${d.workerCount} running now` : ""}
+						</span>
+						<Button
+							type="button"
+							size="sm"
+							variant="secondary"
+							disabled={setDesired.isPending}
+							onClick={async () => {
+								try {
+									const res = await setDesired.mutateAsync({
+										groupId: group.groupId,
+										desiredNodes: desiredInput,
+									});
+									setDesiredInput(res.desired);
+									toast.success(`Desired count set to ${res.desired}`);
+									onChanged();
+								} catch (e) {
+									toast.error(
+										e instanceof Error
+											? e.message
+											: "Failed to set desired count",
+									);
+								}
+							}}
+						>
+							Set
+						</Button>
 					</div>
 				)}
 				{status?.nodes && status.nodes.length > 0 && (
