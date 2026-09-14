@@ -3,8 +3,6 @@ import { validateRequest } from "@nomploy/server/lib/auth";
 import type { GetServerSidePropsContext } from "next";
 import { useRouter } from "next/router";
 import { type ReactElement, useState } from "react";
-import { ShowAutoscaler } from "@/components/dashboard/nomad/autoscale/show-autoscaler";
-import { ShowAutoscalingGraphs } from "@/components/dashboard/nomad/autoscale/show-autoscaling-graphs";
 import { ShowCluster } from "@/components/dashboard/nomad/cluster/show-cluster";
 import { ShowConsul } from "@/components/dashboard/nomad/consul/show-consul";
 import { ShowNomadJobs } from "@/components/dashboard/nomad/jobs/show-nomad-jobs";
@@ -72,7 +70,6 @@ const NomadDashboard = () => {
 					<TabsTrigger value="nodes">Nodes</TabsTrigger>
 					<TabsTrigger value="consul">Consul</TabsTrigger>
 					<TabsTrigger value="network">Network</TabsTrigger>
-					<TabsTrigger value="autoscale">Autoscaling</TabsTrigger>
 					<TabsTrigger value="logs">Logs</TabsTrigger>
 				</TabsList>
 				<TabsContent value="cluster">
@@ -92,10 +89,6 @@ const NomadDashboard = () => {
 				</TabsContent>
 				<TabsContent value="network">
 					<ShowNetworkPolicies />
-				</TabsContent>
-				<TabsContent value="autoscale" className="flex flex-col gap-4">
-					<ShowAutoscalingGraphs />
-					<ShowAutoscaler />
 				</TabsContent>
 				<TabsContent value="logs">
 					<ShowNomadLogs serverId={serverId} />
