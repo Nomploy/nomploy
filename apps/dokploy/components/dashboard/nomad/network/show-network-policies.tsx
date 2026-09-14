@@ -120,7 +120,7 @@ export const ShowNetworkPolicies = () => {
 				<CardHeader className="flex flex-row items-start justify-between gap-4">
 					<div className="space-y-1.5">
 						<CardTitle className="flex items-center gap-2 text-xl">
-							<Shield className="h-5 w-5" />
+							<Shield className="h-5 w-5 text-teal-500" />
 							Network policies
 						</CardTitle>
 						<CardDescription>
@@ -204,7 +204,7 @@ export const ShowNetworkPolicies = () => {
 			<Card className="bg-sidebar rounded-xl">
 				<CardHeader>
 					<CardTitle className="flex items-center gap-2 text-lg">
-						<Network className="h-5 w-5" />
+						<Network className="h-5 w-5 text-sky-500" />
 						Allow-rules
 					</CardTitle>
 					<CardDescription>

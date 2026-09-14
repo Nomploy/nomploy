@@ -38,7 +38,7 @@ export const ShowScheduler = ({ serverId }: { serverId?: string }) => {
 		<Card className="bg-sidebar rounded-xl">
 			<CardHeader className="flex flex-row items-center justify-between">
 				<CardTitle className="flex items-center gap-2 text-lg">
-					<Scale className="h-5 w-5" />
+					<Scale className="h-5 w-5 text-emerald-500" />
 					Scheduler placement
 					{isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
 				</CardTitle>

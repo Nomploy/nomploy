@@ -377,26 +377,26 @@ export const ShowCluster = () => {
 					</div>
 					<div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
 						<Stat
-							icon={<ServerIcon className="h-3.5 w-3.5" />}
+							icon={<ServerIcon className="h-3.5 w-3.5 text-teal-500" />}
 							label="Servers"
 							value={serverCount}
 							sub="Nomad/Consul raft"
 						/>
 						<Stat
-							icon={<Network className="h-3.5 w-3.5" />}
+							icon={<Network className="h-3.5 w-3.5 text-sky-500" />}
 							label="Workers"
 							value={workerCount}
 							sub="run workloads"
 						/>
 						<Stat
-							icon={<ShieldCheck className="h-3.5 w-3.5" />}
+							icon={<ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />}
 							label="Fault tolerance"
 							value={faultTolerance}
 							sub={faultTolerance ? "servers can fail" : "no redundancy"}
 							accent={faultTolerance > 0}
 						/>
 						<Stat
-							icon={<Crown className="h-3.5 w-3.5" />}
+							icon={<Crown className="h-3.5 w-3.5 text-amber-500" />}
 							label="Raft leader"
 							value={
 								<span className="truncate text-base">

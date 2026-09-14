@@ -78,7 +78,10 @@ export const ShowNodeTopology = ({ serverId }: { serverId?: string }) => {
 		<Card className="bg-sidebar rounded-xl">
 			<CardHeader className="flex flex-row items-center justify-between">
 				<div>
-					<CardTitle className="text-xl">Infrastructure</CardTitle>
+					<CardTitle className="flex items-center gap-2 text-xl">
+						<Server className="h-5 w-5 text-cyan-500" />
+						Infrastructure
+					</CardTitle>
 					<p className="text-sm text-muted-foreground">
 						Node sizes and what's running on each — {nodes?.length ?? 0} node
 						{(nodes?.length ?? 0) === 1 ? "" : "s"}

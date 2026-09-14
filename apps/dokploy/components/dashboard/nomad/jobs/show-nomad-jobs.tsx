@@ -1,12 +1,12 @@
 import {
 	AlertTriangle,
+	Briefcase,
 	Loader2,
 	Play,
 	RefreshCw,
 	Square,
 	Trash2,
 } from "lucide-react";
-import { useState } from "react";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -71,7 +71,10 @@ export const ShowNomadJobs = ({ serverId }: { serverId?: string }) => {
 	return (
 		<Card className="bg-sidebar rounded-xl">
 			<CardHeader className="flex flex-row items-center justify-between">
-				<CardTitle className="text-xl">Nomad Jobs</CardTitle>
+				<CardTitle className="flex items-center gap-2 text-xl">
+					<Briefcase className="h-5 w-5 text-teal-500" />
+					Nomad Jobs
+				</CardTitle>
 				<Button variant="ghost" size="icon" onClick={() => refetch()}>
 					<RefreshCw className="h-4 w-4" />
 				</Button>

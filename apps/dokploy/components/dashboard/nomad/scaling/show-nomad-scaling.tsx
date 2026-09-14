@@ -125,7 +125,7 @@ export const ShowNomadScaling = ({ appName, serverId }: Props) => {
 		<Card className="bg-background">
 			<CardHeader>
 				<CardTitle className="flex items-center gap-2 text-xl">
-					<Activity className="size-5" />
+					<Activity className="size-5 text-cyan-500" />
 					Scaling
 				</CardTitle>
 				<CardDescription>

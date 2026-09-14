@@ -95,7 +95,7 @@ export const ShowClusterUpgrade = ({ serverId }: { serverId?: string }) => {
 		<Card className="bg-sidebar rounded-xl">
 			<CardHeader>
 				<CardTitle className="flex items-center gap-2 text-xl">
-					<PackageCheck className="size-5" />
+					<PackageCheck className="size-5 text-sky-500" />
 					Cluster Version &amp; Upgrade
 				</CardTitle>
 				<div className="flex flex-wrap items-center gap-2 pt-1 text-sm">
