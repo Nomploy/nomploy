@@ -88,7 +88,10 @@ export const ShowConsul = ({ serverId }: { serverId?: string }) => {
 		<div className="flex flex-col gap-4">
 			<Card className="bg-sidebar rounded-xl">
 				<CardHeader className="flex flex-row items-center justify-between">
-					<CardTitle className="text-xl">Consul Services</CardTitle>
+					<CardTitle className="flex items-center gap-2 text-xl">
+						<Network className="h-5 w-5 text-sky-500" />
+						Consul Services
+					</CardTitle>
 					<Button
 						variant="ghost"
 						size="icon"
@@ -164,7 +167,10 @@ export const ShowConsul = ({ serverId }: { serverId?: string }) => {
 
 			<Card className="bg-sidebar rounded-xl">
 				<CardHeader>
-					<CardTitle className="text-xl">Consul Members</CardTitle>
+					<CardTitle className="flex items-center gap-2 text-xl">
+						<Server className="h-5 w-5 text-emerald-500" />
+						Consul Members
+					</CardTitle>
 				</CardHeader>
 				<CardContent>
 					<Table>

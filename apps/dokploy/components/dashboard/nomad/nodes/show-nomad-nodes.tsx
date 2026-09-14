@@ -44,7 +44,10 @@ export const ShowNomadNodes = ({ serverId }: { serverId?: string }) => {
 	return (
 		<Card className="bg-sidebar rounded-xl">
 			<CardHeader className="flex flex-row items-center justify-between">
-				<CardTitle className="text-xl">Nomad Nodes</CardTitle>
+				<CardTitle className="flex items-center gap-2 text-xl">
+					<Server className="h-5 w-5 text-emerald-500" />
+					Nomad Nodes
+				</CardTitle>
 				<Button variant="ghost" size="icon" onClick={() => refetch()}>
 					<RefreshCw className="h-4 w-4" />
 				</Button>
