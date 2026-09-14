@@ -227,17 +227,18 @@ export const NomadOverview = ({ serverId }: { serverId?: string }) => {
 				</Card>
 			</div>
 
-			{/* Health / autoscaling / activity row */}
-			<div className="grid gap-4 lg:grid-cols-3">
+			{/* Health / autoscaling / activity row. items-start so each card sizes to
+			    its own content instead of stretching to the tallest one. */}
+			<div className="grid items-start gap-4 lg:grid-cols-3">
 				{/* Cluster health */}
 				<Card>
-					<CardHeader className="pb-2">
+					<CardHeader className="p-4 pb-2">
 						<CardTitle className="flex items-center gap-2 text-sm font-medium">
 							<Network className="h-4 w-4 text-muted-foreground" />
 							Cluster health
 						</CardTitle>
 					</CardHeader>
-					<CardContent className="space-y-2 text-sm">
+					<CardContent className="space-y-1.5 p-4 pt-0 text-sm">
 						<div className="flex items-center justify-between">
 							<span className="text-muted-foreground">Raft quorum</span>
 							<span>
@@ -267,13 +268,13 @@ export const NomadOverview = ({ serverId }: { serverId?: string }) => {
 
 				{/* Autoscaling groups */}
 				<Card>
-					<CardHeader className="pb-2">
+					<CardHeader className="p-4 pb-2">
 						<CardTitle className="flex items-center gap-2 text-sm font-medium">
 							<Boxes className="h-4 w-4 text-muted-foreground" />
 							Autoscaling
 						</CardTitle>
 					</CardHeader>
-					<CardContent className="space-y-2 text-sm">
+					<CardContent className="space-y-1.5 p-4 pt-0 text-sm">
 						{groups.length === 0 && (
 							<p className="text-muted-foreground">No autoscaling groups</p>
 						)}
@@ -305,35 +306,33 @@ export const NomadOverview = ({ serverId }: { serverId?: string }) => {
 
 				{/* Recent activity */}
 				<Card>
-					<CardHeader className="pb-2">
+					<CardHeader className="p-4 pb-2">
 						<CardTitle className="flex items-center gap-2 text-sm font-medium">
 							<Activity className="h-4 w-4 text-muted-foreground" />
 							Recent activity
 						</CardTitle>
 					</CardHeader>
-					<CardContent className="space-y-2 text-sm">
+					<CardContent className="space-y-1.5 p-4 pt-0 text-sm">
 						{events.length === 0 && (
 							<p className="text-muted-foreground">No recent activity</p>
 						)}
 						{events.slice(0, 6).map((e, i) => (
 							<div
 								key={`${e.createdAt}-${i}`}
-								className="flex items-start gap-2"
+								className="flex items-center gap-2"
 							>
 								{e.type === "scale_up" ? (
-									<ArrowUpCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-500" />
+									<ArrowUpCircle className="h-3.5 w-3.5 shrink-0 text-green-500" />
 								) : e.type === "scale_down" ? (
-									<ArrowDownCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-500" />
+									<ArrowDownCircle className="h-3.5 w-3.5 shrink-0 text-blue-500" />
 								) : e.type === "error" ? (
-									<ShieldX className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+									<ShieldX className="h-3.5 w-3.5 shrink-0 text-destructive" />
 								) : (
-									<Activity className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+									<Activity className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 								)}
-								<span className="min-w-0 flex-1">
-									<span className="line-clamp-2">{e.message}</span>
-									<span className="text-xs text-muted-foreground">
-										{relTime(e.createdAt)}
-									</span>
+								<span className="min-w-0 flex-1 truncate">{e.message}</span>
+								<span className="shrink-0 text-xs text-muted-foreground">
+									{relTime(e.createdAt)}
 								</span>
 							</div>
 						))}
