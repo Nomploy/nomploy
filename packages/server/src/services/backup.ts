@@ -1,7 +1,7 @@
 import { db } from "@nomploy/server/db";
 import { type apiCreateBackup, backups } from "@nomploy/server/db/schema";
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import type { z } from "zod";
 
 export type Backup = typeof backups.$inferSelect;
@@ -69,6 +69,17 @@ export const removeBackupById = async (backupId: string) => {
 		.returning();
 
 	return result[0];
+};
+
+// Control-plane backups (the panel's own Postgres) — databaseType "web-server",
+// so they have no service relation; keyed only by destination. Instance-level.
+export const findWebServerBackups = async () => {
+	const result = await db.query.backups.findMany({
+		where: eq(backups.databaseType, "web-server"),
+		with: { destination: true },
+		orderBy: desc(backups.appName),
+	});
+	return result || [];
 };
 
 export const findBackupsByDbId = async (

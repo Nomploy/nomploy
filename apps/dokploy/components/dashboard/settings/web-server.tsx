@@ -13,6 +13,7 @@ import { ShowNomployActions } from "./servers/actions/show-nomploy-actions";
 import { ShowStorageActions } from "./servers/actions/show-storage-actions";
 import { ShowTraefikActions } from "./servers/actions/show-traefik-actions";
 import { ToggleDockerCleanup } from "./servers/actions/toggle-docker-cleanup";
+import { ShowWebServerBackups } from "./web-server/show-web-server-backups";
 import { UpdateServer } from "./web-server/update-server";
 
 export const WebServer = () => {
@@ -72,6 +73,7 @@ export const WebServer = () => {
 					</CardContent>
 				</div>
 			</Card>
+			<ShowWebServerBackups />
 		</div>
 	);
 };
