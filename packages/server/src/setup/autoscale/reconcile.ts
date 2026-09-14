@@ -65,6 +65,8 @@ interface Decision {
 	blockedEvals: number;
 	/** Total worker nodes (autoscaler-managed + manually pinned). */
 	workerCount: number;
+	/** Target total worker count after this evaluation (clamped to [min,max]). */
+	desired: number;
 }
 
 /**
@@ -84,6 +86,8 @@ export const evaluateCluster = async (cfg: {
 	organizationId: string;
 	/** Node pool this group scales — capacity, pressure + nodes are scoped to it. */
 	poolName?: string;
+	/** Target total worker count; null falls back to minNodes. */
+	desiredNodes?: number | null;
 }): Promise<Decision> => {
 	const pool = cfg.poolName || "default";
 	// Client nodes IN THIS POOL that can currently receive work.
@@ -173,49 +177,78 @@ export const evaluateCluster = async (cfg: {
 		(w) => w.autoscaled && w.clusterRole === "worker",
 	).length;
 
+	// The current target: the persisted desiredNodes (or minNodes if unset),
+	// clamped to [min,max]. Everything drives toward this — manual sets, reactive
+	// pressure, and (later) scheduled actions all just move `desiredNodes`.
+	const clampN = (n: number) =>
+		Math.max(cfg.minNodes, Math.min(cfg.maxNodes, n));
+	const current = clampN(cfg.desiredNodes ?? cfg.minNodes);
 	const base = { cpuReserved, memReserved, blockedEvals, workerCount };
-	// Floor first: keep at least minNodes total workers. Manual nodes count toward
-	// the floor, so this only provisions an auto node when the total is short.
-	if (workerCount < cfg.minNodes) {
+
+	const cpuHigh = cpuReserved >= cfg.scaleUpThreshold;
+	const memHigh = memReserved >= cfg.memScaleUpThreshold;
+	const slack =
+		cpuReserved <= cfg.scaleDownThreshold &&
+		memReserved <= cfg.memScaleDownThreshold &&
+		blockedEvals === 0;
+
+	// 1) Converge the actual worker count to the current target first. This is where
+	//    a manually- or schedule-set desiredNodes takes effect. Manual nodes count
+	//    toward workerCount but are never removed (autoRemovable gates scale-down).
+	if (workerCount < current) {
 		return {
 			action: "up",
-			reason: `below min nodes (${workerCount} < ${cfg.minNodes})`,
+			reason: `converging to desired ${current} (have ${workerCount})`,
+			desired: current,
 			...base,
 		};
 	}
-	// Two independent reservation checks — scale up if EITHER binds (respecting max).
-	const cpuHigh = cpuReserved >= cfg.scaleUpThreshold;
-	const memHigh = memReserved >= cfg.memScaleUpThreshold;
-	if ((blockedEvals > 0 || cpuHigh || memHigh) && workerCount < cfg.maxNodes) {
+	if (workerCount > current) {
+		return autoRemovable > 0
+			? {
+					action: "down",
+					reason: `above desired ${current} (have ${workerCount})`,
+					desired: current,
+					...base,
+				}
+			: {
+					action: "none",
+					reason: `above desired ${current} but the extras are pinned/manual`,
+					desired: current,
+					...base,
+				};
+	}
+
+	// 2) At the target — let reservation pressure nudge the target by ±1. Because
+	//    we only nudge when already at target, desired never runs more than one node
+	//    ahead of reality (it advances one node per cooldown as they join/leave).
+	if ((blockedEvals > 0 || cpuHigh || memHigh) && current < cfg.maxNodes) {
 		const reasons: string[] = [];
 		if (blockedEvals > 0) reasons.push(`${blockedEvals} blocked eval(s)`);
 		if (cpuHigh) reasons.push(`cpu ${cpuReserved}% ≥ ${cfg.scaleUpThreshold}%`);
 		if (memHigh)
 			reasons.push(`mem ${memReserved}% ≥ ${cfg.memScaleUpThreshold}%`);
-		return { action: "up", reason: reasons.join(", "), ...base };
-	}
-	// Scale down only if both resources are slack, we're above the floor, and there
-	// is an auto node to remove (never a pinned/manual one).
-	const slack =
-		cpuReserved <= cfg.scaleDownThreshold &&
-		memReserved <= cfg.memScaleDownThreshold &&
-		blockedEvals === 0;
-	if (slack && workerCount > cfg.minNodes && autoRemovable > 0) {
 		return {
-			action: "down",
-			reason: `cpu ${cpuReserved}% ≤ ${cfg.scaleDownThreshold}% & mem ${memReserved}% ≤ ${cfg.memScaleDownThreshold}%`,
+			action: "up",
+			reason: `pressure — ${reasons.join(", ")}`,
+			desired: current + 1,
 			...base,
 		};
 	}
-	// Above min + slack but the extras are all pinned/manual nodes we won't touch.
-	if (slack && workerCount > cfg.minNodes && autoRemovable === 0) {
-		return { action: "none", reason: "only pinned nodes above min", ...base };
+	if (slack && current > cfg.minNodes && autoRemovable > 0) {
+		return {
+			action: "down",
+			reason: `slack — cpu ${cpuReserved}% ≤ ${cfg.scaleDownThreshold}% & mem ${memReserved}% ≤ ${cfg.memScaleDownThreshold}%`,
+			desired: current - 1,
+			...base,
+		};
 	}
-	// At or below the floor, or manual nodes exactly satisfy min.
-	if (workerCount <= cfg.minNodes) {
-		return { action: "none", reason: "at min-nodes floor", ...base };
-	}
-	return { action: "none", reason: "within thresholds", ...base };
+	return {
+		action: "none",
+		reason: `at desired ${current}`,
+		desired: current,
+		...base,
+	};
 };
 
 /** Wait until the control plane can SSH into the new node (cloud-init + boot). */
@@ -292,10 +325,15 @@ const reconcileGroup = async (
 		}
 	}
 
+	// Persist the new desired target together with the cooldown stamp, so a
+	// reactive ±1 nudge only sticks when the scale action actually happens.
 	const stamp = () =>
 		db
 			.update(clusterAutoscaler)
-			.set({ lastScaleAt: new Date().toISOString() })
+			.set({
+				lastScaleAt: new Date().toISOString(),
+				desiredNodes: decision.desired,
+			})
 			.where(eq(clusterAutoscaler.autoscalerId, cfg.autoscalerId));
 
 	if (decision.action === "up") {
