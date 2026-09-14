@@ -151,10 +151,10 @@ export const NomadOverview = ({ serverId }: { serverId?: string }) => {
 		<div className="space-y-4">
 			{/* KPI row — live headline, reserved beneath */}
 			<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-				<Card>
+				<Card className="brand-top-accent overflow-hidden">
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 						<CardTitle className="text-sm font-medium">CPU</CardTitle>
-						<Cpu className="h-4 w-4 text-muted-foreground" />
+						<Cpu className="h-4 w-4 text-teal-500" />
 					</CardHeader>
 					<CardContent>
 						<div className="text-2xl font-bold">
@@ -165,6 +165,7 @@ export const NomadOverview = ({ serverId }: { serverId?: string }) => {
 						</div>
 						<Progress
 							value={cpuLive != null ? cpuLive : cpuReserved}
+							indicatorClassName="bg-brand-gradient"
 							className="mt-2"
 						/>
 						<p className="text-xs text-muted-foreground mt-1">
@@ -173,10 +174,10 @@ export const NomadOverview = ({ serverId }: { serverId?: string }) => {
 					</CardContent>
 				</Card>
 
-				<Card>
+				<Card className="brand-top-accent overflow-hidden">
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 						<CardTitle className="text-sm font-medium">Memory</CardTitle>
-						<MemoryStick className="h-4 w-4 text-muted-foreground" />
+						<MemoryStick className="h-4 w-4 text-sky-500" />
 					</CardHeader>
 					<CardContent>
 						<div className="text-2xl font-bold">
@@ -187,6 +188,7 @@ export const NomadOverview = ({ serverId }: { serverId?: string }) => {
 						</div>
 						<Progress
 							value={memLive != null ? memLive : memReserved}
+							indicatorClassName="bg-brand-gradient"
 							className="mt-2"
 						/>
 						<p className="text-xs text-muted-foreground mt-1">
@@ -196,10 +198,10 @@ export const NomadOverview = ({ serverId }: { serverId?: string }) => {
 					</CardContent>
 				</Card>
 
-				<Card>
+				<Card className="brand-top-accent overflow-hidden">
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 						<CardTitle className="text-sm font-medium">Nodes</CardTitle>
-						<Server className="h-4 w-4 text-muted-foreground" />
+						<Server className="h-4 w-4 text-emerald-500" />
 					</CardHeader>
 					<CardContent>
 						<div className="text-2xl font-bold">
@@ -213,10 +215,10 @@ export const NomadOverview = ({ serverId }: { serverId?: string }) => {
 					</CardContent>
 				</Card>
 
-				<Card>
+				<Card className="brand-top-accent overflow-hidden">
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 						<CardTitle className="text-sm font-medium">Workloads</CardTitle>
-						<Container className="h-4 w-4 text-muted-foreground" />
+						<Container className="h-4 w-4 text-cyan-500" />
 					</CardHeader>
 					<CardContent>
 						<div className="text-2xl font-bold">{res.allocations.running}</div>
@@ -231,10 +233,10 @@ export const NomadOverview = ({ serverId }: { serverId?: string }) => {
 			    its own content instead of stretching to the tallest one. */}
 			<div className="grid items-start gap-4 lg:grid-cols-3">
 				{/* Cluster health */}
-				<Card>
+				<Card className="brand-top-accent overflow-hidden">
 					<CardHeader className="p-4 pb-2">
 						<CardTitle className="flex items-center gap-2 text-sm font-medium">
-							<Network className="h-4 w-4 text-muted-foreground" />
+							<Network className="h-4 w-4 text-teal-500" />
 							Cluster health
 						</CardTitle>
 					</CardHeader>
@@ -267,10 +269,10 @@ export const NomadOverview = ({ serverId }: { serverId?: string }) => {
 				</Card>
 
 				{/* Autoscaling groups */}
-				<Card>
+				<Card className="brand-top-accent overflow-hidden">
 					<CardHeader className="p-4 pb-2">
 						<CardTitle className="flex items-center gap-2 text-sm font-medium">
-							<Boxes className="h-4 w-4 text-muted-foreground" />
+							<Boxes className="h-4 w-4 text-sky-500" />
 							Autoscaling
 						</CardTitle>
 					</CardHeader>
@@ -305,10 +307,10 @@ export const NomadOverview = ({ serverId }: { serverId?: string }) => {
 				</Card>
 
 				{/* Recent activity */}
-				<Card>
+				<Card className="brand-top-accent overflow-hidden">
 					<CardHeader className="p-4 pb-2">
 						<CardTitle className="flex items-center gap-2 text-sm font-medium">
-							<Activity className="h-4 w-4 text-muted-foreground" />
+							<Activity className="h-4 w-4 text-cyan-500" />
 							Recent activity
 						</CardTitle>
 					</CardHeader>
