@@ -9,7 +9,11 @@ const buttonVariants = cva(
 	{
 		variants: {
 			variant: {
-				default: "bg-primary text-primary-foreground hover:bg-primary/90",
+				// Primary CTA carries the nomploy teal→sky brand gradient.
+				default:
+					"bg-brand-gradient text-white shadow-sm hover:opacity-90 hover:shadow-md",
+				// Flat primary fill, for when a gradient would be too loud.
+				primary: "bg-primary text-primary-foreground hover:bg-primary/90",
 				destructive:
 					"bg-destructive text-destructive-foreground hover:bg-destructive/70",
 				outline:

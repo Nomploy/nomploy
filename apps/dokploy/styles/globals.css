@@ -14,8 +14,9 @@
 		--popover: 0 0% 100%;
 		--popover-foreground: 240 10% 3.9%;
 
-		--primary: 240 5.9% 10%;
-		--primary-foreground: 0 0% 98%;
+		/* Brand: nomploy teal → sky gradient (from the app icon). */
+		--primary: 174 78% 36%;
+		--primary-foreground: 0 0% 100%;
 
 		--secondary: 240 4.8% 95.9%;
 		--secondary-foreground: 240 5.9% 10%;
@@ -23,32 +24,37 @@
 		--muted: 240 4.8% 95.9%;
 		--muted-foreground: 240 3.8% 46.1%;
 
-		--accent: 240 4.8% 95.9%;
-		--accent-foreground: 240 5.9% 10%;
+		--accent: 174 45% 93%;
+		--accent-foreground: 175 70% 22%;
 
 		--destructive: 0 84.2% 50.2%;
 		--destructive-foreground: 0 0% 98%;
 
 		--border: 240 5.9% 90%;
 		--input: 240 5.9% 90%;
-		--ring: 240 10% 3.9%;
+		--ring: 174 78% 36%;
 
 		--radius: 0.5rem;
 		--overlay: rgba(0, 0, 0, 0.2);
 
-		--chart-1: 173 58% 39%;
-		--chart-2: 12 76% 61%;
-		--chart-3: 197 37% 24%;
-		--chart-4: 43 74% 66%;
-		--chart-5: 27 87% 67%;
+		/* Brand gradient stops — reused by the .*-brand-gradient utilities. */
+		--brand-from: #2dd4bf;
+		--brand-via: #14b8a6;
+		--brand-to: #0ea5e9;
+
+		--chart-1: 174 72% 41%;
+		--chart-2: 199 89% 48%;
+		--chart-3: 160 64% 43%;
+		--chart-4: 187 75% 44%;
+		--chart-5: 217 80% 58%;
 		--sidebar-background: 0 0% 98%;
 		--sidebar-foreground: 240 5.3% 26.1%;
-		--sidebar-primary: 240 5.9% 10%;
-		--sidebar-primary-foreground: 0 0% 98%;
-		--sidebar-accent: 240 4.8% 95.9%;
-		--sidebar-accent-foreground: 240 5.9% 10%;
+		--sidebar-primary: 174 78% 36%;
+		--sidebar-primary-foreground: 0 0% 100%;
+		--sidebar-accent: 174 45% 93%;
+		--sidebar-accent-foreground: 175 70% 22%;
 		--sidebar-border: 220 13% 91%;
-		--sidebar-ring: 217.2 91.2% 59.8%;
+		--sidebar-ring: 174 78% 40%;
 	}
 
 	.dark {
@@ -62,8 +68,9 @@
 		--popover: 240 10% 3.9%;
 		--popover-foreground: 0 0% 98%;
 
-		--primary: 0 0% 98%;
-		--primary-foreground: 240 5.9% 10%;
+		/* Brand: brighter teal on dark so it stays legible on near-black. */
+		--primary: 172 66% 46%;
+		--primary-foreground: 174 90% 8%;
 
 		--secondary: 240 3.7% 15.9%;
 		--secondary-foreground: 0 0% 98%;
@@ -71,31 +78,35 @@
 		--muted: 240 4% 10%;
 		--muted-foreground: 240 5% 64.9%;
 
-		--accent: 240 3.7% 15.9%;
-		--accent-foreground: 0 0% 98%;
+		--accent: 174 42% 15%;
+		--accent-foreground: 172 60% 82%;
 
 		--destructive: 0 84.2% 50.2%;
 		--destructive-foreground: 0 0% 98%;
 
 		--border: 240 3.7% 15.9%;
 		--input: 240 4% 10%;
-		--ring: 240 4.9% 83.9%;
+		--ring: 172 66% 46%;
 
 		--overlay: rgba(0, 0, 0, 0.5);
 
-		--chart-1: 220 70% 50%;
-		--chart-5: 160 60% 45%;
-		--chart-3: 30 80% 55%;
-		--chart-4: 280 65% 60%;
-		--chart-2: 340 75% 55%;
+		--brand-from: #2dd4bf;
+		--brand-via: #14b8a6;
+		--brand-to: #0ea5e9;
+
+		--chart-1: 172 66% 50%;
+		--chart-2: 199 89% 55%;
+		--chart-3: 160 60% 48%;
+		--chart-4: 187 72% 52%;
+		--chart-5: 217 85% 62%;
 		--sidebar-background: 240 5.9% 10%;
 		--sidebar-foreground: 240 4.8% 95.9%;
-		--sidebar-primary: 224.3 76.3% 48%;
-		--sidebar-primary-foreground: 0 0% 100%;
-		--sidebar-accent: 240 3.7% 15.9%;
-		--sidebar-accent-foreground: 240 4.8% 95.9%;
+		--sidebar-primary: 172 66% 46%;
+		--sidebar-primary-foreground: 174 90% 8%;
+		--sidebar-accent: 174 42% 15%;
+		--sidebar-accent-foreground: 172 60% 82%;
 		--sidebar-border: 240 3.7% 15.9%;
-		--sidebar-ring: 217.2 91.2% 59.8%;
+		--sidebar-ring: 172 66% 46%;
 	}
 }
 
@@ -149,6 +160,53 @@
 	.no-scrollbar {
 		-ms-overflow-style: none; /* IE and Edge */
 		scrollbar-width: none; /* Firefox */
+	}
+
+	/* Brand gradient (nomploy teal → sky). Use on hero backgrounds, the logo
+	   tile, badges, and accent bars to carry the brand color through the UI. */
+	.bg-brand-gradient {
+		background-image: linear-gradient(
+			135deg,
+			var(--brand-from),
+			var(--brand-via) 55%,
+			var(--brand-to)
+		);
+	}
+
+	.text-brand-gradient {
+		background-image: linear-gradient(
+			135deg,
+			var(--brand-from),
+			var(--brand-via) 55%,
+			var(--brand-to)
+		);
+		-webkit-background-clip: text;
+		background-clip: text;
+		color: transparent;
+	}
+
+	.border-brand-gradient {
+		border-color: transparent;
+		background-image:
+			linear-gradient(hsl(var(--background)), hsl(var(--background))),
+			linear-gradient(
+				135deg,
+				var(--brand-from),
+				var(--brand-via) 55%,
+				var(--brand-to)
+			);
+		background-origin: border-box;
+		background-clip: padding-box, border-box;
+	}
+
+	/* Faint brand tint — for headers/banners that should read as branded
+	   without overpowering the content on top of them. */
+	.bg-brand-wash {
+		background-image: linear-gradient(
+			135deg,
+			color-mix(in srgb, var(--brand-from) 14%, transparent),
+			color-mix(in srgb, var(--brand-to) 14%, transparent)
+		);
 	}
 }
 
