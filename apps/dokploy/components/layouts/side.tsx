@@ -17,6 +17,7 @@ import {
 	Folder,
 	Forward,
 	GalleryVerticalEnd,
+	Gauge,
 	GitBranch,
 	House,
 	Key,
@@ -208,6 +209,14 @@ const MENU: Menu = {
 			title: "Nomad",
 			url: "/dashboard/nomad",
 			icon: PieChart,
+			isEnabled: ({ permissions, isCloud }) =>
+				!!(permissions?.docker.read && !isCloud),
+		},
+		{
+			isSingle: true,
+			title: "Autoscaling",
+			url: "/dashboard/autoscaling",
+			icon: Gauge,
 			isEnabled: ({ permissions, isCloud }) =>
 				!!(permissions?.docker.read && !isCloud),
 		},
