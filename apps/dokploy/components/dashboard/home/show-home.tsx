@@ -51,7 +51,7 @@ function StatCard({
 	delta?: string;
 }) {
 	return (
-		<div className="rounded-xl border bg-background p-5 min-h-[140px] flex flex-col justify-between">
+		<div className="brand-top-accent overflow-hidden rounded-xl border bg-background p-5 min-h-[140px] flex flex-col justify-between">
 			<span className="text-xs uppercase tracking-wider text-muted-foreground">
 				{label}
 			</span>
@@ -73,7 +73,7 @@ function StatusListCard({
 	items: { dotClass: string; label: string; count: number }[];
 }) {
 	return (
-		<div className="rounded-xl border bg-background p-5 min-h-[140px] flex flex-col gap-3">
+		<div className="brand-top-accent overflow-hidden rounded-xl border bg-background p-5 min-h-[140px] flex flex-col gap-3">
 			<span className="text-xs uppercase tracking-wider text-muted-foreground">
 				{label}
 			</span>
