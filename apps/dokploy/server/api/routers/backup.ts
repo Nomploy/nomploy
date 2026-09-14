@@ -14,6 +14,7 @@ import {
 	findPostgresByBackupId,
 	findPostgresById,
 	findServerById,
+	findWebServerBackups,
 	IS_CLOUD,
 	keepLatestNBackups,
 	removeBackupById,
@@ -151,6 +152,11 @@ export const backupRouter = createTRPCRouter({
 				});
 			}
 		}),
+	// Control-plane backups (the panel's own Postgres). Instance-level — no service
+	// relation — so listed on their own rather than via a database service.
+	listWebServerBackups: withPermission("backup", "read").query(async () => {
+		return findWebServerBackups();
+	}),
 	one: protectedProcedure
 		.input(apiFindOneBackup)
 		.query(async ({ input, ctx }) => {
