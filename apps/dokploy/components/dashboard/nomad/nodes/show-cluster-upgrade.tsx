@@ -6,8 +6,11 @@ import {
 	Loader2,
 	PackageCheck,
 } from "lucide-react";
+import { toast } from "sonner";
 import { AlertBlock } from "@/components/shared/alert-block";
+import { DialogAction } from "@/components/shared/dialog-action";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
 	Table,
@@ -26,6 +29,7 @@ interface VersionNode {
 	consulVersion: string | null;
 	role: "server" | "worker";
 	isLeader: boolean;
+	serverId: string | null;
 }
 
 /**
@@ -36,10 +40,11 @@ interface VersionNode {
  * raft quorum is never lost — not a blind cluster-wide sweep.
  */
 export const ShowClusterUpgrade = ({ serverId }: { serverId?: string }) => {
-	const { data, isLoading } = api.nomad.getClusterVersions.useQuery(
+	const { data, isLoading, refetch } = api.nomad.getClusterVersions.useQuery(
 		{ serverId },
 		{ refetchInterval: 30000 },
 	);
+	const upgrade = api.nomad.upgradeNode.useMutation();
 
 	if (isLoading || !data) {
 		return (
@@ -62,6 +67,29 @@ export const ShowClusterUpgrade = ({ serverId }: { serverId?: string }) => {
 	const servers = nodes.filter((n) => n.role === "server");
 	const serverFollowers = servers.filter((n) => !n.isLeader);
 	const leader = servers.find((n) => n.isLeader);
+
+	// The single node whose upgrade is enabled right now: the first still-outdated,
+	// panel-upgradable node in quorum order. Everything after it waits; the hub
+	// (no serverId) is skipped (manual). Enforces one-at-a-time, leader last.
+	const ordered = [...workers, ...serverFollowers, ...(leader ? [leader] : [])];
+	const nextTarget = ordered.find(
+		(n) => n.serverId && needsUpdate(n.nomadVersion),
+	);
+
+	const runUpgrade = async (node: VersionNode) => {
+		if (!node.serverId) return;
+		try {
+			const res = await upgrade.mutateAsync({ serverId: node.serverId });
+			toast.success(
+				res.changed
+					? `${node.name} upgraded — agent restarted`
+					: `${node.name}: already up to date (no restart)`,
+			);
+			await refetch();
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : "Upgrade failed");
+		}
+	};
 
 	return (
 		<Card className="bg-sidebar rounded-xl">
@@ -99,10 +127,13 @@ export const ShowClusterUpgrade = ({ serverId }: { serverId?: string }) => {
 								<TableHead>Nomad</TableHead>
 								<TableHead>Consul</TableHead>
 								<TableHead>Status</TableHead>
+								<TableHead className="text-right">Upgrade</TableHead>
 							</TableRow>
 						</TableHeader>
 						<TableBody>
 							{nodes.map((n) => {
+								const outdated = needsUpdate(n.nomadVersion);
+								const isNext = nextTarget?.name === n.name;
 								return (
 									<TableRow key={n.name}>
 										<TableCell className="font-medium">
@@ -138,6 +169,45 @@ export const ShowClusterUpgrade = ({ serverId }: { serverId?: string }) => {
 												{n.status}
 											</Badge>
 										</TableCell>
+										<TableCell className="text-right">
+											{!outdated ? (
+												<span className="text-xs text-muted-foreground">
+													up to date
+												</span>
+											) : !n.serverId ? (
+												<span className="text-xs text-muted-foreground">
+													manual
+												</span>
+											) : isNext ? (
+												<DialogAction
+													title={`Upgrade Nomad on ${n.name}?`}
+													description={
+														n.role === "server"
+															? "apt upgrades the package and restarts the Nomad agent. Running allocations keep running; raft rejoins after restart. Wait for it to rejoin before the next node."
+															: "apt upgrades the package and restarts the Nomad agent. Running allocations on this worker keep running and reconnect after restart."
+													}
+													type="default"
+													onClick={() => runUpgrade(n)}
+												>
+													<Button
+														size="sm"
+														variant="outline"
+														disabled={upgrade.isPending}
+													>
+														{upgrade.isPending ? (
+															<Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+														) : (
+															<ArrowUpCircle className="mr-2 h-3.5 w-3.5" />
+														)}
+														Upgrade
+													</Button>
+												</DialogAction>
+											) : (
+												<span className="text-xs text-muted-foreground">
+													{n.isLeader ? "leader — last" : "waiting"}
+												</span>
+											)}
+										</TableCell>
 									</TableRow>
 								);
 							})}
@@ -148,10 +218,13 @@ export const ShowClusterUpgrade = ({ serverId }: { serverId?: string }) => {
 				{(data.skew || (!data.upToDate && latest)) && (
 					<div className="space-y-2">
 						<AlertBlock type="info">
-							Upgrade one node at a time so raft quorum is never lost. From each
-							node's settings: drain it (Maintenance), upgrade the Nomad package
-							(<span className="font-mono">apt-get install nomad</span>), and
-							let it rejoin before moving on.
+							Use the Upgrade buttons one node at a time — they're enabled in
+							quorum-safe order so raft is never lost. Each upgrades the Nomad
+							package over SSH and restarts the agent only if it actually
+							changed (running allocations keep running). The control-plane hub
+							has no server record, so upgrade it manually (
+							<span className="font-mono">apt-get install nomad</span> on the
+							hub).
 						</AlertBlock>
 						<div className="text-sm">
 							<p className="font-medium mb-1">Quorum-safe order</p>
