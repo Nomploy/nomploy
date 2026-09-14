@@ -1,7 +1,8 @@
 import { Resolver } from "node:dns/promises";
+import * as tls from "node:tls";
 import { eq } from "drizzle-orm";
 import { db } from "../../db";
-import { notifications } from "../../db/schema";
+import { domains, notifications } from "../../db/schema";
 import {
 	type ClusterAlertPayload,
 	sendClusterAlertNotifications,
@@ -13,12 +14,54 @@ const DISK_PERCENT_THRESHOLD = 85;
 // Consecutive ticks of blocked evaluations before alerting (ignores the transient
 // blocks that are normal while the autoscaler is bringing capacity up).
 const BLOCKED_EVAL_TICKS = 2;
+// Warn when a TLS certificate has fewer than this many days left.
+const CERT_EXPIRY_WARN_DAYS = 14;
+// Certs change at most daily, so probe them far less often than the main loop.
+const CERT_CHECK_INTERVAL_MS = 30 * 60 * 1000;
+
+// Days until the TLS cert served at host:443 expires; null if unreachable / no
+// cert (a reachability problem, not a cert-expiry one — we don't alert on null).
+const certDaysLeft = (host: string): Promise<number | null> =>
+	new Promise((resolve) => {
+		let done = false;
+		const finish = (v: number | null) => {
+			if (done) return;
+			done = true;
+			resolve(v);
+		};
+		try {
+			const socket = tls.connect(
+				{
+					host,
+					port: 443,
+					servername: host,
+					timeout: 5000,
+					rejectUnauthorized: false,
+				},
+				() => {
+					const cert = socket.getPeerCertificate();
+					socket.end();
+					if (!cert?.valid_to) return finish(null);
+					const ms = new Date(cert.valid_to).getTime() - Date.now();
+					finish(Math.floor(ms / 86_400_000));
+				},
+			);
+			socket.on("error", () => finish(null));
+			socket.on("timeout", () => {
+				socket.destroy();
+				finish(null);
+			});
+		} catch {
+			finish(null);
+		}
+	});
 
 /**
  * Cluster health monitor. On an interval it evaluates high-signal cluster
  * conditions — node reachability, raft leadership, cluster DNS resolvers,
- * sustained unplaceable allocations, and per-node disk pressure — and, on a state
- * TRANSITION, fires a cluster-alert notification to every org that has the
+ * sustained unplaceable allocations, per-node disk pressure, and TLS certificate
+ * expiry — and, on a state TRANSITION, fires a cluster-alert notification to
+ * every org that has the
  * clusterAlert channel enabled. State is per-subject and in-memory; the first
  * observation of a subject seeds silently (no alert), so it only alerts on real
  * changes, not on what was already broken at boot. Reuses the same channels as
@@ -40,6 +83,8 @@ type Health = "ok" | "bad";
 const state = new Map<string, Health>();
 // Consecutive ticks with blocked evaluations (for the sustained-blocked check).
 let blockedTicks = 0;
+// When the cert-expiry probes last ran (they run every CERT_CHECK_INTERVAL_MS).
+let lastCertCheck = 0;
 
 // Distinct orgs with at least one clusterAlert-enabled notification channel.
 const alertOrgs = async (): Promise<string[]> => {
@@ -189,6 +234,30 @@ export const checkClusterHealth = async (): Promise<void> => {
 					upMessage: `Root filesystem on ${n.Name} is back under ${DISK_PERCENT_THRESHOLD}%.`,
 				},
 			);
+		} catch {}
+	}
+
+	// 6) TLS certificate expiry — probe each HTTPS domain's cert (throttled, since
+	//    certs change at most daily). null (unreachable) is skipped, not alerted.
+	if (Date.now() - lastCertCheck >= CERT_CHECK_INTERVAL_MS) {
+		lastCertCheck = Date.now();
+		try {
+			const rows = await db.query.domains.findMany({
+				where: eq(domains.https, true),
+				columns: { host: true },
+			});
+			const hosts = [...new Set(rows.map((r) => r.host).filter(Boolean))];
+			for (const host of hosts) {
+				const days = await certDaysLeft(host);
+				if (days === null) continue;
+				await evaluate(`cert:${host}`, days >= CERT_EXPIRY_WARN_DAYS, {
+					downType: days < 3 ? "critical" : "warning",
+					downTitle: `TLS certificate expiring for ${host}`,
+					downMessage: `The TLS certificate for ${host} expires in ${days} day(s). Check that Let's Encrypt renewal is working (Traefik).`,
+					upTitle: `TLS certificate renewed for ${host}`,
+					upMessage: `The certificate for ${host} is valid for ${days} more days.`,
+				});
+			}
 		} catch {}
 	}
 };
