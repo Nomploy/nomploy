@@ -2024,8 +2024,9 @@ export const HandleNotifications = ({ notificationId }: Props) => {
 											<div className="space-y-0.5">
 												<FormLabel>Cluster Alerts</FormLabel>
 												<FormDescription>
-													Trigger the action when the cluster autoscaler adds or
-													removes a node, or fails to provision one.
+													Autoscaler activity (a node added, removed, or a
+													failed provision) and cluster health — a node going
+													down or raft losing its leader, with recovery notices.
 												</FormDescription>
 											</div>
 											<FormControl>

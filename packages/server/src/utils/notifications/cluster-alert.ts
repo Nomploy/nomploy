@@ -13,8 +13,16 @@ import {
 } from "./utils";
 
 export interface ClusterAlertPayload {
-	/** Maps onto the autoscaler event type. */
-	EventType: "scale_up" | "scale_down" | "error";
+	/** Autoscaler activity (scale_up/scale_down/error) or a health-monitor event. */
+	EventType:
+		| "scale_up"
+		| "scale_down"
+		| "error"
+		| "warning"
+		| "critical"
+		| "recovered";
+	/** Overrides the default title for this event type (health checks set their own). */
+	Title?: string;
 	Message: string;
 	Detail?: string;
 	Timestamp: string;
@@ -44,6 +52,24 @@ const META: Record<
 		color: 0xff0000,
 		slackColor: "#FF0000",
 	},
+	warning: {
+		title: "Cluster warning",
+		emoji: "⚠️",
+		color: 0xf1c40f,
+		slackColor: "#F1C40F",
+	},
+	critical: {
+		title: "Cluster critical",
+		emoji: "🔴",
+		color: 0xff0000,
+		slackColor: "#FF0000",
+	},
+	recovered: {
+		title: "Cluster recovered",
+		emoji: "✅",
+		color: 0x2ecc71,
+		slackColor: "#2ECC71",
+	},
 };
 
 /**
@@ -60,7 +86,7 @@ export const sendClusterAlertNotifications = async (
 	const date = new Date(payload.Timestamp);
 	const meta = META[payload.EventType];
 	const group = payload.GroupName ? ` (${payload.GroupName})` : "";
-	const title = `${meta.emoji} ${meta.title}${group}`;
+	const title = `${meta.emoji} ${payload.Title ?? meta.title}${group}`;
 
 	const notificationList = await db.query.notifications.findMany({
 		where: and(
