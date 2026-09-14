@@ -170,3 +170,63 @@ export const apiSetDesiredCount = z.object({
 	groupId: z.string().min(1),
 	desiredNodes: z.number().int().min(0),
 });
+
+/**
+ * Scheduled scaling actions for a group (like a cloud ASG's scheduled actions).
+ * At each cron fire, the action sets the group's desiredNodes (and optionally
+ * overrides min/max), then a reconcile converges to it. e.g. "Mon–Fri 09:00 →
+ * desired 3", "18:00 → desired 0". Cron is evaluated in `timezone` (IANA, default
+ * UTC).
+ */
+export const autoscalingSchedule = pgTable("autoscaling_schedule", {
+	scheduleId: text("scheduleId")
+		.notNull()
+		.primaryKey()
+		.$defaultFn(() => nanoid()),
+	autoscalerId: text("autoscalerId")
+		.notNull()
+		.references(() => clusterAutoscaler.autoscalerId, { onDelete: "cascade" }),
+	organizationId: text("organizationId")
+		.notNull()
+		.references(() => organization.id, { onDelete: "cascade" }),
+	name: text("name").notNull(),
+	cronExpression: text("cronExpression").notNull(),
+	desiredNodes: integer("desiredNodes").notNull(),
+	// Optional min/max overrides applied alongside desired at fire time.
+	minNodes: integer("minNodes"),
+	maxNodes: integer("maxNodes"),
+	timezone: text("timezone").notNull().default("UTC"),
+	enabled: boolean("enabled").notNull().default(true),
+	createdAt: text("createdAt")
+		.notNull()
+		.$defaultFn(() => new Date().toISOString()),
+});
+
+export const autoscalingScheduleRelations = relations(
+	autoscalingSchedule,
+	({ one }) => ({
+		group: one(clusterAutoscaler, {
+			fields: [autoscalingSchedule.autoscalerId],
+			references: [clusterAutoscaler.autoscalerId],
+		}),
+	}),
+);
+
+const scheduleSchema = createInsertSchema(autoscalingSchedule);
+export const apiUpsertAutoscalingSchedule = scheduleSchema
+	.pick({
+		autoscalerId: true,
+		name: true,
+		cronExpression: true,
+		desiredNodes: true,
+		minNodes: true,
+		maxNodes: true,
+		timezone: true,
+		enabled: true,
+	})
+	.extend({
+		// present = update that schedule; absent = create.
+		scheduleId: z.string().optional(),
+		cronExpression: z.string().min(1),
+		desiredNodes: z.number().int().min(0),
+	});

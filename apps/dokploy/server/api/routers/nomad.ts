@@ -3,6 +3,8 @@ import { db } from "@nomploy/server/db";
 import {
 	apiSetDesiredCount,
 	apiUpsertAutoscalingGroup,
+	apiUpsertAutoscalingSchedule,
+	autoscalingSchedule,
 	clusterAutoscaler,
 	clusterAutoscalerEvents,
 	networkPolicies,
@@ -20,6 +22,10 @@ import {
 	provisionAndJoinNode,
 	reconcileAutoscaler,
 } from "@nomploy/server/setup/autoscale/reconcile";
+import {
+	removeAutoscalingScheduleJob,
+	rescheduleAutoscalingAction,
+} from "@nomploy/server/setup/autoscale/schedule";
 import { getNomadBootstrapCommand } from "@nomploy/server/setup/nomad-bootstrap";
 import {
 	getClusterServerJoinCommand,
@@ -2080,6 +2086,78 @@ fi`;
 				console.log(`[autoscaler:${org}] ${l.trimEnd()}`),
 			).catch((e) => console.error(`[autoscaler:${org}]`, e));
 			return { desired };
+		}),
+
+	// ── Scheduled scaling (per group) ──────────────────────────────────────────
+	listAutoscalingSchedules: protectedProcedure
+		.input(z.object({ groupId: z.string() }))
+		.query(async ({ input, ctx }) => {
+			const org = ctx.session?.activeOrganizationId;
+			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+			return db.query.autoscalingSchedule.findMany({
+				where: and(
+					eq(autoscalingSchedule.autoscalerId, input.groupId),
+					eq(autoscalingSchedule.organizationId, org),
+				),
+				orderBy: [asc(autoscalingSchedule.name)],
+			});
+		}),
+
+	upsertAutoscalingSchedule: protectedProcedure
+		.input(apiUpsertAutoscalingSchedule)
+		.mutation(async ({ input, ctx }) => {
+			const org = ctx.session?.activeOrganizationId;
+			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+			// The group must belong to the caller's org.
+			const group = await db.query.clusterAutoscaler.findFirst({
+				where: and(
+					eq(clusterAutoscaler.autoscalerId, input.autoscalerId),
+					eq(clusterAutoscaler.organizationId, org),
+				),
+				columns: { autoscalerId: true },
+			});
+			if (!group) throw new TRPCError({ code: "NOT_FOUND" });
+			const { scheduleId, ...rest } = input;
+			let id = scheduleId;
+			if (scheduleId) {
+				const existing = await db.query.autoscalingSchedule.findFirst({
+					where: and(
+						eq(autoscalingSchedule.scheduleId, scheduleId),
+						eq(autoscalingSchedule.organizationId, org),
+					),
+					columns: { scheduleId: true },
+				});
+				if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
+				await db
+					.update(autoscalingSchedule)
+					.set({ ...rest })
+					.where(eq(autoscalingSchedule.scheduleId, scheduleId));
+			} else {
+				const [row] = await db
+					.insert(autoscalingSchedule)
+					.values({ ...rest, organizationId: org })
+					.returning({ scheduleId: autoscalingSchedule.scheduleId });
+				id = row?.scheduleId;
+			}
+			if (id) await rescheduleAutoscalingAction(id);
+			return { scheduleId: id };
+		}),
+
+	deleteAutoscalingSchedule: protectedProcedure
+		.input(z.object({ scheduleId: z.string() }))
+		.mutation(async ({ input, ctx }) => {
+			const org = ctx.session?.activeOrganizationId;
+			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
+			await db
+				.delete(autoscalingSchedule)
+				.where(
+					and(
+						eq(autoscalingSchedule.scheduleId, input.scheduleId),
+						eq(autoscalingSchedule.organizationId, org),
+					),
+				);
+			removeAutoscalingScheduleJob(input.scheduleId);
+			return { success: true };
 		}),
 
 	upsertAutoscalingGroup: protectedProcedure

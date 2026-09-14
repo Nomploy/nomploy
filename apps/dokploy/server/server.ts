@@ -73,6 +73,11 @@ void app.prepare().then(async () => {
 				"@nomploy/server/setup/autoscale/reconcile"
 			);
 			startAutoscalerLoop(60);
+			// Scheduled scaling actions (cron → set a group's desired count).
+			const { initAutoscalingSchedules } = await import(
+				"@nomploy/server/setup/autoscale/schedule"
+			);
+			await initAutoscalingSchedules();
 		}
 		await initEnterpriseBackupCronJobs();
 

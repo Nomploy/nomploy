@@ -29,6 +29,7 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { api } from "@/utils/api";
+import { AutoscalingSchedules } from "./autoscaling-schedules";
 
 type Form = {
 	name: string;
@@ -576,6 +577,8 @@ const GroupCard = ({
 						</Button>
 					</div>
 				)}
+
+				{group && <AutoscalingSchedules groupId={group.groupId} />}
 				{status?.nodes && status.nodes.length > 0 && (
 					<div className="overflow-x-auto rounded-lg border">
 						<Table>
