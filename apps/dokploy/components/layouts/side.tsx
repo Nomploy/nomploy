@@ -946,7 +946,7 @@ export default function Page({ children }: Props) {
 		>
 			<MobileCloser />
 			<Sidebar collapsible="icon" variant="floating">
-				<SidebarHeader>
+				<SidebarHeader className="bg-brand-wash rounded-t-lg">
 					{/* <SidebarMenuButton
 						className="group-data-[collapsible=icon]:!p-0"
 						size="lg"

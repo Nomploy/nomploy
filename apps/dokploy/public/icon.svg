@@ -1,10 +1,11 @@
-<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
-<style>
-  :root { color-scheme: light dark; }
-  path { fill: black; }
-  @media (prefers-color-scheme: dark) {
-    path { fill: white; }
-  }
-</style>
-<path d="M20 100 L20 20 L38 20 L82 74 L82 20 L100 20 L100 100 L82 100 L38 46 L38 100 Z"/>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ng" x1="40" y1="24" x2="472" y2="488" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2DD4BF"/>
+      <stop offset="0.55" stop-color="#14B8A6"/>
+      <stop offset="1" stop-color="#0EA5E9"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#ng)"/>
+  <path fill="#ffffff" d="M140 140 H196 V372 H140 Z M316 140 H372 V372 H316 Z M140 140 H240 L372 372 H272 Z"/>
 </svg>
