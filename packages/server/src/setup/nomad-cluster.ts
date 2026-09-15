@@ -227,9 +227,11 @@ AllowedIPs = ${overlayCidr}
 PersistentKeepalive = 25${extraServerPeers}
 WG
 $SUDO chmod 600 /etc/wireguard/wg0.conf
+# Bring wg0 up THROUGH systemd (enable --now) so systemctl is-active reflects
+# reality — a plain wg-quick up leaves the interface up but untracked by systemd,
+# which made health checks and diagnostics report it as inactive/dead.
 $SUDO wg-quick down wg0 >/dev/null 2>&1 || true
-$SUDO wg-quick up wg0
-$SUDO systemctl enable wg-quick@wg0 >/dev/null 2>&1 || true
+$SUDO systemctl enable --now wg-quick@wg0
 echo "WORKER_WG_PUBKEY=$($SUDO cat /etc/wireguard/w_pub)"
 
 # ── Consul client ──────────────────────────────────────────────────────────
@@ -312,9 +314,9 @@ PostUp = sysctl -w net.ipv4.ip_forward=1; iptables -A FORWARD -i wg0 -j ACCEPT; 
 PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o wg0 -j ACCEPT${serverPeers}${workerPeers}
 WG
 $SUDO chmod 600 /etc/wireguard/wg0.conf
+# Bring wg0 up THROUGH systemd (see the worker block for why).
 $SUDO wg-quick down wg0 >/dev/null 2>&1 || true
-$SUDO wg-quick up wg0
-$SUDO systemctl enable wg-quick@wg0 >/dev/null 2>&1 || true
+$SUDO systemctl enable --now wg-quick@wg0
 echo "SERVER_WG_PUBKEY=$($SUDO cat /etc/wireguard/srv_pub)"
 
 # ── Consul server ──────────────────────────────────────────────────────────
