@@ -578,6 +578,13 @@ ${portLines}
 	const portsConfig = hasPorts
 		? `\n        ports = [${service.ports.map((p) => `"${p.label}"`).join(", ")}]`
 		: "";
+	// Persist the service's volumes/mounts as docker volumes (same mechanism as the
+	// compose path). Without this an application/service with a mount ran on ephemeral
+	// storage and lost its data on every redeploy. NOTE: docker volumes are node-local
+	// — a stateful service with replicas>1 or that reschedules to another node won't
+	// see the data; pin it to a single-node pool (or use a managed database, which is
+	// pinned by design in nomad-database.ts).
+	const volumesConfig = generateVolumesConfig(appName, service.volumes);
 
 	// Spread replicas across distinct nodes so a multi-replica service uses the
 	// whole cluster instead of bin-packing onto one box. Soft (spread, not a
@@ -605,7 +612,7 @@ ${consulServices}
       driver = "docker"
 
       config {
-        image = "${service.image}"${portsConfig}${entrypointLine}
+        image = "${service.image}"${portsConfig}${entrypointLine}${volumesConfig}
       }
 
 ${envBlock}${secretsBlock}

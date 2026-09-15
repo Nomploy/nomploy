@@ -102,6 +102,24 @@ export const applicationToNomadSpec = (
 			}
 		: undefined;
 
+	// Volume + bind mounts → persistent docker volumes (the generator prefixes named
+	// volumes with the app name). Without this an app's mount ran on ephemeral storage
+	// and was wiped on every redeploy. `file` mounts write content into the container
+	// and are handled separately (a template stanza) — not persistence, so skipped here.
+	const volumes = (application.mounts ?? [])
+		.filter((m) => m.type === "volume" || m.type === "bind")
+		.map((m) => ({
+			source:
+				m.type === "volume"
+					? (m.volumeName ?? undefined)
+					: (m.hostPath ?? undefined),
+			target: m.mountPath,
+			named: m.type === "volume",
+		}))
+		.filter((v): v is { source: string; target: string; named: boolean } =>
+			Boolean(v.source && v.target),
+		);
+
 	return {
 		name: NOMAD_APP_SERVICE_NAME,
 		image: imageOverride ?? resolveApplicationImage(application),
@@ -114,6 +132,7 @@ export const applicationToNomadSpec = (
 		entrypoint: entrypoint.length > 0 ? entrypoint : undefined,
 		resources: cpu || memory ? { cpu, memory } : undefined,
 		scaling,
+		volumes: volumes.length > 0 ? volumes : undefined,
 		// Inject secrets from nomad/jobs/<appName> when the app opted in.
 		secrets: !!application.nomadSecretsEnabled,
 	};
