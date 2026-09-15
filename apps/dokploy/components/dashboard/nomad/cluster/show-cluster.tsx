@@ -48,6 +48,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
 	Select,
@@ -243,11 +244,22 @@ export const ShowCluster = () => {
 	const [byoOpen, setByoOpen] = useState(false);
 	const [byoServerId, setByoServerId] = useState("");
 	const [byoRole, setByoRole] = useState<ClusterRole>("worker");
+	// Which Nomad node pool a worker joins (blank = "default"). Lets you dedicate a
+	// node to a pool — e.g. a "db" pool that stateful jobs target, kept off the
+	// autoscaled ephemeral workers. Ignored for server nodes.
+	const [byoNodePool, setByoNodePool] = useState("");
 	const [isJoining, setIsJoining] = useState(false);
 	const [joinLogs, setJoinLogs] = useState("");
 
 	api.nomad.joinCluster.useSubscription(
-		{ serverId: byoServerId, role: byoRole },
+		{
+			serverId: byoServerId,
+			role: byoRole,
+			nodePool:
+				byoRole === "worker" && byoNodePool.trim()
+					? byoNodePool.trim()
+					: undefined,
+		},
 		{
 			enabled: isJoining && !!byoServerId,
 			onData(log) {
@@ -445,6 +457,7 @@ export const ShowCluster = () => {
 								onClick={() => {
 									setByoServerId(candidates[0]?.serverId ?? "");
 									setByoRole("worker");
+									setByoNodePool("");
 									setJoinLogs("");
 									setByoOpen(true);
 								}}
@@ -889,6 +902,31 @@ export const ShowCluster = () => {
 									</SelectContent>
 								</Select>
 							</div>
+							{byoRole === "worker" && (
+								<div className="space-y-1.5">
+									<Label>Node pool</Label>
+									<Input
+										value={byoNodePool}
+										onChange={(e) => setByoNodePool(e.target.value)}
+										placeholder="default"
+										list="byo-node-pools"
+										disabled={isJoining}
+									/>
+									<datalist id="byo-node-pools">
+										<option value="default" />
+										{(autoscalingGroups ?? []).map((g) => (
+											<option key={g.poolName} value={g.poolName} />
+										))}
+									</datalist>
+									<p className="text-muted-foreground text-xs">
+										The Nomad pool this node joins. Pick an autoscaling group's
+										pool, or type a new name to dedicate the node — e.g. a{" "}
+										<code>db</code> pool that stateful jobs target (set{" "}
+										<code>node_pool</code> on the app), kept off the autoscaled
+										workers. Blank = <code>default</code>.
+									</p>
+								</div>
+							)}
 							<p className="text-muted-foreground text-xs">
 								The server must be SSH-reachable from the control plane. If its
 								key isn't authorized yet, the log below prints the exact
