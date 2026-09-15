@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Cut a nomploy release: bump the panel version, commit, tag, and push.
+# Cut a nomploy release: tag the current main and push (no version-file bump).
 #
 # Channel model (see .github/workflows/nomploy.yml): pushing to `main` only
 # rebuilds the `:edge` image (rolling dev). `:latest` — what the panel self-
 # updates from — moves ONLY when a version tag `vX.Y.Z` is pushed, which this
 # script does. So production changes exactly when you cut a release, and the
-# version the panel shows (apps/dokploy/package.json) is always a real release.
+# version the panel reports is baked from this tag by CI (NOMPLOY_VERSION build
+# arg), not stored in package.json — see the commit step below for why.
 #
 # Usage:  scripts/release.sh 0.30.0        # -> tag v0.30.0, image :v0.30.0 + :latest
 #         scripts/release.sh v0.30.0       # 'v' optional
@@ -22,7 +23,6 @@ if [[ ! "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$ ]]; then
   exit 1
 fi
 tag="v${ver}"
-pkg="apps/dokploy/package.json"
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
@@ -42,17 +42,21 @@ if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
   exit 1
 fi
 
-# Bump the version the panel reports (packageInfo.version).
-node -e "const f='${pkg}';const p=require('./'+f);p.version='${tag}';require('fs').writeFileSync(f, JSON.stringify(p,null,'\t')+'\n');"
-echo "bumped ${pkg} -> ${tag}"
-
-git add "$pkg"
-git commit -m "release: ${tag}"
+# No version bump: the panel version is baked from this tag by CI
+# (--build-arg NOMPLOY_VERSION, see nomploy.yml + server/nomploy-version.ts).
+# Bumping package.json used to change the file COPY'd before `pnpm install`,
+# busting that Docker cache layer and forcing a near-cold build every release.
+#
+# Instead push an EMPTY "release:" marker commit: CI's `setup` guard skips the
+# redundant main/:edge build for "release:" commits, so the tag build (:latest +
+# :vX.Y.Z) is the ONLY build that runs — one build per release. The empty commit
+# shares its parent's tree, so it doesn't invalidate any Docker layer either.
+git commit --allow-empty -m "release: ${tag}"
 git tag -a "${tag}" -m "nomploy ${tag}"
 git push origin main
 git push origin "${tag}"
 
 echo
 echo "✅ Released ${tag}."
-echo "   CI is building ghcr.io/nomploy/nomploy:${tag} + :latest (multi-arch)."
+echo "   CI is building ghcr.io/nomploy/nomploy:${tag} + :latest (amd64)."
 echo "   Once green, click Reload/Update in the panel to roll production to ${tag}."

@@ -107,6 +107,14 @@ RUN ok=0; for i in 1 2 3; do \
 # Install buildpacks
 COPY --from=buildpacksio/pack:0.39.1 /usr/local/bin/pack /usr/local/bin/pack
 
+# The panel version, baked from the git ref by CI (--build-arg NOMPLOY_VERSION).
+# Placed AFTER every COPY so a new version only busts the trivial trailing layers
+# — never the pnpm-install/build layers. This is why releases no longer bump
+# package.json (which would bust the install cache and force a cold build every
+# time); the app reads this env first (see server/nomploy-version.ts).
+ARG NOMPLOY_VERSION=dev
+ENV NOMPLOY_VERSION=$NOMPLOY_VERSION
+
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=5 \
