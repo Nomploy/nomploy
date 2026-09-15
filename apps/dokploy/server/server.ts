@@ -63,26 +63,47 @@ void app.prepare().then(async () => {
 			createDefaultMiddlewares();
 			// No docker overlay network on Nomad — services use the WireGuard overlay
 			// + Consul; creating an "overlay" network here needs Swarm and 403s.
-			await initCronJobs();
-			await initSchedules();
-			await initCancelDeployments();
-			await initVolumeBackupsCronJobs();
-			await sendNomployRestartNotifications();
-			// Phase C: cluster autoscaler loop (reconciles orgs that enabled it).
-			const { startAutoscalerLoop } = await import(
-				"@nomploy/server/setup/autoscale/reconcile"
+
+			// Background SINGLETONS (cron backups/schedules, the autoscaler, cluster
+			// health monitor, scheduled scaling) must run on exactly ONE panel. Gate
+			// them behind a Postgres advisory-lock leader election so a rolling/canary
+			// update — where a new panel briefly overlaps the old — never double-runs
+			// them. With count=1 the lock is always free, so this is a no-op today;
+			// the non-leader serves HTTP and inherits the loops when the old panel
+			// exits (releasing the lock). HTTP serving + the deployment worker below
+			// run on every instance regardless.
+			const { runAsLeader } = await import("@nomploy/server/setup/leader");
+			await runAsLeader(
+				async () => {
+					console.log("✅ Control-plane leader — starting background loops");
+					await initCronJobs();
+					await initSchedules();
+					await initCancelDeployments();
+					await initVolumeBackupsCronJobs();
+					await sendNomployRestartNotifications();
+					// Phase C: cluster autoscaler loop (reconciles orgs that enabled it).
+					const { startAutoscalerLoop } = await import(
+						"@nomploy/server/setup/autoscale/reconcile"
+					);
+					startAutoscalerLoop(60);
+					// Scheduled scaling actions (cron → set a group's desired count).
+					const { initAutoscalingSchedules } = await import(
+						"@nomploy/server/setup/autoscale/schedule"
+					);
+					await initAutoscalingSchedules();
+					// Cluster health monitor (node down / raft leader → cluster alerts).
+					const { startClusterHealthLoop } = await import(
+						"@nomploy/server/setup/monitoring/cluster-health"
+					);
+					startClusterHealthLoop(60);
+				},
+				{
+					onWait: () =>
+						console.log(
+							"⏳ Another panel holds control-plane leadership; serving HTTP only (will take over the loops if it exits)",
+						),
+				},
 			);
-			startAutoscalerLoop(60);
-			// Scheduled scaling actions (cron → set a group's desired count).
-			const { initAutoscalingSchedules } = await import(
-				"@nomploy/server/setup/autoscale/schedule"
-			);
-			await initAutoscalingSchedules();
-			// Cluster health monitor (node down / raft leader → cluster alerts).
-			const { startClusterHealthLoop } = await import(
-				"@nomploy/server/setup/monitoring/cluster-health"
-			);
-			startClusterHealthLoop(60);
 		}
 		await initEnterpriseBackupCronJobs();
 
