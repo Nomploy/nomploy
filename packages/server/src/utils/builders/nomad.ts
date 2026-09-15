@@ -32,7 +32,10 @@ export interface NomadServiceSpec {
 	};
 	resources?: {
 		cpu?: number;
+		/** Scheduling reservation (soft floor), MB. Docker `mem_reservation`. */
 		memory?: number;
+		/** Hard cgroup cap the task may burst to, MB. Docker `mem_limit`. */
+		memoryMax?: number;
 		/** Number of NVIDIA GPUs to request (nomad-device-nvidia). */
 		gpus?: number;
 	};
@@ -701,9 +704,20 @@ const generateResourcesBlock = (
           count = ${resources.gpus}
         }`
 			: "";
+	// Docker compose services are unbounded by default, and container runtimes that
+	// size themselves to the cgroup limit (Node's V8 heap, the JVM) will OOM when the
+	// hard cap equals the reservation — e.g. a Next.js app dies at a 512 MB cap with
+	// its heap pinned near 256 MB. So reserve `memory` for scheduling but allow
+	// bursting to `memory_max` (needs cluster memory oversubscription, enabled in
+	// install.sh), mirroring the panel job's own 512→2048 pattern. An explicit compose
+	// limit (`mem_limit` → memoryMax) wins; otherwise give generous headroom.
+	const memory = resources?.memory || 512;
+	const memoryMax = resources?.memoryMax ?? Math.max(memory * 4, 2048);
+	const memoryMaxLine =
+		memoryMax > memory ? `\n        memory_max = ${memoryMax}` : "";
 	return `      resources {
         cpu    = ${resources?.cpu || 256}
-        memory = ${resources?.memory || 512}${gpuBlock}
+        memory = ${memory}${memoryMaxLine}${gpuBlock}
       }`;
 };
 

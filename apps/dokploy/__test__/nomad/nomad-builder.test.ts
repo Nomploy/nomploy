@@ -97,7 +97,7 @@ describe("nomad builder — compose → HCL (live)", () => {
 		expect(hcl).toContain("https://api.example.com");
 		expect(hcl).toContain('NODE_ENV = "production"');
 
-		// Resource limits translated (0.5 CPU -> 500 MHz, 512M -> 512 MB)
+		// Resource limits translated (0.5 CPU -> 500 MHz, 512M -> 512 MB reservation)
 		expect(hcl).toContain("cpu    = 500");
 		expect(hcl).toContain("memory = 512");
 
@@ -178,9 +178,12 @@ services:
 		// nested inside the task's resources block.
 		expect(hcl).toContain('device "nvidia/gpu"');
 		expect(hcl).toContain("count = 2");
-		// CPU/memory limits still translate alongside the GPU request.
+		// CPU/memory limits still translate alongside the GPU request. A Docker
+		// `limit` is a HARD cap → Nomad memory_max (burst ceiling); the reservation
+		// stays at the default floor so the scheduler doesn't over-reserve.
 		expect(hcl).toContain("cpu    = 2000");
-		expect(hcl).toContain("memory = 4096");
+		expect(hcl).toContain("memory = 512");
+		expect(hcl).toContain("memory_max = 4096");
 	});
 
 	it("emits node_pool only when the compose targets an autoscaling group", async () => {

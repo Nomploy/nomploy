@@ -191,35 +191,62 @@ const extractHealthCheck = (
 const extractResources = (
 	service: DefinitionsService,
 ): NomadServiceSpec["resources"] => {
-	const deploy = service.deploy;
-	if (!deploy) return undefined;
-
-	// @ts-ignore - resources might exist in deploy
-	const resources = deploy.resources;
-	if (!resources) return undefined;
-
 	let cpu: number | undefined;
-	let memory: number | undefined;
+	let memory: number | undefined; // soft floor → Nomad `memory`
+	let memoryMax: number | undefined; // hard cap → Nomad `memory_max`
 
-	const limits = resources.limits;
+	// Docker's `limit` is a HARD cap (→ memory_max); `reservation` is a soft floor
+	// (→ memory). This is the semantically correct mapping — the old code put the
+	// limit into the reservation, which pinned the hard cgroup cap at the limit and
+	// gave the task no burst room (see generateResourcesBlock).
+	// @ts-ignore - resources might exist in deploy
+	const resources = service.deploy?.resources;
+	const limits = resources?.limits;
+	const reservations = resources?.reservations;
 	if (limits?.cpus) {
-		// Docker uses fractional CPUs (e.g., "0.5"), Nomad uses MHz
+		// Docker uses fractional CPUs (e.g., "0.5"), Nomad uses MHz.
 		cpu = Math.round(Number.parseFloat(String(limits.cpus)) * 1000);
 	}
-	if (limits?.memory) {
-		// Docker uses "512M", "1G" etc, Nomad uses MB
-		memory = parseMemoryToMB(String(limits.memory));
+	if (limits?.memory) memoryMax = parseMemoryToMB(String(limits.memory));
+	if (reservations?.memory)
+		memory = parseMemoryToMB(String(reservations.memory));
+
+	// Classic (short-form) compose fields, used when the deploy block didn't set the
+	// equivalent. Many compose files use these instead of deploy.resources.
+	const s = service as {
+		cpus?: number | string;
+		mem_limit?: number | string;
+		mem_reservation?: number | string;
+	};
+	if (cpu === undefined && s.cpus !== undefined) {
+		cpu = Math.round(Number.parseFloat(String(s.cpus)) * 1000);
+	}
+	if (memoryMax === undefined && s.mem_limit !== undefined) {
+		memoryMax = parseMemoryToMB(String(s.mem_limit));
+	}
+	if (memory === undefined && s.mem_reservation !== undefined) {
+		memory = parseMemoryToMB(String(s.mem_reservation));
+	}
+
+	// A reservation must never exceed the hard cap.
+	if (memory !== undefined && memoryMax !== undefined && memory > memoryMax) {
+		memory = memoryMax;
 	}
 
 	// GPUs use the standard compose syntax under reservations.devices:
 	//   reservations: { devices: [{ driver: nvidia, count: 1, capabilities: [gpu] }] }
 	// Nomad schedules them via nomad-device-nvidia (device "nvidia/gpu").
-	const gpus = extractGpuCount(resources.reservations);
+	const gpus = extractGpuCount(resources?.reservations);
 
-	if (cpu === undefined && memory === undefined && gpus === undefined) {
+	if (
+		cpu === undefined &&
+		memory === undefined &&
+		memoryMax === undefined &&
+		gpus === undefined
+	) {
 		return undefined;
 	}
-	return { cpu, memory, gpus };
+	return { cpu, memory, memoryMax, gpus };
 };
 
 /**
