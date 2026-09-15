@@ -148,15 +148,36 @@ export const evaluateCluster = async (cfg: {
 	const memReserved = Math.round(memTotal > 0 ? (memUsed / memTotal) * 100 : 0);
 
 	// Blocked evaluations (allocs that couldn't be placed) TARGETING THIS POOL.
+	// Nomad often leaves an eval's NodePool empty even for a pool-targeted job, so
+	// don't trust it — resolve each blocked eval's pool from its job's node_pool
+	// (cached per tick). Without this, a mem-pool job's blocked eval is misread as
+	// default-pool pressure and scales the WRONG pool.
 	let blockedEvals = 0;
 	try {
-		const evals = (await nomad("/evaluations")) as {
+		const evals = (await nomad("/evaluations?status=blocked")) as {
 			Status: string;
 			NodePool?: string;
+			JobID?: string;
 		}[];
-		blockedEvals = evals.filter(
-			(e) => e.Status === "blocked" && (e.NodePool || "default") === pool,
-		).length;
+		const jobPool = new Map<string, string>();
+		for (const e of evals) {
+			if (e.Status !== "blocked") continue;
+			let evalPool = e.NodePool || "";
+			if (!evalPool && e.JobID) {
+				if (!jobPool.has(e.JobID)) {
+					try {
+						const job = (await nomad(
+							`/job/${encodeURIComponent(e.JobID)}`,
+						)) as { NodePool?: string };
+						jobPool.set(e.JobID, job.NodePool || "default");
+					} catch {
+						jobPool.set(e.JobID, "default");
+					}
+				}
+				evalPool = jobPool.get(e.JobID) || "default";
+			}
+			if ((evalPool || "default") === pool) blockedEvals++;
+		}
 	} catch {}
 
 	// Worker nodes in THIS pool. minNodes/maxNodes bound the TOTAL worker count for
