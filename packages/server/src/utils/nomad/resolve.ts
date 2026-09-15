@@ -86,16 +86,18 @@ export interface NomadContainerInfo {
 }
 
 export const ALLOC_ID_LABEL = "com.hashicorp.nomad.alloc_id";
+export const TASK_NAME_LABEL = "com.hashicorp.nomad.task_name";
 
 /**
- * The docker containers backing a Nomad job's allocations. Nomad names an
- * allocation's container `<task-group>-<allocId>` and labels it with the alloc
- * id, so we list the app's allocations, then match them to the containers by
- * that label (one Nomad query + one `docker ps`). Returns [] when the app isn't
- * a Nomad job — callers fall back to their legacy lookup for that case.
- *
- * This is the Nomad replacement for the Swarm `docker service ps` / name-grep
- * container listings used by the app logs UI.
+ * The docker containers backing a Nomad job's allocations — one entry PER TASK.
+ * Nomad runs one docker container per task and labels each with the alloc id AND
+ * the task name. A single-service app is one task (one container); a compose
+ * deploy is now ONE allocation with MANY tasks (one per compose service, sharing
+ * a network namespace), so an alloc can back several containers. We therefore key
+ * by (allocId → [containers]) and emit one entry per task container, named by its
+ * task (i.e. the compose service name) — so the logs/terminal/containers UIs can
+ * pick an individual service instead of collapsing them into one. Returns [] when
+ * the app isn't a Nomad job (callers fall back to their legacy lookup).
  */
 export const getNomadJobContainers = async (
 	appName: string,
@@ -104,7 +106,7 @@ export const getNomadJobContainers = async (
 	const allocs = await getJobAllocations(appName, serverId);
 	if (allocs.length === 0) return [];
 
-	const format = `{{.ID}}\t{{.Names}}\t{{.State}}\t{{.Status}}\t{{.Label "${ALLOC_ID_LABEL}"}}`;
+	const format = `{{.ID}}\t{{.Names}}\t{{.State}}\t{{.Status}}\t{{.Label "${ALLOC_ID_LABEL}"}}\t{{.Label "${TASK_NAME_LABEL}"}}`;
 	const command = `docker ps -a --filter "label=${ALLOC_ID_LABEL}" --format '${format}'`;
 	let stdout = "";
 	try {
@@ -116,29 +118,44 @@ export const getNomadJobContainers = async (
 		return [];
 	}
 
+	// allocId → its task containers.
 	const byAlloc = new Map<
 		string,
-		{ id: string; name: string; state: string; status: string }
+		{ id: string; name: string; state: string; status: string; task: string }[]
 	>();
 	for (const line of stdout.trim().split("\n").filter(Boolean)) {
-		const [id = "", name = "", state = "", status = "", allocId = ""] =
-			line.split("\t");
-		if (allocId) byAlloc.set(allocId, { id, name, state, status });
+		const [
+			id = "",
+			name = "",
+			state = "",
+			status = "",
+			allocId = "",
+			task = "",
+		] = line.split("\t");
+		if (!allocId) continue;
+		const list = byAlloc.get(allocId) ?? [];
+		list.push({ id, name, state, status, task });
+		byAlloc.set(allocId, list);
 	}
 
-	return allocs
-		.map((a): NomadContainerInfo => {
-			const c = byAlloc.get(a.ID);
-			const status = c?.status || a.ClientStatus || "";
-			return {
-				containerId: c?.id || "",
-				name: c?.name || `${a.TaskGroup || appName}-${a.ID.slice(0, 8)}`,
-				state: (c?.state || a.ClientStatus || "").toLowerCase(),
+	const out: NomadContainerInfo[] = [];
+	for (const a of allocs) {
+		const containers = byAlloc.get(a.ID) ?? [];
+		for (const c of containers) {
+			const status = c.status || a.ClientStatus || "";
+			out.push({
+				// Prefer the task name (= compose service name); fall back to the docker
+				// container name.
+				containerId: c.id,
+				name:
+					c.task || c.name || `${a.TaskGroup || appName}-${a.ID.slice(0, 8)}`,
+				state: (c.state || a.ClientStatus || "").toLowerCase(),
 				status,
 				currentState: status,
 				node: a.NodeName || "",
 				error: "",
-			};
-		})
-		.filter((c) => c.containerId);
+			});
+		}
+	}
+	return out.filter((c) => c.containerId);
 };
