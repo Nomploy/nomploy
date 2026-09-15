@@ -1,4 +1,28 @@
+import { existsSync, readFileSync } from "node:fs";
 import { encodeBase64 } from "../docker/utils";
+
+// The panel's Traefik file route (written at install), the single place that
+// currently holds the panel's public domain. We read the Host rule from it to
+// build the Consul routing tags for zero-downtime deploys — see discoverPanelDomain.
+const PANEL_TRAEFIK_ROUTE = "/etc/nomploy/traefik/dynamic/nomploy.yml";
+
+/**
+ * The panel's public domain, discovered from its existing Traefik file route
+ * (bind-mounted at /etc/nomploy). Returns undefined if the file/rule isn't found
+ * — callers then fall back to the legacy host-static job (no behavior change).
+ * This avoids needing a new config value: the domain the user already configured
+ * for the panel is reused for the Consul-routed, canary-deployable job.
+ */
+export const discoverPanelDomain = (): string | undefined => {
+	try {
+		if (!existsSync(PANEL_TRAEFIK_ROUTE)) return undefined;
+		const yml = readFileSync(PANEL_TRAEFIK_ROUTE, "utf8");
+		const m = yml.match(/Host\(`([^`]+)`\)/);
+		return m?.[1] || undefined;
+	} catch {
+		return undefined;
+	}
+};
 
 // The panel (nomploy itself) runs as a Nomad job named "nomploy" so it can
 // self-update the Dokploy way: `nomad job run` with a new image pulls it and
@@ -111,7 +135,78 @@ export const generatePanelNomadJob = (
 	image: string,
 	env: Record<string, string>,
 	deployedAt: string = new Date().toISOString(),
+	panelDomain?: string,
 ): string => {
+	// Zero-downtime mode: when we know the panel's domain we route it through
+	// Consul (dynamic port + Traefik tags) and deploy with a CANARY — a new alloc
+	// starts alongside the old, both stay in the Consul load-balancer pool, and the
+	// old is only drained once the canary is healthy (auto_promote). So a self-
+	// update never drops the single backend the way the host-static job does.
+	// Without a domain we can't build the Host tag, so fall back to the legacy
+	// host-networked static-3000 job (routed by the Traefik file route) unchanged.
+	const zeroDowntime = !!panelDomain;
+
+	// Dynamic port + Consul service (only in zero-downtime mode).
+	const networkBlock = zeroDowntime
+		? `    network {
+      mode = "host"
+      port "http" {}
+    }
+`
+		: "";
+	// PORT must be the Nomad-assigned dynamic port so two panels can coexist during
+	// a canary swap; Nomad interpolates \${NOMAD_PORT_http} at runtime.
+	const panelEnv = zeroDowntime ? { ...env, PORT: "${NOMAD_PORT_http}" } : env;
+	// priority 100 so these Consul routers win over the legacy file route (same Host
+	// rule) once the canary is healthy; the file route stays as a harmless fallback.
+	const serviceBlock = zeroDowntime
+		? `    service {
+      name     = "${PANEL_JOB_NAME}"
+      port     = "http"
+      provider = "consul"
+      tags = [
+        "traefik.enable=true",
+        "traefik.http.routers.nomploy-web.rule=Host(\`${panelDomain}\`)",
+        "traefik.http.routers.nomploy-web.entrypoints=web",
+        "traefik.http.routers.nomploy-web.middlewares=redirect-to-https@file",
+        "traefik.http.routers.nomploy-web.priority=100",
+        "traefik.http.routers.nomploy-secure.rule=Host(\`${panelDomain}\`)",
+        "traefik.http.routers.nomploy-secure.entrypoints=websecure",
+        "traefik.http.routers.nomploy-secure.tls.certresolver=letsencrypt",
+        "traefik.http.routers.nomploy-secure.priority=100",
+      ]
+
+      check {
+        type     = "tcp"
+        port     = "http"
+        interval = "10s"
+        timeout  = "3s"
+      }
+    }
+`
+		: "";
+	const portsConfig = zeroDowntime ? '\n        ports        = ["http"]' : "";
+
+	// Canary rollout only in zero-downtime mode; health gated on the Consul check.
+	const updateBlock = zeroDowntime
+		? `  update {
+    max_parallel     = 1
+    canary           = 1
+    auto_promote     = true
+    health_check     = "checks"
+    min_healthy_time = "10s"
+    healthy_deadline = "5m"
+    progress_deadline = "10m"
+    auto_revert      = true
+  }`
+		: `  update {
+    max_parallel     = 1
+    health_check     = "task_states"
+    min_healthy_time = "10s"
+    healthy_deadline = "3m"
+    auto_revert      = true
+  }`;
+
 	return `job "${PANEL_JOB_NAME}" {
   namespace = "default"
   type      = "service"
@@ -132,13 +227,7 @@ export const generatePanelNomadJob = (
     deployed_at = ${JSON.stringify(deployedAt)}
   }
 
-  update {
-    max_parallel     = 1
-    health_check     = "task_states"
-    min_healthy_time = "10s"
-    healthy_deadline = "3m"
-    auto_revert      = true
-  }
+${updateBlock}
 
   group "${PANEL_JOB_NAME}" {
     count = 1
@@ -149,7 +238,7 @@ export const generatePanelNomadJob = (
       delay    = "15s"
       mode     = "delay"
     }
-
+${networkBlock}${serviceBlock}
     task "${PANEL_JOB_NAME}" {
       driver = "docker"
 
@@ -157,7 +246,7 @@ export const generatePanelNomadJob = (
         image        = ${JSON.stringify(image)}
         force_pull   = true
         network_mode = "host"
-        privileged   = true
+        privileged   = true${portsConfig}
         volumes = [
           "/var/run/docker.sock:/var/run/docker.sock",
           "/etc/nomploy:/etc/nomploy",
@@ -165,7 +254,7 @@ export const generatePanelNomadJob = (
         ]
       }
 
-${generateEnvBlock(env)}
+${generateEnvBlock(panelEnv)}
 
       kill_timeout = "30s"
 
@@ -192,8 +281,11 @@ ${generateEnvBlock(env)}
 export const getPanelNomadDeployCommand = (
 	image: string,
 	env: Record<string, string>,
+	panelDomain: string | undefined = discoverPanelDomain(),
 ): string => {
-	const encoded = encodeBase64(generatePanelNomadJob(image, env));
+	const encoded = encodeBase64(
+		generatePanelNomadJob(image, env, undefined, panelDomain),
+	);
 	return `
 set -e
 {
