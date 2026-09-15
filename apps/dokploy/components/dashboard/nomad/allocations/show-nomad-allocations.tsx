@@ -94,12 +94,16 @@ const AllocationRow = ({
 	const [open, setOpen] = useState(false);
 	const [logType, setLogType] = useState<"stdout" | "stderr">("stdout");
 
-	// Nomad's logs endpoint needs the TASK name, not the group. For nomploy-
-	// translated jobs they're equal, but native-HCL / Nomad Pack jobs often
-	// differ (e.g. group "web", task "server"), so read the actual task from the
-	// allocation's TaskStates and fall back to the group name.
-	const taskName =
-		(alloc.TaskStates && Object.keys(alloc.TaskStates)[0]) || alloc.TaskGroup;
+	// Nomad's logs endpoint needs the TASK name, not the group. An alloc can run
+	// several tasks — a compose deploy now packs every service as a task in ONE
+	// group — so list them all and let the user pick which service's logs to view.
+	// Native-HCL / Nomad Pack jobs also have group != task (e.g. group "web", task
+	// "server"). Fall back to the group name when TaskStates is absent.
+	const taskNames: string[] =
+		alloc.TaskStates && Object.keys(alloc.TaskStates).length > 0
+			? Object.keys(alloc.TaskStates)
+			: [alloc.TaskGroup];
+	const [taskName, setTaskName] = useState<string>(taskNames[0]);
 
 	return (
 		<Collapsible open={open} onOpenChange={setOpen}>
@@ -125,6 +129,20 @@ const AllocationRow = ({
 						<div className="mt-3 space-y-3">
 							<AllocMetrics allocId={alloc.ID} serverId={serverId} />
 							<div className="flex gap-2">
+								{taskNames.length > 1 && (
+									<Select value={taskName} onValueChange={setTaskName}>
+										<SelectTrigger className="w-[160px] h-7 text-xs">
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											{taskNames.map((t) => (
+												<SelectItem key={t} value={t}>
+													{t}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								)}
 								<Select
 									value={logType}
 									onValueChange={(v) => setLogType(v as "stdout" | "stderr")}
