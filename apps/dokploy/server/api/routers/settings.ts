@@ -71,7 +71,7 @@ import {
 } from "@/server/db/schema";
 import { cleanAllDeploymentQueue } from "@/server/queues/queueSetup";
 import { removeJob, schedule } from "@/server/utils/backup";
-import packageInfo from "../../../package.json";
+import { NOMPLOY_VERSION } from "../../nomploy-version";
 import { appRouter } from "../root";
 import {
 	adminProcedure,
@@ -552,7 +552,7 @@ export const settingsRouter = createTRPCRouter({
 		// Pass the RUNNING version (baked into this image) so the release-channel
 		// check compares what's actually served against the newest release tag,
 		// not the host's possibly-newer pulled :latest image.
-		return await getUpdateData(packageInfo.version);
+		return await getUpdateData(NOMPLOY_VERSION);
 	}),
 	updateServer: adminProcedure.mutation(async ({ ctx }) => {
 		if (IS_CLOUD) {
@@ -573,7 +573,7 @@ export const settingsRouter = createTRPCRouter({
 	}),
 
 	getNomployVersion: protectedProcedure.query(() => {
-		return packageInfo.version;
+		return NOMPLOY_VERSION;
 	}),
 	getReleaseTag: protectedProcedure.query(() => {
 		return getNomployImageTag();
@@ -657,7 +657,7 @@ export const settingsRouter = createTRPCRouter({
 			const url = `${protocol}://${ctx.req.headers.host}/api`;
 			const openApiDocument = generateOpenApiDocument(appRouter, {
 				title: "tRPC OpenAPI",
-				version: packageInfo.version,
+				version: NOMPLOY_VERSION,
 				baseUrl: url,
 				docsUrl: `${url}/settings.getOpenApiDocument`,
 				tags: [
@@ -710,7 +710,7 @@ export const settingsRouter = createTRPCRouter({
 			openApiDocument.info = {
 				title: "Nomploy API",
 				description: "Endpoints for nomploy",
-				version: packageInfo.version,
+				version: NOMPLOY_VERSION,
 			};
 
 			// Add security schemes configuration

@@ -7,13 +7,13 @@ name: Docker Publish (GHCR)
 # publishes `:vX.Y.Z` AND moves `:latest` (the release channel the panel self-
 # updates from). So main never touches production — only tagging a release does.
 #
-# Release (v* tag) builds are multi-arch (amd64 + arm64). main (:edge) and manual
-# (workflow_dispatch) builds are amd64-only — that's all the hub needs, so the edge
-# loop skips the arm64 leg and the manifest wait. The matrix is chosen by `setup`.
+# All builds are amd64-only — the entire nomploy cluster is amd64 (Hetzner cx/ccx),
+# so an arm64 leg was pure waste that doubled cost and made releases wait on a
+# second runner + a manifest merge for a platform nothing runs. (To ship to an arm
+# cluster, add an arm64 entry back to the `setup` matrix; see the note there.)
 #
-# Each architecture is built on its OWN native runner (fast, no QEMU emulation),
-# pushed by digest, then a merge job assembles the final manifest. Native arm64
-# runners (ubuntu-24.04-arm) are free for public repositories.
+# The image is built on a native runner (no QEMU emulation), pushed by digest, then
+# the merge job assembles the final tag manifest.
 #
 # NOTE: for `install.sh` to `docker pull` without auth, the ghcr package must be
 # Public (set it in the package settings once).
@@ -56,14 +56,13 @@ jobs:
       - id: pick
         run: |
           amd64='{"platform":"linux/amd64","arch":"amd64","runner":"ubuntu-latest"}'
-          arm64='{"platform":"linux/arm64","arch":"arm64","runner":"ubuntu-24.04-arm"}'
-          # Multi-arch only for RELEASES (v* tags). main (:edge) + manual builds
-          # are amd64-only (the hub is amd64) — keeps the edge loop fast.
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "matrix={\"include\":[$amd64,$arm64]}" >> "$GITHUB_OUTPUT"
-          else
-            echo "matrix={\"include\":[$amd64]}" >> "$GITHUB_OUTPUT"
-          fi
+          # The whole nomploy cluster is amd64 (Hetzner cx/ccx: hub, servers,
+          # workers, autoscaled ccx nodes). arm64 was pure waste — it doubled
+          # runner cost and made every release wait on a second (sometimes
+          # queued/flaky) leg + a manifest merge for a platform nothing runs.
+          # amd64-only for ALL builds now. To ship to an arm cluster, add back an
+          # arm64 entry (runner: ubuntu-24.04-arm) to the matrix for v* tags.
+          echo "matrix={\"include\":[$amd64]}" >> "$GITHUB_OUTPUT"
 
   build:
     needs: setup
@@ -97,6 +96,12 @@ jobs:
         with:
           context: .
           platforms: ${{ matrix.platform }}
+          # The panel version, baked into the image (Dockerfile ARG -> ENV). A
+          # release tag (v0.30.4) bakes that exact version; every other build is
+          # the rolling "edge" channel. Releases no longer bump package.json, so
+          # this build-arg is the single source of the version the panel reports.
+          build-args: |
+            NOMPLOY_VERSION=${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'edge' }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
