@@ -54,10 +54,11 @@ export const deployDatabaseToNomad = async (
 ): Promise<void> => {
 	const targetNodeName = await resolveNomadNodeName(serverId);
 	const command = getBuildNomadDatabaseCommand({ ...input, targetNodeName });
-	if (serverId) {
-		await execAsyncRemote(serverId, command, onData);
-	} else {
-		const { stdout } = await execAsync(command);
-		onData?.(stdout);
-	}
+	// `nomad job run` is a cluster API call — ALWAYS submit it from the control plane
+	// (which holds the Nomad token). The job's node constraint (targetNodeName) places
+	// the alloc on the right node, so there's no need to run the submit on the target
+	// server. Submitting over SSH on a worker fails: workers don't carry the token, so
+	// the Nomad API returns 403 under ACLs.
+	const { stdout } = await execAsync(command);
+	onData?.(stdout);
 };

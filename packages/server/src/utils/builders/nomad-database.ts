@@ -176,15 +176,15 @@ export const getBuildNomadDatabaseCommand = (
 ): string => {
 	const jobFilePath = `/etc/nomploy/jobs/${db.appName}.nomad.hcl`;
 	const encoded = encodeBase64(generateDatabaseNomadJob(db));
+	// NOTE: don't wrap the submit in `{ … } || { … }` — bash suspends `set -e` inside a
+	// group that's the left operand of `||`, so a failing `nomad job run` (e.g. a 403)
+	// would keep going and still print success. Check the exit status explicitly.
 	return `
 set -e
-{
-	mkdir -p /etc/nomploy/jobs
-	echo "${encoded}" | base64 -d > "${jobFilePath}"
-	echo "Nomad job file written: ✅"
-	nomad job run "${jobFilePath}" 2>&1
-	echo "Nomad Job Deployed: ✅"
-} || {
+mkdir -p /etc/nomploy/jobs
+echo "${encoded}" | base64 -d > "${jobFilePath}"
+echo "Nomad job file written: ✅"
+if ! nomad job run "${jobFilePath}" 2>&1; then
 	echo "Error: ❌ Nomad database deployment failed"
 	# Surface the container's own logs — the deployment error alone rarely shows
 	# WHY the task died (e.g. mongo:8 refusing to boot on a new kernel). Best-effort.
@@ -194,6 +194,7 @@ set -e
 		|| echo "(no allocation logs available — the task may not have started)"
 	echo "-------------------------------------------"
 	exit 1
-}
+fi
+echo "Nomad Job Deployed: ✅"
 `;
 };
