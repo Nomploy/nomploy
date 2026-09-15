@@ -188,13 +188,23 @@ export const getBuildNomadCommand = async (
 		const segmentation = compose.environment?.project?.isolated
 			? { projectId: compose.environment.projectId }
 			: undefined;
-		jobSpec = generateNomadJobSpec(
-			appName,
-			services,
-			domains,
-			segmentation,
-			compose.nodePool,
-		);
+		// Isolated projects use the Connect mesh (per-service groups + sidecars);
+		// everything else uses the single-group, compose-faithful translation so
+		// services reach each other by name like Docker Compose.
+		jobSpec = segmentation
+			? generateNomadJobSpec(
+					appName,
+					services,
+					domains,
+					segmentation,
+					compose.nodePool,
+				)
+			: generateNomadComposeJobSpec(
+					appName,
+					services,
+					domains,
+					compose.nodePool,
+				);
 	}
 	const encodedJobSpec = encodeBase64(jobSpec);
 
@@ -347,6 +357,125 @@ const generateUpdateBlock = (update?: NomadUpdateConfig): string => {
     healthy_deadline = "5m"
     auto_revert      = true${canaryLines}
   }`;
+};
+
+/**
+ * Compose → Nomad, faithful to Docker Compose's single-host networking.
+ *
+ * Docker Compose runs all of a project's services on ONE host and lets them reach
+ * each other by service name (`db:5432`, `redis:6379`). Nomad has no per-project
+ * network and assigns dynamic ports, so the previous per-service-group translation
+ * broke that: a service like `db` with no published port registered nothing in
+ * Consul and never resolved.
+ *
+ * We mirror compose instead: ALL services go into ONE task group in `bridge` mode,
+ * so every task shares a single network namespace (like compose's project network).
+ * An `extra_hosts` alias per service name → 127.0.0.1 is injected into each task,
+ * so `db:5432` resolves to the db task in the shared netns — exactly like compose,
+ * with NO port declaration needed for inter-service traffic. Only ports the compose
+ * actually declares are mapped out of the group (for Traefik/domains + Consul).
+ *
+ * The isolated/Connect-mesh path keeps the per-service-group form (generateNomadJobSpec
+ * with segmentation) — the sidecar model needs one service identity per group.
+ */
+export const generateNomadComposeJobSpec = (
+	appName: string,
+	services: NomadServiceSpec[],
+	domains: Domain[],
+	nodePool?: string | null,
+	update?: NomadUpdateConfig,
+): string => {
+	// Port labels must be unique WITHIN the single group (two services could both
+	// expose e.g. 3000), so scope each label by its service name.
+	const relabeled = services.map((s) => ({
+		...s,
+		ports: s.ports.map((p) => ({ ...p, label: `${s.name}-${p.to}` })),
+	}));
+
+	const dnsServers = clusterDnsServers()
+		.map((ip) => `"${ip}"`)
+		.join(", ");
+	const portLines = relabeled
+		.flatMap((s) =>
+			s.ports.map(
+				(p) => `      port "${p.label}" {\n        to = ${p.to}\n      }`,
+			),
+		)
+		.join("\n");
+	const networkBlock = `    network {
+      mode = "bridge"
+      dns {
+        servers  = [${dnsServers}]
+        searches = ["service.consul"]
+      }
+${portLines}
+    }`;
+
+	// Consul registrations (domain routing + discovery) for services with ports.
+	const consulServices = relabeled
+		.map((s) => generateConsulServices(appName, s, domains))
+		.filter(Boolean)
+		.join("\n\n");
+
+	// Every compose service name resolves to localhost inside the shared netns.
+	const hostAliases = relabeled.map((s) => `"${s.name}:127.0.0.1"`).join(", ");
+
+	const tasks = relabeled
+		.map((s) => {
+			const envBlock = generateEnvBlock(s.env);
+			const secretsBlock = s.secrets
+				? `\n\n${generateSecretsTemplate(appName)}`
+				: "";
+			const resourcesBlock = generateResourcesBlock(s.resources);
+			const entrypointLine = s.entrypoint
+				? `\n        entrypoint = ${JSON.stringify(s.entrypoint)}`
+				: "";
+			const portsConfig =
+				s.ports.length > 0
+					? `\n        ports = [${s.ports.map((p) => `"${p.label}"`).join(", ")}]`
+					: "";
+			return `    task "${s.name}" {
+      driver = "docker"
+
+      config {
+        image = "${s.image}"
+        extra_hosts = [${hostAliases}]${portsConfig}${entrypointLine}
+      }
+
+${envBlock}${secretsBlock}
+
+${resourcesBlock}
+    }`;
+		})
+		.join("\n\n");
+
+	const nodePoolLine =
+		nodePool && nodePool !== "default" ? `  node_pool = "${nodePool}"` : "";
+
+	return `job "${appName}" {
+  namespace = "default"
+  type      = "service"
+${nodePoolLine}
+${generateUpdateBlock(update)}
+
+  group "${appName}" {
+    count = 1
+
+    # Compose has no cross-task ordering here (tasks start together), so a service
+    # that talks to another on boot (app → db) may need a few retries while its
+    # dependency comes up. Be generous so transient startup ordering self-heals.
+    restart {
+      attempts = 5
+      interval = "10m"
+      delay    = "10s"
+      mode     = "delay"
+    }
+${networkBlock}
+${consulServices ? `\n${consulServices}\n` : ""}
+${tasks}
+  }
+}
+`;
 };
 
 export const generateNomadJobSpec = (
