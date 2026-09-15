@@ -57,14 +57,19 @@ export const ShowInternalPostgresCredentials = ({ postgresId }: Props) => {
 
 							<div className="flex flex-col gap-2">
 								<Label>Internal Host</Label>
-								<Input disabled value={data?.appName} />
+								{/* Fully-qualified Consul DNS name: resolves cluster-wide from any
+								    alloc, not only where the resolver has `search service.consul`. */}
+								<Input
+									disabled
+									value={data?.appName ? `${data.appName}.service.consul` : ""}
+								/>
 							</div>
 
 							<div className="flex flex-col gap-2">
 								<Label>Internal Connection URL </Label>
 								<ToggleVisibilityInput
 									disabled
-									value={`postgresql://${data?.databaseUser}:${data?.databasePassword}@${data?.appName}:5432/${data?.databaseName}`}
+									value={`postgresql://${data?.databaseUser}:${data?.databasePassword}@${data?.appName}.service.consul:5432/${data?.databaseName}`}
 								/>
 							</div>
 						</div>

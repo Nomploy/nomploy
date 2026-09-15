@@ -53,14 +53,17 @@ export const ShowInternalRedisCredentials = ({ redisId }: Props) => {
 
 							<div className="flex flex-col gap-2">
 								<Label>Internal Host</Label>
-								<Input disabled value={data?.appName} />
+								<Input
+									disabled
+									value={data?.appName ? `${data.appName}.service.consul` : ""}
+								/>
 							</div>
 
 							<div className="flex flex-col gap-2 md:col-span-2">
 								<Label>Internal Connection URL </Label>
 								<ToggleVisibilityInput
 									disabled
-									value={`redis://default:${data?.databasePassword}@${data?.appName}:6379`}
+									value={`redis://default:${data?.databasePassword}@${data?.appName}.service.consul:6379`}
 								/>
 							</div>
 						</div>
