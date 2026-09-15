@@ -113,7 +113,12 @@ describe("nomad application builder — application → HCL", () => {
 				{ type: "volume", volumeName: "data", mountPath: "/var/lib/data" },
 				{ type: "bind", hostPath: "/srv/conf", mountPath: "/etc/conf" },
 				// file mounts write content via a template stanza — not a docker volume.
-				{ type: "file", filePath: "app.conf", mountPath: "/etc/app.conf" },
+				{
+					type: "file",
+					filePath: "app.conf",
+					mountPath: "/etc/app.conf",
+					content: "key = value\nliteral = ${KEEP} {{ keep }}\n",
+				},
 			],
 		};
 		const spec = applicationToNomadSpec(appWithMounts);
@@ -121,11 +126,24 @@ describe("nomad application builder — application → HCL", () => {
 			{ source: "data", target: "/var/lib/data", named: true },
 			{ source: "/srv/conf", target: "/etc/conf", named: false },
 		]);
+		expect(spec.fileMounts).toEqual([
+			{
+				content: "key = value\nliteral = ${KEEP} {{ keep }}\n",
+				mountPath: "/etc/app.conf",
+			},
+		]);
 
 		const hcl = generateApplicationNomadJob(appWithMounts, []);
 		// Named volume → app-prefixed docker named volume (persists across redeploys).
 		expect(hcl).toContain('"mountapp-data:/var/lib/data"');
 		// Absolute bind mount passes through.
 		expect(hcl).toContain('"/srv/conf:/etc/conf"');
+		// file mount → template stanza + a bind of the rendered file at mountPath.
+		expect(hcl).toContain('destination     = "local/file-0"');
+		expect(hcl).toContain('"local/file-0:/etc/app.conf"');
+		// Content survives: HCL interpolation escaped ($${), consul-template left as-is
+		// via non-default delimiters.
+		expect(hcl).toContain("literal = $${KEEP} {{ keep }}");
+		expect(hcl).toContain('left_delimiter  = "[[[["');
 	});
 });
