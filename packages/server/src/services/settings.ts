@@ -226,12 +226,26 @@ export const getUpdateData = async (
 		// Release channel: compare running version against the newest release tag.
 		if (tag === "latest" && currentVersion) {
 			const releaseTag = await getLatestReleaseTag(repository);
-			if (releaseTag) {
-				const updateAvailable = compareSemver(releaseTag, currentVersion) > 0;
+			if (releaseTag && compareSemver(releaseTag, currentVersion) > 0) {
+				// A newer version was TAGGED — but release.sh pushes the git tag first
+				// (that's what triggers the build), so the tag exists ~10 min before CI
+				// publishes the image. Only report the update once that release's image
+				// is actually pullable, otherwise "update available" shows while a click
+				// would just re-pull the current :latest. The tag's own image manifest
+				// (`:vX.Y.Z`) appears exactly when the build's merge job completes.
+				const releaseImagePublished = await getRemoteManifestDigest(
+					registry,
+					repository,
+					releaseTag,
+				);
 				return {
-					updateAvailable,
-					latestVersion: updateAvailable ? releaseTag : null,
+					updateAvailable: !!releaseImagePublished,
+					latestVersion: releaseImagePublished ? releaseTag : null,
 				};
+			}
+			if (releaseTag) {
+				// Up to date (running >= latest release).
+				return { updateAvailable: false, latestVersion: null };
 			}
 			// GitHub unreachable — fall through to the digest comparison below.
 		}
