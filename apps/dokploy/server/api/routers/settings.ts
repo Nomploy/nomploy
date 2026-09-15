@@ -549,7 +549,10 @@ export const settingsRouter = createTRPCRouter({
 			return DEFAULT_UPDATE_DATA;
 		}
 
-		return await getUpdateData();
+		// Pass the RUNNING version (baked into this image) so the release-channel
+		// check compares what's actually served against the newest release tag,
+		// not the host's possibly-newer pulled :latest image.
+		return await getUpdateData(packageInfo.version);
 	}),
 	updateServer: adminProcedure.mutation(async ({ ctx }) => {
 		if (IS_CLOUD) {

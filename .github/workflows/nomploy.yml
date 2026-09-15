@@ -42,9 +42,13 @@ env:
   IMAGE: ghcr.io/nomploy/nomploy
 
 jobs:
-  # Pick the build matrix: multi-arch for releases (main / v* tags), amd64-only
-  # for branch + manual builds (the hub is amd64, so dev dispatches stay fast).
+  # Pick the build matrix: multi-arch for releases (v* tags), amd64-only for
+  # main (:edge) + manual builds (the hub is amd64, so the edge loop stays fast).
   setup:
+    # A release pushes BOTH the commit to main and the tag; both fire this
+    # workflow, which would build the same commit twice (:edge + :latest). Skip
+    # the redundant :edge build for release commits — the tag build covers them.
+    if: ${{ !(github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'release:')) }}
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.pick.outputs.matrix }}
