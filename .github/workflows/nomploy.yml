@@ -103,8 +103,14 @@ jobs:
           build-args: |
             NOMPLOY_VERSION=${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'edge' }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+          # Registry cache (a dedicated GHCR tag), NOT type=gha: the GitHub Actions
+          # cache is capped at 10 GB/repo, and mode=max (which caches every build
+          # stage — node_modules, the pnpm store, base layers) blew past it, so GitHub
+          # evicted layers between runs and nearly every build was cold (~12 min). A
+          # registry cache has no such cap, persists reliably, and keeps the install +
+          # build stages warm so only changed layers rebuild.
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.arch }}
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.arch }},mode=max
 
       - name: Export digest
         run: |
