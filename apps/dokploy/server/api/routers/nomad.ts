@@ -1331,6 +1331,9 @@ fi`;
 			z.object({
 				serverId: z.string(),
 				role: z.enum(["server", "worker"]).default("worker"),
+				// Which Nomad node pool a WORKER joins (an autoscaling group's pool, or
+				// a new pool name). Defaults to "default". Ignored for server nodes.
+				nodePool: z.string().optional(),
 			}),
 		)
 		.subscription(async ({ input, ctx }) => {
@@ -1430,6 +1433,27 @@ fi`;
 						emit.next(
 							`Assigning worker overlay IP ${wgIp} to "${server.name}"\n`,
 						);
+						// Which node pool this worker joins. A non-default pool must EXIST
+						// before the client registers into it, so create it eagerly (Nomad
+						// also auto-creates on join, but this keeps it visible + targetable).
+						const nodePool =
+							input.nodePool && input.nodePool !== "default"
+								? input.nodePool
+								: undefined;
+						if (nodePool) {
+							emit.next(`Ensuring Nomad node pool "${nodePool}" exists\n`);
+							try {
+								const cfg = await resolveNomad(ctx, undefined);
+								await nomadClient(cfg).request(
+									`/node/pool/${encodeURIComponent(nodePool)}`,
+									{ method: "POST", body: JSON.stringify({ Name: nodePool }) },
+								);
+							} catch (e) {
+								emit.next(
+									`⚠ Could not pre-create pool "${nodePool}" (${e instanceof Error ? e.message : "unknown"}); Nomad will auto-create it on join.\n`,
+								);
+							}
+						}
 						const script = getClusterWorkerJoinCommand({
 							hubPublicKey: cluster.hubPublicKey,
 							hubEndpoint: cluster.hubEndpoint,
@@ -1443,6 +1467,7 @@ fi`;
 								endpoint: s.endpoint,
 							})),
 							aclTokens: readClusterAclTokens(),
+							nodePool,
 						});
 						let pubkey = "";
 						await execAsyncRemote(input.serverId, script, (log) => {
@@ -1476,6 +1501,9 @@ fi`;
 							clusterRole: "worker",
 							wgIp,
 							wgPublicKey: pubkey,
+							// Record which pool this node belongs to (default when unset) so the
+							// UI + autoscaler can attribute it to the right group.
+							nodePool: nodePool || "default",
 						});
 						emit.next("JOIN_DONE");
 						emit.complete();
