@@ -20,6 +20,20 @@
 
 import { consulTemplateSetupScript } from "./registry-auth";
 
+/**
+ * Nomad telemetry: publish per-allocation + per-node metrics in Prometheus format.
+ * REQUIRED for the Nomad Autoscaler's nomad-apm source (avg_cpu-allocated etc.) —
+ * without it the autoscaler has no data and horizontal (service) scaling never fires.
+ * Note: this telemetry path reports real per-alloc CPU/mem even on this cluster,
+ * where the /v1/client/allocation/:id/stats API returns zeros (a separate Nomad
+ * docker-driver ↔ Docker 29 bug) — the two use different collection paths.
+ */
+const NOMAD_TELEMETRY = `telemetry {
+  publish_allocation_metrics = true
+  publish_node_metrics       = true
+  prometheus_metrics         = true
+}`;
+
 /** A server this node must dial (full mesh / worker→server): needs an endpoint. */
 export interface MeshServerPeer {
 	wgIp: string;
@@ -270,6 +284,7 @@ client {
   # and cross-node routing fails behind a cloud firewall.
   network_interface = "wg0"${nodePoolLine}
 }
+${NOMAD_TELEMETRY}
 ${nomadAclBlock(opts.aclTokens)}consul { address = "127.0.0.1:8500"${nomadConsulTokenAttr(opts.aclTokens)} }
 plugin "docker" {
   config {
@@ -357,6 +372,7 @@ client {
   enabled = true
   network_interface = "wg0"
 }
+${NOMAD_TELEMETRY}
 ${nomadAclBlock(opts.aclTokens)}consul { address = "127.0.0.1:8500"${nomadConsulTokenAttr(opts.aclTokens)} }
 plugin "docker" {
   config {

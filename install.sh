@@ -201,6 +201,17 @@ client {
   }
 }
 
+# Publish per-alloc + per-node metrics (Prometheus format) — REQUIRED for the Nomad
+# Autoscaler's nomad-apm source (avg_cpu-allocated etc.); without it horizontal
+# (service) autoscaling has no data and never scales. This telemetry path reports
+# real per-alloc CPU/mem even where /v1/client/allocation/:id/stats returns zeros
+# (a separate Nomad docker-driver ↔ Docker 29 bug; different collection paths).
+telemetry {
+  publish_allocation_metrics = true
+  publish_node_metrics       = true
+  prometheus_metrics         = true
+}
+
 acl {
   enabled = true
 }
