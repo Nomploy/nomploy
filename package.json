@@ -20,7 +20,8 @@
 		"format-and-lint": "biome check .",
 		"check": "biome check --write --no-errors-on-unmatched --files-ignore-unknown=true",
 		"format-and-lint:fix": "biome check . --write",
-		"generate:openapi": "pnpm --filter=nomploy run generate:openapi"
+		"generate:openapi": "pnpm --filter=nomploy run generate:openapi",
+		"release": "bash scripts/release.sh"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.1.1",
