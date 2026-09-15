@@ -53,6 +53,13 @@ export interface NomadServiceSpec {
 		/** Mount mode, e.g. "ro". */
 		mode?: string;
 	}[];
+	/**
+	 * `file` mounts — inline content written into the container at `mountPath`.
+	 * Rendered via a Nomad `template` stanza (node-agnostic, unlike a host bind), so
+	 * the config file follows the alloc to whatever node it lands on. See
+	 * generateFileMounts.
+	 */
+	fileMounts?: { content: string; mountPath: string }[];
 	scaling?: {
 		min: number;
 		max: number;
@@ -451,7 +458,14 @@ ${portLines}
 				s.ports.length > 0
 					? `\n        ports = [${s.ports.map((p) => `"${p.label}"`).join(", ")}]`
 					: "";
-			const volumesConfig = generateVolumesConfig(appName, s.volumes);
+			const fileMounts = generateFileMounts(s.fileMounts);
+			const allVolumeEntries = [
+				...volumeEntries(appName, s.volumes),
+				...fileMounts.volumes,
+			];
+			const volumesConfig = allVolumeEntries.length
+				? `\n        volumes = [${allVolumeEntries.join(", ")}]`
+				: "";
 			return `    task "${s.name}" {
       driver = "docker"
 
@@ -460,7 +474,7 @@ ${portLines}
         extra_hosts = [${hostAliases}]${portsConfig}${entrypointLine}${volumesConfig}
       }
 
-${envBlock}${secretsBlock}
+${envBlock}${secretsBlock}${fileMounts.templates}
 
 ${resourcesBlock}
     }`;
@@ -583,8 +597,16 @@ ${portLines}
 	// storage and lost its data on every redeploy. NOTE: docker volumes are node-local
 	// — a stateful service with replicas>1 or that reschedules to another node won't
 	// see the data; pin it to a single-node pool (or use a managed database, which is
-	// pinned by design in nomad-database.ts).
-	const volumesConfig = generateVolumesConfig(appName, service.volumes);
+	// pinned by design in nomad-database.ts). `file` mounts are rendered as templates
+	// and bound from the alloc's local dir, so they share the same volumes list.
+	const fileMounts = generateFileMounts(service.fileMounts);
+	const allVolumeEntries = [
+		...volumeEntries(appName, service.volumes),
+		...fileMounts.volumes,
+	];
+	const volumesConfig = allVolumeEntries.length
+		? `\n        volumes = [${allVolumeEntries.join(", ")}]`
+		: "";
 
 	// Spread replicas across distinct nodes so a multi-replica service uses the
 	// whole cluster instead of bin-packing onto one box. Soft (spread, not a
@@ -615,7 +637,7 @@ ${consulServices}
         image = "${service.image}"${portsConfig}${entrypointLine}${volumesConfig}
       }
 
-${envBlock}${secretsBlock}
+${envBlock}${secretsBlock}${fileMounts.templates}
 
 ${resourcesBlock}
     }
@@ -767,12 +789,12 @@ const sanitizeVolumeName = (s: string): string =>
  * NOTE: docker volumes are node-local — if the alloc reschedules to another node
  * the data does not follow. The compose model is single-host.
  */
-const generateVolumesConfig = (
+const volumeEntries = (
 	appName: string,
 	volumes?: NomadServiceSpec["volumes"],
-): string => {
-	if (!volumes || volumes.length === 0) return "";
-	const entries = volumes.map((v) => {
+): string[] => {
+	if (!volumes || volumes.length === 0) return [];
+	return volumes.map((v) => {
 		const mode = v.mode ? `:${v.mode}` : "";
 		if (!v.source) {
 			const name = `${appName}-${sanitizeVolumeName(v.target)}`;
@@ -787,7 +809,61 @@ const generateVolumesConfig = (
 		const rel = sanitizeVolumeName(v.source.replace(/^\.\/?/, ""));
 		return `"/var/lib/nomploy/volumes/${appName}/${rel}:${v.target}${mode}"`;
 	});
-	return `\n        volumes = [${entries.join(", ")}]`;
+};
+
+const generateVolumesConfig = (
+	appName: string,
+	volumes?: NomadServiceSpec["volumes"],
+): string => {
+	const entries = volumeEntries(appName, volumes);
+	return entries.length ? `\n        volumes = [${entries.join(", ")}]` : "";
+};
+
+/**
+ * Render `file` mounts (inline config content) as Nomad `template` stanzas plus the
+ * docker volume entries that mount each rendered file at its container path.
+ *
+ * A template is node-agnostic (Nomad writes it into the alloc's `local/` dir on
+ * whatever node runs the task), unlike a host bind mount which would need the file
+ * pre-placed on that specific node. Two layers of escaping keep arbitrary content
+ * intact: HCL2 heredoc interpolation (`${` / `%{`) is escaped, and the template's
+ * consul-template delimiters are set to unlikely tokens so the content's own
+ * `{{ }}` / `${ }` are written verbatim rather than rendered.
+ *
+ * Returns `templates` (stanzas for the task body) and `volumes` (entries to append
+ * to the docker `volumes` list, relative to the alloc dir where `local/` lives).
+ */
+const generateFileMounts = (
+	fileMounts?: NomadServiceSpec["fileMounts"],
+): { templates: string; volumes: string[] } => {
+	if (!fileMounts || fileMounts.length === 0)
+		return { templates: "", volumes: [] };
+	const templates: string[] = [];
+	const volumes: string[] = [];
+	fileMounts.forEach((f, i) => {
+		if (!f.mountPath) return;
+		const dest = `local/file-${i}`;
+		// Escape HCL2 heredoc interpolation so literal ${...}/%{...} survive parsing.
+		// Function replacements return the text verbatim (a plain "$${" string would be
+		// mangled by String.replace's own `$$`→`$` substitution).
+		const data = f.content
+			.replace(/\$\{/g, () => "$${")
+			.replace(/%\{/g, () => "%%{");
+		templates.push(`      template {
+        destination     = ${JSON.stringify(dest)}
+        change_mode     = "restart"
+        left_delimiter  = "[[[["
+        right_delimiter = "]]]]"
+        data            = <<EOFILE
+${data}
+EOFILE
+      }`);
+		volumes.push(`"${dest}:${f.mountPath}"`);
+	});
+	return {
+		templates: templates.length ? `\n\n${templates.join("\n\n")}` : "",
+		volumes,
+	};
 };
 
 // ─── Consul + Traefik Integration ────────────────────────────────────────────
