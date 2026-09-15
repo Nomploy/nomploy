@@ -1342,6 +1342,37 @@ fi`;
 				throw new TRPCError({ code: "UNAUTHORIZED" });
 			}
 
+			// Guard against the crossed/duplicate membership that repeated joins + IP
+			// reuse produce. Re-joining an existing member allocates a SECOND overlay IP
+			// (the box keeps its old one) → the DB wgIp and the box diverge, and the live
+			// node gets misattributed to the wrong row. And when a destroyed VM's private
+			// IP is reused by a new box, a second row with the same IP appears. Refuse
+			// both up front and tell the operator to remove the stale member first.
+			if (server.clusterRole) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: `"${server.name}" is already a ${server.clusterRole} in the cluster. Remove it first before re-joining — re-joining allocates a second overlay IP and corrupts the membership records.`,
+				});
+			}
+			const orgId = ctx.session.activeOrganizationId;
+			if (orgId) {
+				const members = await db.query.server.findMany({
+					where: eq(serverTable.organizationId, orgId),
+				});
+				const dupIpMember = members.find(
+					(s) =>
+						s.serverId !== server.serverId &&
+						s.ipAddress === server.ipAddress &&
+						!!s.clusterRole,
+				);
+				if (dupIpMember) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: `${server.ipAddress} already belongs to cluster member "${dupIpMember.name}". A destroyed VM's private IP was likely reused without removing the old node — remove "${dupIpMember.name}" first, then re-join.`,
+					});
+				}
+			}
+
 			return observable<string>((emit) => {
 				(async () => {
 					try {
