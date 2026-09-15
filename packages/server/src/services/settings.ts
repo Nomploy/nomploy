@@ -56,17 +56,60 @@ const parseImageRef = (ref: string) => {
 	return { registry, repository, tag };
 };
 
-/** The digest the local image for `ref` was pulled at (its RepoDigest), or null. */
-const getLocalImageDigest = async (ref: string): Promise<string | null> => {
+/**
+ * The manifest digest the **running** panel container is actually on — not the
+ * digest of whatever `:latest` happens to be pulled on the host. Those diverge
+ * whenever `:latest` was force-pulled without the container restarting (e.g. a
+ * canary that was auto-reverted), which made the old check report "no update"
+ * while the running panel was in fact behind. We resolve the digest from the
+ * live container's image, so it reflects what is served right now.
+ *
+ * Falls back to inspecting `ref` directly if the container can't be located
+ * (e.g. running outside Nomad).
+ */
+const getRunningImageDigest = async (ref: string): Promise<string | null> => {
+	const digestOf = async (image: string): Promise<string | null> => {
+		try {
+			const { stdout } = await execAsync(
+				`docker image inspect ${image} --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}'`,
+			);
+			const digest = stdout.trim().split("@")[1];
+			return digest || null;
+		} catch {
+			return null;
+		}
+	};
 	try {
+		// The panel runs as the Nomad task "nomploy"; find its live container's
+		// image, then read that image's RepoDigest (its manifest digest).
 		const { stdout } = await execAsync(
-			`docker image inspect ${ref} --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}'`,
+			`docker ps --filter "label=com.hashicorp.nomad.task_name=nomploy" --format '{{.Image}}' | head -1`,
 		);
-		const digest = stdout.trim().split("@")[1];
-		return digest || null;
+		const runningImage = stdout.trim();
+		if (runningImage) {
+			const digest = await digestOf(runningImage);
+			if (digest) return digest;
+		}
 	} catch {
-		return null;
+		// fall through to inspecting the ref
 	}
+	return digestOf(ref);
+};
+
+/** Split a version/tag into numeric parts: "v0.30.2" -> [0, 30, 2]. */
+const semverParts = (v: string): number[] =>
+	v
+		.replace(/^v/, "")
+		.split(/[.-]/)
+		.map((n) => Number.parseInt(n, 10) || 0);
+
+/** >0 if a is newer than b, <0 if older, 0 if equal (numeric semver compare). */
+const compareSemver = (a: string, b: string): number => {
+	const [pa, pb] = [semverParts(a), semverParts(b)];
+	for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+		if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) - (pb[i] ?? 0);
+	}
+	return 0;
 };
 
 /**
@@ -146,34 +189,55 @@ const getLatestReleaseTag = async (
 		);
 		if (!res.ok) return null;
 		const tags = (await res.json()) as { name: string }[];
-		const parts = (v: string) =>
-			v
-				.replace(/^v/, "")
-				.split(/[.-]/)
-				.map((n) => Number.parseInt(n, 10) || 0);
 		const semver = tags
 			.map((t) => t.name)
 			.filter((n) => /^v?\d+\.\d+\.\d+/.test(n))
-			.sort((a, b) => {
-				const [pa, pb] = [parts(a), parts(b)];
-				for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-					if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) - (pb[i] ?? 0);
-				}
-				return 0;
-			});
+			.sort(compareSemver);
 		return semver.length ? (semver[semver.length - 1] as string) : null;
 	} catch {
 		return null;
 	}
 };
 
-export const getUpdateData = async (): Promise<IUpdateData> => {
+/**
+ * Is a newer panel available for the current channel?
+ *
+ * On the RELEASE channel (`:latest`) the honest signal is the **running**
+ * version vs the newest published release tag — a plain semver comparison. This
+ * is immune to the host having `:latest` pulled to a newer digest without the
+ * container being restarted (the reverted-canary case that made the old
+ * digest-only check report "no update" while the panel was really behind).
+ * `currentVersion` is the running `packageInfo.version` (e.g. "v0.30.0"), passed
+ * in by the router since it lives in the app package.
+ *
+ * On moving/pinned tags (`:edge`, `:sha-*`) version tags aren't meaningful, so
+ * we fall back to comparing the running container's manifest digest against the
+ * tag's current registry digest. The release path also falls back to this if the
+ * GitHub tags API is unreachable.
+ */
+export const getUpdateData = async (
+	currentVersion?: string,
+): Promise<IUpdateData> => {
 	try {
 		const imageRef =
 			process.env.NOMPLOY_IMAGE || "ghcr.io/nomploy/nomploy:latest";
 		const { registry, repository, tag } = parseImageRef(imageRef);
+
+		// Release channel: compare running version against the newest release tag.
+		if (tag === "latest" && currentVersion) {
+			const releaseTag = await getLatestReleaseTag(repository);
+			if (releaseTag) {
+				const updateAvailable = compareSemver(releaseTag, currentVersion) > 0;
+				return {
+					updateAvailable,
+					latestVersion: updateAvailable ? releaseTag : null,
+				};
+			}
+			// GitHub unreachable — fall through to the digest comparison below.
+		}
+
 		const [localDigest, remoteDigest] = await Promise.all([
-			getLocalImageDigest(imageRef),
+			getRunningImageDigest(imageRef),
 			getRemoteManifestDigest(registry, repository, tag),
 		]);
 		if (!remoteDigest || !localDigest) return DEFAULT_UPDATE_DATA;
