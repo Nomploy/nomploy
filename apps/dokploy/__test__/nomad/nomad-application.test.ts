@@ -104,4 +104,28 @@ describe("nomad application builder — application → HCL", () => {
 		};
 		expect(resolveApplicationImage(dockerApp)).toBe("nginx:alpine");
 	});
+
+	it("persists volume + bind mounts as docker volumes", () => {
+		const appWithMounts = {
+			...application,
+			appName: "mountapp",
+			mounts: [
+				{ type: "volume", volumeName: "data", mountPath: "/var/lib/data" },
+				{ type: "bind", hostPath: "/srv/conf", mountPath: "/etc/conf" },
+				// file mounts write content via a template stanza — not a docker volume.
+				{ type: "file", filePath: "app.conf", mountPath: "/etc/app.conf" },
+			],
+		};
+		const spec = applicationToNomadSpec(appWithMounts);
+		expect(spec.volumes).toEqual([
+			{ source: "data", target: "/var/lib/data", named: true },
+			{ source: "/srv/conf", target: "/etc/conf", named: false },
+		]);
+
+		const hcl = generateApplicationNomadJob(appWithMounts, []);
+		// Named volume → app-prefixed docker named volume (persists across redeploys).
+		expect(hcl).toContain('"mountapp-data:/var/lib/data"');
+		// Absolute bind mount passes through.
+		expect(hcl).toContain('"/srv/conf:/etc/conf"');
+	});
 });
