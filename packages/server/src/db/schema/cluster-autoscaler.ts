@@ -4,6 +4,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { organization } from "./account";
+import { cloudProvider } from "./cloud-provider";
 import { sshKeys } from "./ssh-key";
 
 /**
@@ -37,9 +38,16 @@ export const clusterAutoscaler = pgTable("cluster_autoscaler", {
 	// The default group can't be deleted; it backs the built-in `default` pool.
 	isDefault: boolean("isDefault").notNull().default(false),
 	enabled: boolean("enabled").notNull().default(false),
+	// The registered cloud account (credential) this group provisions with — see
+	// `cloudProvider`. The effective provider + token come from it; the two columns
+	// below are a dormant legacy fallback (pre-Cloud-tab installs) kept only so an
+	// unmigrated row still works. New groups set cloudProviderId and leave them blank.
+	cloudProviderId: text("cloudProviderId").references(
+		() => cloudProvider.cloudProviderId,
+		{ onDelete: "set null" },
+	),
 	provider: text("provider").notNull().default("hetzner"),
-	// Cloud API token. Stored like the other provider secrets in this schema
-	// (plaintext at rest); never returned by read APIs (masked in the UI).
+	// Legacy per-group token (plaintext); superseded by cloudProvider.token.
 	token: text("token").notNull().default(""),
 	serverType: text("serverType").notNull().default("cpx22"),
 	location: text("location").notNull().default("nbg1"),
@@ -120,6 +128,10 @@ export const clusterAutoscalerRelations = relations(
 			fields: [clusterAutoscaler.sshKeyId],
 			references: [sshKeys.sshKeyId],
 		}),
+		cloudProvider: one(cloudProvider, {
+			fields: [clusterAutoscaler.cloudProviderId],
+			references: [cloudProvider.cloudProviderId],
+		}),
 	}),
 );
 
@@ -132,6 +144,7 @@ const createSchema = createInsertSchema(clusterAutoscaler);
 export const apiUpdateClusterAutoscaler = createSchema
 	.pick({
 		enabled: true,
+		cloudProviderId: true,
 		provider: true,
 		serverType: true,
 		location: true,

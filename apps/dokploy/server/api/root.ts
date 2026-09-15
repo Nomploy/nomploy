@@ -5,6 +5,7 @@ import { applicationRouter } from "./routers/application";
 import { backupRouter } from "./routers/backup";
 import { bitbucketRouter } from "./routers/bitbucket";
 import { certificateRouter } from "./routers/certificate";
+import { cloudProviderRouter } from "./routers/cloud-provider";
 import { composeRouter } from "./routers/compose";
 import { deploymentRouter } from "./routers/deployment";
 import { destinationRouter } from "./routers/destination";
@@ -61,6 +62,7 @@ export const appRouter = createTRPCRouter({
 	compose: composeRouter,
 	deployment: deploymentRouter,
 	destination: destinationRouter,
+	cloudProvider: cloudProviderRouter,
 	docker: dockerRouter,
 	domain: domainRouter,
 	gitea: giteaRouter,

@@ -35,6 +35,7 @@ type Form = {
 	name: string;
 	poolName: string;
 	enabled: boolean;
+	cloudProviderId: string;
 	provider: string;
 	token: string;
 	sshKeyId: string;
@@ -55,6 +56,7 @@ const DEFAULTS: Form = {
 	name: "",
 	poolName: "",
 	enabled: false,
+	cloudProviderId: "",
 	provider: "hetzner",
 	token: "",
 	sshKeyId: "",
@@ -96,6 +98,7 @@ const GroupCard = ({
 	const upsert = api.nomad.upsertAutoscalingGroup.useMutation();
 	const remove = api.nomad.deleteAutoscalingGroup.useMutation();
 	const loadOptions = api.nomad.listProviderOptions.useMutation();
+	const { data: cloudProviders } = api.cloudProvider.all.useQuery();
 	const setDesired = api.nomad.setDesiredCount.useMutation();
 	const [desiredInput, setDesiredInput] = useState<number>(
 		group?.desiredNodes ?? group?.minNodes ?? 0,
@@ -111,6 +114,7 @@ const GroupCard = ({
 					name: group.name,
 					poolName: group.poolName,
 					enabled: group.enabled,
+					cloudProviderId: group.cloudProviderId ?? "",
 					provider: group.provider,
 					sshKeyId: group.sshKeyId ?? "",
 					serverType: group.serverType,
@@ -127,7 +131,6 @@ const GroupCard = ({
 				}
 			: {}),
 	});
-	const [hasToken, setHasToken] = useState(group?.hasToken ?? false);
 	const [options, setOptions] = useState<{
 		locations: { name: string; description: string }[];
 		networks: { id: string; name: string; zone: string }[];
@@ -142,6 +145,7 @@ const GroupCard = ({
 				name: group.name,
 				poolName: group.poolName,
 				enabled: group.enabled,
+				cloudProviderId: group.cloudProviderId ?? "",
 				provider: group.provider,
 				sshKeyId: group.sshKeyId ?? "",
 				serverType: group.serverType,
@@ -156,7 +160,6 @@ const GroupCard = ({
 				memScaleDownThreshold: group.memScaleDownThreshold,
 				cooldownSeconds: group.cooldownSeconds,
 			});
-			setHasToken(group.hasToken);
 		}
 	}, [group?.groupId]);
 
@@ -167,8 +170,7 @@ const GroupCard = ({
 		try {
 			const o = await loadOptions.mutateAsync({
 				groupId: group?.groupId,
-				token: form.token || undefined,
-				provider: form.provider,
+				cloudProviderId: form.cloudProviderId || undefined,
 				location: form.location,
 				image: form.image,
 			});
@@ -188,14 +190,19 @@ const GroupCard = ({
 			toast.error("Max nodes must be ≥ min nodes");
 			return;
 		}
+		if (form.enabled && !form.cloudProviderId) {
+			toast.error(
+				"Select a cloud provider (Settings → Cloud) to enable the group",
+			);
+			return;
+		}
 		try {
 			await upsert.mutateAsync({
 				groupId: group?.groupId,
 				name: form.name.trim(),
 				poolName: form.poolName.trim(),
 				enabled: form.enabled,
-				provider: form.provider,
-				...(form.token ? { token: form.token } : {}),
+				cloudProviderId: form.cloudProviderId || undefined,
 				sshKeyId: form.sshKeyId || undefined,
 				serverType: form.serverType,
 				location: form.location,
@@ -321,44 +328,48 @@ const GroupCard = ({
 								/>
 							</div>
 							<div className="space-y-2">
-								<Label>Provider</Label>
-								<Select
-									value={form.provider}
-									onValueChange={(v) => set("provider", v)}
-								>
-									<SelectTrigger>
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="hetzner">Hetzner Cloud</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-							<div className="space-y-2">
-								<Label>API token</Label>
+								<Label>Cloud provider</Label>
 								<div className="flex gap-2">
-									<Input
-										type="password"
-										placeholder={
-											hasToken
-												? "•••••••• (set — leave blank to keep)"
-												: "hcloud API token"
-										}
-										value={form.token}
-										onChange={(e) => set("token", e.target.value)}
-									/>
+									<Select
+										value={form.cloudProviderId}
+										onValueChange={(v) => set("cloudProviderId", v)}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Select a cloud provider" />
+										</SelectTrigger>
+										<SelectContent>
+											{(cloudProviders ?? []).map((cp) => (
+												<SelectItem
+													key={cp.cloudProviderId}
+													value={cp.cloudProviderId}
+												>
+													{cp.name}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
 									<Button
 										type="button"
 										variant="secondary"
 										onClick={fetchOptions}
-										disabled={
-											loadOptions.isPending || (!hasToken && !form.token)
-										}
+										disabled={loadOptions.isPending || !form.cloudProviderId}
 										title="List locations, networks + server types from the provider"
 									>
 										{loadOptions.isPending ? "Loading…" : "Load options"}
 									</Button>
 								</div>
+								{(cloudProviders?.length ?? 0) === 0 && (
+									<p className="text-xs text-muted-foreground">
+										No cloud providers yet — add one in{" "}
+										<a
+											href="/dashboard/settings/cloud"
+											className="text-primary underline-offset-4 hover:underline"
+										>
+											Settings → Cloud
+										</a>
+										.
+									</p>
+								)}
 							</div>
 							<div className="space-y-2">
 								<Label>SSH key (authorized on new nodes)</Label>

@@ -12,6 +12,7 @@ import {
 	CircleHelp,
 	ClipboardList,
 	Clock,
+	CloudCog,
 	CreditCard,
 	Database,
 	Folder,
@@ -368,6 +369,13 @@ const MENU: Menu = {
 			url: "/dashboard/settings/destinations",
 			icon: Database,
 			isEnabled: ({ permissions }) => !!permissions?.destination.read,
+		},
+		{
+			isSingle: true,
+			title: "Cloud",
+			url: "/dashboard/settings/cloud",
+			icon: CloudCog,
+			isEnabled: ({ permissions }) => !!permissions?.server.read,
 		},
 
 		{

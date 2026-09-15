@@ -2,6 +2,7 @@ import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { customAlphabet, nanoid } from "nanoid";
 import { db } from "../../db";
 import {
+	cloudProvider,
 	clusterAutoscaler,
 	clusterAutoscalerEvents,
 	server as serverTable,
@@ -277,6 +278,25 @@ const waitForSsh = async (serverId: string, onLog: Log) => {
 type GroupRow = typeof clusterAutoscaler.$inferSelect;
 
 /**
+ * The effective cloud credential for a group: the linked cloud_provider account
+ * (Settings → Cloud) when set, else the group's own legacy token column (dormant
+ * fallback for pre-Cloud-tab installs). This is what decouples the credential from
+ * the autoscaling group — the token lives on the shared account, not each group.
+ */
+const resolveCloudCredential = async (
+	cfg: GroupRow,
+): Promise<{ provider: string; token: string }> => {
+	if (cfg.cloudProviderId) {
+		const cp = await db.query.cloudProvider.findFirst({
+			where: eq(cloudProvider.cloudProviderId, cfg.cloudProviderId),
+			columns: { provider: true, token: true },
+		});
+		if (cp?.token) return { provider: cp.provider, token: cp.token };
+	}
+	return { provider: cfg.provider, token: cfg.token };
+};
+
+/**
  * One reconcile tick for an ORG: reconcile each of its enabled autoscaling groups
  * (node pools) independently. Failure-isolated per group.
  */
@@ -349,9 +369,10 @@ const reconcileGroup = async (
 		if (!key?.publicKey)
 			throw new Error("Configured SSH key has no public key");
 
+		const cred = await resolveCloudCredential(cfg);
 		const provisioner = getProvisioner({
-			provider: cfg.provider,
-			token: cfg.token,
+			provider: cred.provider,
+			token: cred.token,
 			serverTypes: serverTypeList(cfg.serverType),
 			location: cfg.location,
 			image: cfg.image,
@@ -500,9 +521,10 @@ const reconcileGroup = async (
 	);
 	await removeWorkerNode(victim.serverId, onLog);
 	if (victim.providerNodeId) {
+		const cred = await resolveCloudCredential(cfg);
 		const provisioner = getProvisioner({
-			provider: cfg.provider,
-			token: cfg.token,
+			provider: cred.provider,
+			token: cred.token,
 			serverTypes: serverTypeList(cfg.serverType),
 			location: cfg.location,
 			image: cfg.image,
@@ -552,9 +574,12 @@ export const provisionAndJoinNode = async (
 				where: eq(clusterAutoscaler.organizationId, organizationId),
 				orderBy: [desc(clusterAutoscaler.isDefault)],
 			});
-	if (!cfg?.token)
+	if (!cfg)
+		throw new Error("No autoscaling group configured — create one first.");
+	const cred = await resolveCloudCredential(cfg);
+	if (!cred.token)
 		throw new Error(
-			"No cloud provider token configured — set one in the Autoscaling tab first.",
+			"No cloud provider configured — add one in Settings → Cloud and select it on the group.",
 		);
 	if (!cfg.sshKeyId) throw new Error("No SSH key configured for provisioning");
 	const key = await db.query.sshKeys.findFirst({
@@ -564,8 +589,8 @@ export const provisionAndJoinNode = async (
 	if (!key?.publicKey) throw new Error("Configured SSH key has no public key");
 
 	const provisioner = getProvisioner({
-		provider: cfg.provider,
-		token: cfg.token,
+		provider: cred.provider,
+		token: cred.token,
 		serverTypes: serverTypeList(cfg.serverType),
 		location: cfg.location,
 		image: cfg.image,

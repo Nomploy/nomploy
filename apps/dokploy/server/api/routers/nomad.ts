@@ -5,6 +5,7 @@ import {
 	apiUpsertAutoscalingGroup,
 	apiUpsertAutoscalingSchedule,
 	autoscalingSchedule,
+	cloudProvider,
 	clusterAutoscaler,
 	clusterAutoscalerEvents,
 	networkPolicies,
@@ -1633,18 +1634,23 @@ fi`;
 										clusterAutoscaler.organizationId,
 										server.organizationId,
 									),
+									with: { cloudProvider: true },
 								});
-								if (cfg?.token) {
+								// Credential comes from the linked cloud account (Settings →
+								// Cloud), falling back to the group's legacy token.
+								const provider = cfg?.cloudProvider?.provider ?? cfg?.provider;
+								const token = cfg?.cloudProvider?.token || cfg?.token;
+								if (token && provider) {
 									emit.next(
-										`Destroying cloud VM (${cfg.provider} ${server.providerNodeId}) …\n`,
+										`Destroying cloud VM (${provider} ${server.providerNodeId}) …\n`,
 									);
 									await getProvisioner({
-										provider: cfg.provider,
-										token: cfg.token,
+										provider,
+										token,
 										serverTypes: [],
-										location: cfg.location,
-										image: cfg.image,
-										networkId: cfg.networkId || undefined,
+										location: cfg?.location ?? "",
+										image: cfg?.image ?? "",
+										networkId: cfg?.networkId || undefined,
 									})
 										.destroyNode(server.providerNodeId)
 										.catch((e) =>
@@ -2365,6 +2371,7 @@ fi`;
 			z
 				.object({
 					groupId: z.string().optional(),
+					cloudProviderId: z.string().optional(),
 					token: z.string().optional(),
 					provider: z.string().optional(),
 					location: z.string().optional(),
@@ -2379,6 +2386,19 @@ fi`;
 			let provider = input?.provider || "hetzner";
 			let location = input?.location || "nbg1";
 			let image = input?.image || "ubuntu-24.04";
+			// Prefer a selected cloud account’s saved token (Settings → Cloud).
+			if (!token && input?.cloudProviderId) {
+				const cp = await db.query.cloudProvider.findFirst({
+					where: and(
+						eq(cloudProvider.cloudProviderId, input.cloudProviderId),
+						eq(cloudProvider.organizationId, org),
+					),
+				});
+				if (cp?.token) {
+					token = cp.token;
+					provider = cp.provider;
+				}
+			}
 			if (!token) {
 				const g = input?.groupId
 					? await db.query.clusterAutoscaler.findFirst({
@@ -2386,15 +2406,18 @@ fi`;
 								eq(clusterAutoscaler.autoscalerId, input.groupId),
 								eq(clusterAutoscaler.organizationId, org),
 							),
+							with: { cloudProvider: true },
 						})
 					: await db.query.clusterAutoscaler.findFirst({
 							where: eq(clusterAutoscaler.organizationId, org),
+							with: { cloudProvider: true },
 						});
-				if (g?.token) {
-					token = g.token;
-					provider = g.provider;
-					location = g.location;
-					image = g.image;
+				const gToken = g?.cloudProvider?.token || g?.token;
+				if (gToken) {
+					token = gToken;
+					provider = g?.cloudProvider?.provider ?? g?.provider ?? provider;
+					location = g?.location ?? location;
+					image = g?.image ?? image;
 				}
 			}
 			if (!token)
