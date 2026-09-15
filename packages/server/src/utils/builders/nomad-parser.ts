@@ -397,11 +397,21 @@ const substituteEnvVars = (
 	content: string,
 	envVars: Record<string, string>,
 ): string => {
+	// Supports `$VAR`, `${VAR}`, and the default forms `${VAR:-default}` (default
+	// when VAR is unset OR empty) and `${VAR-default}` (default only when unset) —
+	// a very common compose pattern (e.g. `TZ=${TZ:-UTC}`). The old regex captured
+	// the `:-default` suffix but the callback discarded it, substituting "" instead
+	// of the default — which broke apps that relied on it (an empty TZ made a cron
+	// library throw "invalid date" and crash the container on boot).
 	return content.replace(
-		/\$\{([^}:]+?)(?::?-[^}]*)?\}|\$([A-Za-z_][A-Za-z0-9_]*)/g,
-		(match, braced, bare) => {
+		/\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:?-)([^}]*))?\}|\$([A-Za-z_][A-Za-z0-9_]*)/g,
+		(_match, braced, op, defaultVal, bare) => {
 			const varName = braced || bare;
-			return envVars[varName] ?? "";
+			const val = envVars[varName];
+			if (op === ":-")
+				return val !== undefined && val !== "" ? val : defaultVal;
+			if (op === "-") return val !== undefined ? val : defaultVal;
+			return val ?? "";
 		},
 	);
 };

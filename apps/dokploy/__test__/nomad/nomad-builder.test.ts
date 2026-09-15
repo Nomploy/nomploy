@@ -186,6 +186,37 @@ services:
 		expect(hcl).toContain("memory_max = 4096");
 	});
 
+	it("honors ${VAR:-default} / ${VAR-default} env defaults", async () => {
+		const defCompose = {
+			...compose,
+			appName: "defenv",
+			// TZ unset → :-default and -default both fall back; SET wins over its
+			// default; bare ${MISSING} → empty.
+			env: "SET=present",
+			environment: { project: { env: "" }, env: null },
+			composeFile: `
+services:
+  app:
+    image: nginx:alpine
+    environment:
+      TZ: \${TZ:-UTC}
+      DASH: \${MISSING-fallback}
+      KEPT: \${SET:-ignored}
+      EMPTY: \${MISSING}
+`,
+			domains: [],
+		};
+		const cmd = await getBuildNomadCommand(defCompose);
+		const hcl = Buffer.from(
+			cmd.match(/echo "([A-Za-z0-9+/=]+)" \| base64 -d/)?.[1] ?? "",
+			"base64",
+		).toString("utf8");
+		expect(hcl).toContain('TZ = "UTC"');
+		expect(hcl).toContain('DASH = "fallback"');
+		expect(hcl).toContain('KEPT = "present"');
+		expect(hcl).toContain('EMPTY = ""');
+	});
+
 	it("persists compose volumes as docker volumes (named/bind/anonymous)", async () => {
 		const volCompose = {
 			...compose,
