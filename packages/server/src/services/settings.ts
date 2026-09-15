@@ -125,6 +125,48 @@ const getRemoteManifestDigest = async (
  * of which applies to the GHCR + Nomad deployment. The digest comparison is the
  * same signal the reload path acts on: force_pull fetches exactly this digest.
  */
+/**
+ * The newest published release tag (e.g. "v0.30.1"), from the GitHub tags API,
+ * so the Update panel shows the real version rather than "latest (<digest>)".
+ * Picks the highest semver v-tag (GitHub's tag order isn't guaranteed). Null on
+ * any failure — callers fall back to the digest label.
+ */
+const getLatestReleaseTag = async (
+	repository: string,
+): Promise<string | null> => {
+	try {
+		const res = await fetch(
+			`https://api.github.com/repos/${repository}/tags?per_page=30`,
+			{
+				headers: {
+					"User-Agent": "nomploy",
+					Accept: "application/vnd.github+json",
+				},
+			},
+		);
+		if (!res.ok) return null;
+		const tags = (await res.json()) as { name: string }[];
+		const parts = (v: string) =>
+			v
+				.replace(/^v/, "")
+				.split(/[.-]/)
+				.map((n) => Number.parseInt(n, 10) || 0);
+		const semver = tags
+			.map((t) => t.name)
+			.filter((n) => /^v?\d+\.\d+\.\d+/.test(n))
+			.sort((a, b) => {
+				const [pa, pb] = [parts(a), parts(b)];
+				for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+					if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) - (pb[i] ?? 0);
+				}
+				return 0;
+			});
+		return semver.length ? (semver[semver.length - 1] as string) : null;
+	} catch {
+		return null;
+	}
+};
+
 export const getUpdateData = async (): Promise<IUpdateData> => {
 	try {
 		const imageRef =
@@ -136,11 +178,14 @@ export const getUpdateData = async (): Promise<IUpdateData> => {
 		]);
 		if (!remoteDigest || !localDigest) return DEFAULT_UPDATE_DATA;
 		const updateAvailable = localDigest !== remoteDigest;
+		if (!updateAvailable) return { updateAvailable, latestVersion: null };
+		// Show the real release version when we can resolve it; else the digest.
+		const releaseTag = await getLatestReleaseTag(repository);
 		return {
 			updateAvailable,
-			latestVersion: updateAvailable
-				? `${tag} (${remoteDigest.replace("sha256:", "").slice(0, 12)})`
-				: null,
+			latestVersion:
+				releaseTag ??
+				`${tag} (${remoteDigest.replace("sha256:", "").slice(0, 12)})`,
 		};
 	} catch (error) {
 		console.error("Error fetching update data:", error);
