@@ -3,10 +3,13 @@ name: Docker Publish (GHCR)
 # Builds the app image and pushes it to the GitHub Container Registry using the
 # built-in GITHUB_TOKEN — no external secrets.
 #
-# Release builds (main / v* tags) are multi-arch (amd64 + arm64). Branch and
-# manual (workflow_dispatch) builds are amd64-only — that's all the hub needs,
-# so dev dispatches skip the arm64 leg and the manifest wait. The matrix is
-# chosen by the `setup` job below.
+# Channels: a push to `main` publishes `:edge` (rolling dev); a version tag `v*`
+# publishes `:vX.Y.Z` AND moves `:latest` (the release channel the panel self-
+# updates from). So main never touches production — only tagging a release does.
+#
+# Release (v* tag) builds are multi-arch (amd64 + arm64). main (:edge) and manual
+# (workflow_dispatch) builds are amd64-only — that's all the hub needs, so the edge
+# loop skips the arm64 leg and the manifest wait. The matrix is chosen by `setup`.
 #
 # Each architecture is built on its OWN native runner (fast, no QEMU emulation),
 # pushed by digest, then a merge job assembles the final manifest. Native arm64
@@ -50,7 +53,9 @@ jobs:
         run: |
           amd64='{"platform":"linux/amd64","arch":"amd64","runner":"ubuntu-latest"}'
           arm64='{"platform":"linux/arm64","arch":"arm64","runner":"ubuntu-24.04-arm"}'
-          if [[ "${GITHUB_REF}" == "refs/heads/main" || "${GITHUB_REF}" == refs/tags/v* ]]; then
+          # Multi-arch only for RELEASES (v* tags). main (:edge) + manual builds
+          # are amd64-only (the hub is amd64) — keeps the edge loop fast.
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             echo "matrix={\"include\":[$amd64,$arm64]}" >> "$GITHUB_OUTPUT"
           else
             echo "matrix={\"include\":[$amd64]}" >> "$GITHUB_OUTPUT"
@@ -132,8 +137,14 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE }}
+          # Channel model: `:latest` is a RELEASE channel that only moves on a
+          # version tag (v*), and that's what the panel self-updates from. Every
+          # push to main publishes `:edge` (the rolling dev channel) instead, so
+          # `main` never disturbs production. `:vX.Y.Z` and `:sha-<short>` are
+          # always produced for their respective refs.
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=edge,enable={{is_default_branch}}
             type=ref,event=tag
             type=sha,format=short
 
@@ -145,4 +156,6 @@ jobs:
             $(printf '${{ env.IMAGE }}@sha256:%s ' *)
 
       - name: Inspect image
-        run: docker buildx imagetools inspect ${{ env.IMAGE }}:latest
+        # Inspect the first tag this run actually produced (:edge on main,
+        # :latest on a release tag) rather than assuming :latest exists.
+        run: docker buildx imagetools inspect "$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
