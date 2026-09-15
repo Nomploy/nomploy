@@ -71,7 +71,10 @@ export const ShowInternalLibsqlCredentials = ({ libsqlId }: Props) => {
 							</div>
 							<div className="flex flex-col gap-2">
 								<Label>Internal Host</Label>
-								<Input disabled value={data?.appName} />
+								<Input
+									disabled
+									value={data?.appName ? `${data.appName}.service.consul` : ""}
+								/>
 							</div>
 							<div className="flex flex-col gap-2">
 								<Label>Enable Namespaces</Label>
@@ -102,14 +105,14 @@ export const ShowInternalLibsqlCredentials = ({ libsqlId }: Props) => {
 								<Label>Internal Connection URL </Label>
 								<ToggleVisibilityInput
 									disabled
-									value={`http://${data?.databaseUser}:${data?.databasePassword}@${data?.appName}:8080`}
+									value={`http://${data?.databaseUser}:${data?.databasePassword}@${data?.appName}.service.consul:8080`}
 								/>
 							</div>
 							<div className="flex flex-col gap-2 md:col-span-2">
 								<Label>Internal Replication Connection URL </Label>
 								<ToggleVisibilityInput
 									disabled
-									value={`http://${data?.databaseUser}:${data?.databasePassword}@${data?.appName}:5001`}
+									value={`http://${data?.databaseUser}:${data?.databasePassword}@${data?.appName}.service.consul:5001`}
 								/>
 							</div>
 						</div>

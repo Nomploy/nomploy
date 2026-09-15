@@ -55,14 +55,17 @@ export const ShowInternalMongoCredentials = ({ mongoId }: Props) => {
 
 							<div className="flex flex-col gap-2">
 								<Label>Internal Host</Label>
-								<Input disabled value={data?.appName} />
+								<Input
+									disabled
+									value={data?.appName ? `${data.appName}.service.consul` : ""}
+								/>
 							</div>
 
 							<div className="flex flex-col gap-2 md:col-span-2">
 								<Label>Internal Connection URL </Label>
 								<ToggleVisibilityInput
 									disabled
-									value={`mongodb://${data?.databaseUser}:${data?.databasePassword}@${data?.appName}:27017/?authSource=admin${data?.replicaSets ? "" : "&directConnection=true"}`}
+									value={`mongodb://${data?.databaseUser}:${data?.databasePassword}@${data?.appName}.service.consul:27017/?authSource=admin${data?.replicaSets ? "" : "&directConnection=true"}`}
 								/>
 							</div>
 						</div>

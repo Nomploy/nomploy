@@ -79,14 +79,17 @@ export const ShowInternalMariadbCredentials = ({ mariadbId }: Props) => {
 
 							<div className="flex flex-col gap-2">
 								<Label>Internal Host</Label>
-								<Input disabled value={data?.appName} />
+								<Input
+									disabled
+									value={data?.appName ? `${data.appName}.service.consul` : ""}
+								/>
 							</div>
 
 							<div className="flex flex-col gap-2 md:col-span-2">
 								<Label>Internal Connection URL </Label>
 								<ToggleVisibilityInput
 									disabled
-									value={`mariadb://${data?.databaseUser}:${data?.databasePassword}@${data?.appName}:3306/${data?.databaseName}`}
+									value={`mariadb://${data?.databaseUser}:${data?.databasePassword}@${data?.appName}.service.consul:3306/${data?.databaseName}`}
 								/>
 							</div>
 						</div>
