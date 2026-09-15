@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { paths } from "@nomploy/server/constants";
 import type { Domain } from "@nomploy/server/services/domain";
@@ -173,9 +174,25 @@ export const getBuildNomadCommand = async (
 	compose: NomadComposeNested,
 ): Promise<string> => {
 	const { COMPOSE_PATH } = paths(!!compose.serverId);
-	const { appName, composeFile, domains } = compose;
+	const { appName, domains } = compose;
 	const projectPath = join(COMPOSE_PATH, appName, "code");
 	const jobFilePath = join(projectPath, `${appName}.nomad.hcl`);
+
+	// Which compose file to translate. For `raw` the stored composeFile is the source
+	// of truth (edited in the panel). For a GIT source the real compose lives in the
+	// freshly-cloned repo at composePath — the stored composeFile is a stale snapshot,
+	// so a `git push` (e.g. removing a service) would otherwise never change the
+	// deployed job. Read the cloned file instead. (Control-plane deploys only; a remote
+	// server's clone isn't on this filesystem — fall back to the stored copy there.)
+	const relComposePath =
+		compose.sourceType === "raw"
+			? "docker-compose.yml"
+			: compose.composePath || "docker-compose.yml";
+	let composeFile = compose.composeFile;
+	if (compose.sourceType !== "raw" && !compose.serverId) {
+		const clonedPath = join(projectPath, relComposePath);
+		if (existsSync(clonedPath)) composeFile = readFileSync(clonedPath, "utf8");
+	}
 
 	// Native Nomad jobspec passthrough: if the source is already a Nomad HCL job
 	// (a top-level `job "\u2026" {` block) rather than docker-compose YAML, deploy it
@@ -236,12 +253,15 @@ export const getBuildNomadCommand = async (
 	const buildSteps = isNativeHcl
 		? ""
 		: `
-	# Build Docker image
-	docker compose build 2>&1
+	# Build + push any services that declare a build: (no-op for pre-built images).
+	# Use -f so docker compose finds the file at its configured path (it may live in a
+	# subdir, e.g. docker/docker-compose.yaml \u2014 a bare \`docker compose build\` in the
+	# repo root errors with "no configuration file provided").
+	docker compose -f ${JSON.stringify(relComposePath)} build 2>&1
 	echo "Docker image built: \u2705"
 
 	# Push to registry
-	docker compose push 2>&1
+	docker compose -f ${JSON.stringify(relComposePath)} push 2>&1
 	echo "Docker image pushed: \u2705"
 `;
 
