@@ -258,13 +258,15 @@ ${generateEnvBlock(panelEnv)}
 
       kill_timeout = "30s"
 
-      // memory is the scheduling reservation; memory_max is the hard cgroup cap
-      // the panel can burst to (Node's heap grows well past 512 MB under load —
-      // a 1024 MB hard limit OOM-killed it). Bursting above the reservation
-      // needs the cluster's memory oversubscription enabled (install.sh does:
-      // \`nomad operator scheduler set-config -memory-oversubscription=true\`).
+      // CPU is a scheduling FLOOR, not a cap — the panel bursts above it freely.
+      // In zero-downtime mode a CANARY must fit alongside the running panel on the
+      // (often small) single control-plane node, so reserve a smaller floor (500)
+      // that lets two coexist during the brief swap; legacy mode keeps 1000.
+      // memory is the reservation; memory_max is the hard cgroup cap the panel can
+      // burst to (Node's heap grows past 512 MB under load; a 1024 MB cap
+      // OOM-killed it). Bursting needs memory oversubscription (install.sh enables it).
       resources {
-        cpu        = 1000
+        cpu        = ${zeroDowntime ? 500 : 1000}
         memory     = 512
         memory_max = 2048
       }
