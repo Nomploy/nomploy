@@ -22,8 +22,12 @@ export const parseComposeToNomadServices = (
 		throw new Error("No services found in compose file");
 	}
 
+	// Top-level `volumes:` keys are the declared NAMED volumes — used to tell a named
+	// volume (`db_data:/path`) apart from a bind mount (`/host:/path`, `./rel:/path`).
+	const declaredVolumes = new Set(Object.keys(spec.volumes ?? {}));
+
 	return Object.entries(spec.services).map(([name, service]) =>
-		convertService(name, service, envVars),
+		convertService(name, service, envVars, declaredVolumes),
 	);
 };
 
@@ -34,6 +38,7 @@ const convertService = (
 	name: string,
 	service: DefinitionsService,
 	envVars: Record<string, string>,
+	declaredVolumes: Set<string>,
 ): NomadServiceSpec => {
 	const image = service.image || name;
 	const ports = extractPorts(service);
@@ -43,6 +48,7 @@ const convertService = (
 	const healthCheck = extractHealthCheck(service);
 	const resources = extractResources(service);
 	const scaling = extractScaling(service);
+	const volumes = extractVolumes(service, declaredVolumes);
 
 	return {
 		name,
@@ -54,7 +60,59 @@ const convertService = (
 		healthCheck,
 		resources,
 		scaling,
+		volumes,
 	};
+};
+
+/**
+ * Extract a service's `volumes:` (short `src:dst[:mode]` / `dst` and long-form
+ * object syntax) so the generator can persist them as docker volumes. A source is
+ * a NAMED volume when it's declared under top-level `volumes:` or is a bare name
+ * (not starting with `/` or `.`); otherwise it's a bind mount.
+ */
+const extractVolumes = (
+	service: DefinitionsService,
+	declaredVolumes: Set<string>,
+): NomadServiceSpec["volumes"] => {
+	const vols = service.volumes;
+	if (!Array.isArray(vols)) return undefined;
+
+	const out: NonNullable<NomadServiceSpec["volumes"]> = [];
+	for (const v of vols) {
+		if (typeof v === "string") {
+			const parts = v.split(":");
+			if (parts.length === 1) {
+				// Anonymous volume ("/data") — persist it under a generated name.
+				out.push({ target: parts[0] as string, named: true });
+			} else {
+				const [source, target, mode] = parts;
+				out.push({
+					source,
+					target: target as string,
+					mode,
+					named:
+						declaredVolumes.has(source as string) ||
+						!/^[/.]/.test(source as string),
+				});
+			}
+		} else if (v && typeof v === "object") {
+			const o = v as {
+				type?: string;
+				source?: string;
+				target?: string;
+				read_only?: boolean;
+			};
+			if (!o.target) continue;
+			out.push({
+				source: o.source,
+				target: o.target,
+				mode: o.read_only ? "ro" : undefined,
+				named:
+					o.type === "volume" || (!!o.source && declaredVolumes.has(o.source)),
+			});
+		}
+	}
+	return out.length > 0 ? out : undefined;
 };
 
 /**

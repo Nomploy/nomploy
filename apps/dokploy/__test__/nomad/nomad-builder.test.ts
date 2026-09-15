@@ -186,6 +186,38 @@ services:
 		expect(hcl).toContain("memory_max = 4096");
 	});
 
+	it("persists compose volumes as docker volumes (named/bind/anonymous)", async () => {
+		const volCompose = {
+			...compose,
+			appName: "voljob",
+			composeFile: `
+services:
+  db:
+    image: postgres:17-alpine
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - /etc/host/conf:/etc/conf:ro
+      - /cache
+volumes:
+  db_data:
+`,
+			domains: [],
+		};
+
+		const cmd = await getBuildNomadCommand(volCompose);
+		const hcl = Buffer.from(
+			cmd.match(/echo "([A-Za-z0-9+/=]+)" \| base64 -d/)?.[1] ?? "",
+			"base64",
+		).toString("utf8");
+
+		// Named volume → app-prefixed docker named volume (survives redeploys).
+		expect(hcl).toContain('"voljob-db_data:/var/lib/postgresql/data"');
+		// Absolute bind mount passes through, mode preserved.
+		expect(hcl).toContain('"/etc/host/conf:/etc/conf:ro"');
+		// Anonymous volume → a stable per-app+target named volume.
+		expect(hcl).toContain('"voljob-cache:/cache"');
+	});
+
 	it("emits node_pool only when the compose targets an autoscaling group", async () => {
 		// No pool → the job runs in the default pool (no node_pool stanza).
 		const defCmd = await getBuildNomadCommand(compose);

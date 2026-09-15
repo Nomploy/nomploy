@@ -39,6 +39,20 @@ export interface NomadServiceSpec {
 		/** Number of NVIDIA GPUs to request (nomad-device-nvidia). */
 		gpus?: number;
 	};
+	/**
+	 * Compose `volumes:` for this service — mapped to docker volumes so data
+	 * survives a redeploy (a new alloc). See generateVolumesConfig.
+	 */
+	volumes?: {
+		/** Named volume, absolute host path, or relative path. Undefined = anonymous. */
+		source?: string;
+		/** Mount path inside the container. */
+		target: string;
+		/** True for a named (declared) volume vs a host bind mount. */
+		named: boolean;
+		/** Mount mode, e.g. "ro". */
+		mode?: string;
+	}[];
 	scaling?: {
 		min: number;
 		max: number;
@@ -437,12 +451,13 @@ ${portLines}
 				s.ports.length > 0
 					? `\n        ports = [${s.ports.map((p) => `"${p.label}"`).join(", ")}]`
 					: "";
+			const volumesConfig = generateVolumesConfig(appName, s.volumes);
 			return `    task "${s.name}" {
       driver = "docker"
 
       config {
         image = "${s.image}"
-        extra_hosts = [${hostAliases}]${portsConfig}${entrypointLine}
+        extra_hosts = [${hostAliases}]${portsConfig}${entrypointLine}${volumesConfig}
       }
 
 ${envBlock}${secretsBlock}
@@ -719,6 +734,53 @@ const generateResourcesBlock = (
         cpu    = ${resources?.cpu || 256}
         memory = ${memory}${memoryMaxLine}${gpuBlock}
       }`;
+};
+
+/** Docker volume names must be [a-zA-Z0-9][a-zA-Z0-9_.-]* — sanitize a source. */
+const sanitizeVolumeName = (s: string): string =>
+	s
+		.replace(/[^a-zA-Z0-9_.-]+/g, "-")
+		.replace(/^[-.]+/, "")
+		.replace(/-+$/, "") || "vol";
+
+/**
+ * Map a service's compose `volumes:` to the docker driver's `volumes` config so
+ * data PERSISTS across a redeploy (each deploy is a new alloc; without this the
+ * container's writable layer — e.g. a Postgres data dir — is wiped every time).
+ *
+ * - Named volume  → `<appName>-<name>:<target>` docker named volume. Prefixed with
+ *   the app so two apps that both declare e.g. `db_data` don't collide on the host;
+ *   docker auto-creates it and it survives redeploys.
+ * - Absolute bind → `<host>:<target>` passed through.
+ * - Relative bind → a stable per-app host dir (there's no compose project dir on
+ *   Nomad), so it still persists.
+ * - Anonymous     → a stable per-app+target named volume (so it, too, persists).
+ *
+ * Requires the docker plugin's `volumes { enabled = true }` (set in install.sh).
+ * NOTE: docker volumes are node-local — if the alloc reschedules to another node
+ * the data does not follow. The compose model is single-host.
+ */
+const generateVolumesConfig = (
+	appName: string,
+	volumes?: NomadServiceSpec["volumes"],
+): string => {
+	if (!volumes || volumes.length === 0) return "";
+	const entries = volumes.map((v) => {
+		const mode = v.mode ? `:${v.mode}` : "";
+		if (!v.source) {
+			const name = `${appName}-${sanitizeVolumeName(v.target)}`;
+			return `"${name}:${v.target}${mode}"`;
+		}
+		if (v.named) {
+			return `"${appName}-${sanitizeVolumeName(v.source)}:${v.target}${mode}"`;
+		}
+		if (v.source.startsWith("/")) {
+			return `"${v.source}:${v.target}${mode}"`;
+		}
+		const rel = sanitizeVolumeName(v.source.replace(/^\.\/?/, ""));
+		return `"/var/lib/nomploy/volumes/${appName}/${rel}:${v.target}${mode}"`;
+	});
+	return `\n        volumes = [${entries.join(", ")}]`;
 };
 
 // ─── Consul + Traefik Integration ────────────────────────────────────────────
