@@ -24,7 +24,15 @@ import { setupNomadTerminalWebSocketServer } from "./wss/nomad-terminal";
 import { setupTerminalWebSocketServer } from "./wss/terminal";
 
 config({ path: ".env" });
-const PORT = Number.parseInt(process.env.PORT || "3000", 10);
+// Prefer NOMAD_PORT_http — Nomad auto-injects it when the panel job declares a
+// dynamic `port "http"` (zero-downtime/canary mode), so two panels can bind
+// different ports during a rolling swap. Falls back to PORT (host-static mode) /
+// 3000. Reading the injected var directly avoids the unreliable ${NOMAD_PORT_http}
+// env-stanza interpolation in host networking.
+const PORT = Number.parseInt(
+	process.env.NOMAD_PORT_http || process.env.PORT || "3000",
+	10,
+);
 const HOST = process.env.HOST || "0.0.0.0";
 const dev = process.env.NODE_ENV !== "production";
 
