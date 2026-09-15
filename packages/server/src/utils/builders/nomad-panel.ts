@@ -154,9 +154,11 @@ export const generatePanelNomadJob = (
     }
 `
 		: "";
-	// PORT must be the Nomad-assigned dynamic port so two panels can coexist during
-	// a canary swap; Nomad interpolates \${NOMAD_PORT_http} at runtime.
-	const panelEnv = zeroDowntime ? { ...env, PORT: "${NOMAD_PORT_http}" } : env;
+	// The app binds NOMAD_PORT_http (auto-injected by Nomad from the port block)
+	// when it's set, so two panels get distinct ports during a canary swap — no
+	// PORT override needed here (env-stanza ${NOMAD_PORT_http} interpolation is
+	// unreliable in host networking; see server.ts).
+	const panelEnv = env;
 	// priority 100 so these Consul routers win over the legacy file route (same Host
 	// rule) once the canary is healthy; the file route stays as a harmless fallback.
 	const serviceBlock = zeroDowntime
