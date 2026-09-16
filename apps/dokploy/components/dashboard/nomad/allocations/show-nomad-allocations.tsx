@@ -24,6 +24,8 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/utils/api";
+import { TerminalLine } from "../../docker/logs/terminal-line";
+import { parseLogs } from "../../docker/logs/utils";
 
 interface Props {
 	appName: string;
@@ -235,6 +237,13 @@ const AllocLogViewer = ({
 		{ refetchInterval: 5000 },
 	);
 
+	// Parse + colorize the raw log text the same way the Docker log viewer does:
+	// ANSI escape codes → HTML, per-line error/warn/success classification, and a
+	// type badge — so alloc logs read like the rest of the panel instead of a flat
+	// green dump. Structured (pino/JSON) lines still classify by their statusCode
+	// and level keywords via getLogType.
+	const parsed = logs ? parseLogs(logs) : [];
+
 	return (
 		<div className="relative">
 			<Button
@@ -245,10 +254,21 @@ const AllocLogViewer = ({
 			>
 				<RefreshCw className="h-3 w-3" />
 			</Button>
-			<pre className="bg-black text-green-400 p-3 rounded-md overflow-auto max-h-[300px] text-xs font-mono whitespace-pre-wrap">
-				{isLoading && "Loading..."}
-				{!isLoading && (logs || "No logs available")}
-			</pre>
+			<div className="overflow-y-auto max-h-[300px] space-y-0 border p-3 bg-[#fafafa] dark:bg-[#050506] rounded-md custom-logs-scrollbar">
+				{isLoading ? (
+					<span className="text-xs text-muted-foreground font-mono">
+						Loading...
+					</span>
+				) : parsed.length > 0 ? (
+					parsed.map((log, i) => (
+						<TerminalLine key={`${log.rawTimestamp}-${i}`} log={log} />
+					))
+				) : (
+					<span className="text-xs text-muted-foreground font-mono">
+						No logs available
+					</span>
+				)}
+			</div>
 		</div>
 	);
 };
