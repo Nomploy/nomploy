@@ -15,6 +15,7 @@ import { ShowNodeTopology } from "@/components/dashboard/nomad/nodes/show-node-t
 import { ShowNomadNodes } from "@/components/dashboard/nomad/nodes/show-nomad-nodes";
 import { ShowScheduler } from "@/components/dashboard/nomad/nodes/show-scheduler";
 import { NomadOverview } from "@/components/dashboard/nomad/overview";
+import { ShowServiceScaling } from "@/components/dashboard/nomad/scaling/show-service-scaling";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
 import {
 	Select,
@@ -89,6 +90,7 @@ const NomadDashboard = () => {
 				</TabsContent>
 				<TabsContent value="scaling" className="flex flex-col gap-4">
 					<ShowAutoscalingGraphs />
+					<ShowServiceScaling serverId={serverId} />
 					<ShowAutoscaler />
 				</TabsContent>
 				<TabsContent value="consul">
