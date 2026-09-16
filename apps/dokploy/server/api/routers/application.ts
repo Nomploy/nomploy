@@ -344,6 +344,8 @@ export const applicationRouter = createTRPCRouter({
 				deployment: ["create"],
 			});
 			const application = await findApplicationById(input.applicationId);
+			// Redeploying applies the current config → clear the "redeploy needed" flag.
+			await updateApplication(input.applicationId, { pendingDeploy: false });
 			const jobData: DeploymentJob = {
 				applicationId: input.applicationId,
 				titleLog: input.title || "Rebuild deployment",
@@ -698,8 +700,14 @@ export const applicationRouter = createTRPCRouter({
 			}
 
 			const { applicationId, ...rest } = input;
+			// Flag "redeploy needed" unless the edit only touches cosmetic fields that
+			// take effect immediately (name/description/autodeploy). Almost every other
+			// application setting only applies on the next deploy.
+			const COSMETIC = new Set(["name", "description", "autoDeploy", "title"]);
+			const touchesDeploy = Object.keys(rest).some((k) => !COSMETIC.has(k));
 			const updateApp = await updateApplication(applicationId, {
 				...rest,
+				...(touchesDeploy ? { pendingDeploy: true } : {}),
 			});
 
 			if (!updateApp) {
@@ -741,6 +749,8 @@ export const applicationRouter = createTRPCRouter({
 				deployment: ["create"],
 			});
 			const application = await findApplicationById(input.applicationId);
+			// Deploying applies the current config → clear the "redeploy needed" flag.
+			await updateApplication(input.applicationId, { pendingDeploy: false });
 			const jobData: DeploymentJob = {
 				applicationId: input.applicationId,
 				titleLog: input.title || "Manual deployment",

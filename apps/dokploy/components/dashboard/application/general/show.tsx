@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { ShowBuildChooseForm } from "@/components/dashboard/application/build/show";
 import { ShowProviderForm } from "@/components/dashboard/application/general/generic/show";
 import { DialogAction } from "@/components/shared/dialog-action";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -56,7 +57,17 @@ export const ShowGeneralApplication = ({ applicationId }: Props) => {
 		<>
 			<Card className="bg-background">
 				<CardHeader>
-					<CardTitle className="text-xl">Deploy Settings</CardTitle>
+					<div className="flex flex-row items-center gap-2 flex-wrap">
+						<CardTitle className="text-xl">Deploy Settings</CardTitle>
+						{data?.pendingDeploy && (
+							<Badge
+								variant="outline"
+								className="border-yellow-500/50 text-yellow-600 dark:text-yellow-400"
+							>
+								Redeploy needed
+							</Badge>
+						)}
+					</div>
 				</CardHeader>
 				<CardContent className="grid grid-cols-2 lg:flex lg:flex-row lg:flex-wrap gap-4">
 					<TooltipProvider delayDuration={0} disableHoverableContent={false}>
