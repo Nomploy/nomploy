@@ -32,6 +32,7 @@ import { ShowBackups } from "@/components/dashboard/database/backups/show-backup
 import { ComposeFreeMonitoring } from "@/components/dashboard/monitoring/free/container/show-free-compose-monitoring";
 import { ComposePaidMonitoring } from "@/components/dashboard/monitoring/paid/container/show-paid-compose-monitoring";
 import { ShowNomadAllocations } from "@/components/dashboard/nomad/allocations/show-nomad-allocations";
+import { ScheduleScale } from "@/components/dashboard/nomad/scaling/schedule-scale";
 import { ShowNomadScaling } from "@/components/dashboard/nomad/scaling/show-nomad-scaling";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
 import { AdvanceBreadcrumb } from "@/components/shared/advance-breadcrumb";
@@ -327,6 +328,7 @@ const Service = (
 															appName={data?.appName || ""}
 															serverId={data?.serverId || undefined}
 														/>
+														<ScheduleScale composeId={composeId} />
 														<ShowNomadAllocations
 															appName={data?.appName || ""}
 															serverId={data?.serverId || undefined}
