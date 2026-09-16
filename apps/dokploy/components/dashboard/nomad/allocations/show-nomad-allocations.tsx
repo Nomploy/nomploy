@@ -62,6 +62,11 @@ export const ShowNomadAllocations = ({ appName, serverId }: Props) => {
 		);
 	}
 
+	// Newest allocation first (Nomad returns them unordered). CreateTime is ns.
+	const sortedAllocs = [...((allocs as any[]) ?? [])].sort(
+		(a, b) => (b.CreateTime ?? 0) - (a.CreateTime ?? 0),
+	);
+
 	return (
 		<Card className="bg-background">
 			<CardHeader className="flex flex-row items-center justify-between">
@@ -73,12 +78,12 @@ export const ShowNomadAllocations = ({ appName, serverId }: Props) => {
 				</Button>
 			</CardHeader>
 			<CardContent className="space-y-3">
-				{allocs?.length === 0 && (
+				{sortedAllocs.length === 0 && (
 					<p className="text-center text-muted-foreground py-4">
 						No allocations found
 					</p>
 				)}
-				{allocs?.map((alloc: any) => (
+				{sortedAllocs.map((alloc: any) => (
 					<AllocationRow key={alloc.ID} alloc={alloc} serverId={serverId} />
 				))}
 			</CardContent>
