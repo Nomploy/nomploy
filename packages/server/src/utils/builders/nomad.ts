@@ -733,12 +733,19 @@ ${taskGroups}
  * other paths.
  *
  * Static host port = container port is what lets bare-name discovery work with no env
- * rewriting and no CNI changes: a sibling registers its Consul service at
- * `<node wg IP>:<native port>`, the alias maps its bare name to that node IP, and the
- * consumer's `<name>:<native port>` reaches it over the existing WireGuard mesh. The
- * cost is that a port-bearing service can run at most one replica per node (a static
+ * rewriting and no CNI changes: the alias maps a sibling's bare name to its node wg IP,
+ * and the consumer's `<name>:<native port>` reaches it over the existing WireGuard mesh.
+ * The cost is that a port-bearing service runs at most one replica per node (a static
  * host port is node-unique); excess replicas stay pending until the node autoscaler
  * adds capacity. Fine for the common shape (scale the web tier, single DB).
+ *
+ * Provider: Nomad rejects mixing service providers within a group, so each group uses
+ * exactly ONE. A service with a domain uses the Consul provider (Traefik reads the
+ * Consul catalog); a service without a domain uses the Nomad-native provider (so the
+ * sibling /etc/hosts template, which can't get a Consul token under Consul ACLs, can
+ * resolve it via nomadService). Consequence: only non-domain services are bare-name
+ * discoverable by siblings — the common backend shape (db/redis/internal API have no
+ * domain; the public frontend is reached via Traefik, not by a sibling's bare name).
  */
 const generateIndependentTaskGroup = (
 	appName: string,
@@ -751,10 +758,15 @@ const generateIndependentTaskGroup = (
 	const secretsBlock = service.secrets
 		? `\n\n${generateSecretsTemplate(appName)}`
 		: "";
-	// Consul service = Traefik routing + health (domain-bearing services). Nomad
-	// service = sibling discovery consumed by the /etc/hosts aliases (Consul-ACL-free).
-	const consulServices = generateConsulServices(appName, service, domains);
-	const discoveryService = generateNomadDiscoveryService(appName, service);
+	// One provider per group (Nomad forbids mixing). Domain → Consul (Traefik);
+	// otherwise Nomad-native (discoverable by the sibling /etc/hosts template).
+	const hasDomain = domains.some((d) => d.serviceName === service.name);
+	const consulServices = hasDomain
+		? generateConsulServices(appName, service, domains)
+		: "";
+	const discoveryService = hasDomain
+		? ""
+		: generateNomadDiscoveryService(appName, service);
 	const resourcesBlock = generateResourcesBlock(service.resources);
 	const scalingBlock = generateScalingBlock(service.scaling);
 	const entrypointLine = service.entrypoint
@@ -765,14 +777,17 @@ const generateIndependentTaskGroup = (
 	const dnsServers = clusterDnsServers()
 		.map((ip) => `"${ip}"`)
 		.join(", ");
-	// Static host port pinned to the container port so `<name>:<native port>` from a
-	// sibling lands on the right port over the mesh (see the fn doc). Host networking
-	// (no bridge mode) advertises the node's wg0 IP in Consul — routable cross-node
+	// Non-domain (discovery) services pin a STATIC host port = container port so a
+	// sibling's `<name>:<native port>` lands right over the mesh. Domain services use a
+	// DYNAMIC host port instead: Traefik maps the domain to whatever port Consul
+	// advertises, and a static port would collide with Traefik itself (it owns 80/443
+	// on the node). Host networking advertises the node's wg0 IP, routable cross-node
 	// via the existing /32 overlay routes.
 	const portLines = service.ports
-		.map(
-			(p) =>
-				`      port "${p.label}" {\n        static = ${p.to}\n        to = ${p.to}\n      }`,
+		.map((p) =>
+			hasDomain
+				? `      port "${p.label}" {\n        to = ${p.to}\n      }`
+				: `      port "${p.label}" {\n        static = ${p.to}\n        to = ${p.to}\n      }`,
 		)
 		.join("\n");
 	// Keep the Consul DNS block so names that aren't sibling aliases (e.g. a managed
@@ -789,7 +804,12 @@ ${portLines}
 		: "";
 
 	const fileMounts = generateFileMounts(service.fileMounts);
-	const hostsAlias = generateHostsAliasTemplate(appName, allServices, service);
+	const hostsAlias = generateHostsAliasTemplate(
+		appName,
+		allServices,
+		service,
+		domains,
+	);
 	const allVolumeEntries = [
 		...volumeEntries(appName, service.volumes),
 		...fileMounts.volumes,
@@ -1255,9 +1275,15 @@ const generateHostsAliasTemplate = (
 	appName: string,
 	services: NomadServiceSpec[],
 	self: NomadServiceSpec,
+	domains: Domain[],
 ): { template: string; volume: string } | null => {
+	// Only NON-domain siblings are discoverable: they use the Nomad provider (see
+	// generateIndependentTaskGroup), so nomadService can resolve them without a Consul
+	// token. Domain-bearing siblings are Consul-only (Traefik) and reached via their
+	// domain, not a bare name.
+	const domainServices = new Set(domains.map((d) => d.serviceName));
 	const siblings = services
-		.filter((s) => s.name !== self.name)
+		.filter((s) => s.name !== self.name && !domainServices.has(s.name))
 		.map((s) => ({ name: s.name, primary: s.ports[0] }))
 		.filter(
 			(s): s is { name: string; primary: NomadPort } => s.primary != null,
