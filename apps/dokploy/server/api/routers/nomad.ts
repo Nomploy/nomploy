@@ -2407,20 +2407,35 @@ fi`;
 
 	// Autoscaler activity feed (most recent first), optionally scoped to a group.
 	getAutoscalerEvents: protectedProcedure
-		.input(z.object({ groupId: z.string().optional() }).optional())
+		.input(
+			z
+				.object({
+					groupId: z.string().optional(),
+					limit: z.number().int().min(1).max(100).optional(),
+					offset: z.number().int().min(0).optional(),
+				})
+				.optional(),
+		)
 		.query(async ({ ctx, input }) => {
 			const org = ctx.session?.activeOrganizationId;
 			if (!org) throw new TRPCError({ code: "UNAUTHORIZED" });
-			return db.query.clusterAutoscalerEvents.findMany({
-				where: and(
-					eq(clusterAutoscalerEvents.organizationId, org),
-					input?.groupId
-						? eq(clusterAutoscalerEvents.groupId, input.groupId)
-						: undefined,
-				),
+			const limit = input?.limit ?? 10;
+			const offset = input?.offset ?? 0;
+			const where = and(
+				eq(clusterAutoscalerEvents.organizationId, org),
+				input?.groupId
+					? eq(clusterAutoscalerEvents.groupId, input.groupId)
+					: undefined,
+			);
+			// Fetch one extra row to tell the client whether another page exists,
+			// without a second COUNT query.
+			const rows = await db.query.clusterAutoscalerEvents.findMany({
+				where,
 				orderBy: [desc(clusterAutoscalerEvents.createdAt)],
-				limit: 50,
+				limit: limit + 1,
+				offset,
 			});
+			return { events: rows.slice(0, limit), hasMore: rows.length > limit };
 		}),
 
 	// List the cloud's locations / private networks / server types for the config

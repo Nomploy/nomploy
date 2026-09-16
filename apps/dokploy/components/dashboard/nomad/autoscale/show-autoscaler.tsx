@@ -699,9 +699,13 @@ export const ShowAutoscaler = () => {
 			refetchInterval: 15000,
 		});
 	const { data: sshKeys } = api.sshKey.all.useQuery();
-	const { data: events } = api.nomad.getAutoscalerEvents.useQuery(undefined, {
-		refetchInterval: 15000,
-	});
+	const EVENTS_PER_PAGE = 10;
+	const [eventsPage, setEventsPage] = useState(0);
+	const { data: eventsData } = api.nomad.getAutoscalerEvents.useQuery(
+		{ limit: EVENTS_PER_PAGE, offset: eventsPage * EVENTS_PER_PAGE },
+		{ refetchInterval: 15000 },
+	);
+	const events = eventsData?.events;
 	const reconcile = api.nomad.reconcileAutoscalerNow.useMutation();
 	const [newCards, setNewCards] = useState(0);
 
@@ -839,6 +843,33 @@ export const ShowAutoscaler = () => {
 							</TableBody>
 						</Table>
 					</div>
+					{(eventsPage > 0 || eventsData?.hasMore) && (
+						<div className="mt-3 flex items-center justify-between">
+							<span className="text-muted-foreground text-xs">
+								Page {eventsPage + 1}
+							</span>
+							<div className="flex gap-2">
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									disabled={eventsPage === 0}
+									onClick={() => setEventsPage((p) => Math.max(0, p - 1))}
+								>
+									Previous
+								</Button>
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									disabled={!eventsData?.hasMore}
+									onClick={() => setEventsPage((p) => p + 1)}
+								>
+									Next
+								</Button>
+							</div>
+						</div>
+					)}
 				</CardContent>
 			</Card>
 		</div>

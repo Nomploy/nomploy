@@ -79,8 +79,10 @@ export const ShowAutoscalingGraphs = () => {
 		},
 	);
 	const { data: groupsRaw } = api.nomad.listAutoscalingGroups.useQuery();
+	// Graphs plot count-over-time, so fetch a wide window of history (not the
+	// paginated 10 the Activity feed uses).
 	const { data: eventsRaw } = api.nomad.getAutoscalerEvents.useQuery(
-		undefined,
+		{ limit: 100 },
 		{
 			refetchInterval: 30000,
 		},
@@ -88,7 +90,7 @@ export const ShowAutoscalingGraphs = () => {
 
 	const status = (statusRaw ?? []) as GroupStatus[];
 	const groups = (groupsRaw ?? []) as GroupConfig[];
-	const events = (eventsRaw ?? []) as Ev[];
+	const events = (eventsRaw?.events ?? []) as Ev[];
 
 	const enabled = groups.filter((g) => g.enabled);
 	if (enabled.length === 0) return null;
