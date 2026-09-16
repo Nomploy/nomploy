@@ -333,7 +333,11 @@ const Service = (
 															appName={data?.appName || ""}
 															serverId={data?.serverId || undefined}
 														/>
-														<ScheduleScale id={composeId} type="compose" />
+														{/* Scheduled scaling needs compose service groups; a
+														    nomad-pack has no compose file, so it's not supported there. */}
+														{data?.composeType === "nomad" && (
+															<ScheduleScale id={composeId} type="compose" />
+														)}
 														<ShowNomadAllocations
 															appName={data?.appName || ""}
 															serverId={data?.serverId || undefined}
