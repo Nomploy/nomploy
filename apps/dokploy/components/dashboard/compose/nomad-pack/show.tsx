@@ -11,6 +11,13 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/utils/api";
 
@@ -30,6 +37,17 @@ export const ShowNomadPackForm = ({ composeId }: Props) => {
 	const [nomadPack, setNomadPack] = useState("");
 	const [nomadPackRegistry, setNomadPackRegistry] = useState("");
 	const [variables, setVariables] = useState("");
+	const [browse, setBrowse] = useState(false);
+	// Enumerate packs in the registry only on demand (it adds the registry + reads
+	// the cache — a few seconds). Uses the custom registry if set, else community.
+	const { data: packs, isFetching: packsLoading } =
+		api.nomad.listNomadPacks.useQuery(
+			{
+				serverId: data?.serverId || undefined,
+				registryUrl: nomadPackRegistry.trim() || undefined,
+			},
+			{ enabled: browse },
+		);
 
 	useEffect(() => {
 		if (!data) return;
@@ -88,6 +106,38 @@ export const ShowNomadPackForm = ({ composeId }: Props) => {
 							value={nomadPack}
 							onChange={(e) => setNomadPack(e.target.value)}
 						/>
+						{browse ? (
+							<Select value={nomadPack} onValueChange={setNomadPack}>
+								<SelectTrigger>
+									<SelectValue
+										placeholder={
+											packsLoading ? "Loading packs…" : "Pick a pack"
+										}
+									/>
+								</SelectTrigger>
+								<SelectContent>
+									{(packs ?? []).map((p) => (
+										<SelectItem key={p} value={p}>
+											{p}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						) : (
+							<button
+								type="button"
+								className="text-muted-foreground text-xs underline underline-offset-2"
+								onClick={() => setBrowse(true)}
+							>
+								Browse packs from registry
+							</button>
+						)}
+						{browse && !packsLoading && (packs ?? []).length === 0 && (
+							<p className="text-muted-foreground text-xs">
+								No packs found (is nomad-pack available + the registry
+								reachable?).
+							</p>
+						)}
 					</div>
 					<div className="space-y-1.5">
 						<Label>Custom registry (optional)</Label>
