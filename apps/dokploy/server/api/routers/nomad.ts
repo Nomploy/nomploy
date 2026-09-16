@@ -416,6 +416,13 @@ export const nomadRouter = createTRPCRouter({
 			// The control plane's own address is always reachable — include it.
 			addrs.add(cfg.address.replace(/^https?:\/\//, "").replace(/\/$/, ""));
 
+			// A Nomad Pack registers jobs under ids != appName, so accept both the
+			// appName and the pack's real job ids when filtering the metrics.
+			const jobIds = new Set([
+				input.jobId,
+				...(await resolvePackJobIds(cfg, input.jobId)),
+			]);
+
 			const cpuLine =
 				/nomad_client_allocs_cpu_total_percent\{([^}]*)\}\s+([0-9.e+-]+)/g;
 			const memLine =
@@ -439,12 +446,12 @@ export const nomadRouter = createTRPCRouter({
 					if (!res.ok) return;
 					const text = await res.text();
 					for (const m of text.matchAll(cpuLine)) {
-						if (label(m[1] ?? "", "job") !== input.jobId) continue;
+						if (!jobIds.has(label(m[1] ?? "", "job"))) continue;
 						const g = label(m[1] ?? "", "task_group") || input.jobId;
 						(acc[g] ??= { cpu: 0, mem: 0 }).cpu += Number(m[2]) || 0;
 					}
 					for (const m of text.matchAll(memLine)) {
-						if (label(m[1] ?? "", "job") !== input.jobId) continue;
+						if (!jobIds.has(label(m[1] ?? "", "job"))) continue;
 						const g = label(m[1] ?? "", "task_group") || input.jobId;
 						(acc[g] ??= { cpu: 0, mem: 0 }).mem += Number(m[2]) || 0;
 					}
@@ -833,9 +840,18 @@ fi`;
 		.input(serverInput.extend({ jobId: z.string() }))
 		.query(async ({ input, ctx }) => {
 			const cfg = await resolveNomad(ctx, input.serverId);
-			const res = await nomadClient(cfg).request(
+			const client = nomadClient(cfg);
+			// A Nomad Pack's job id != appName — fall back to the pack's real job id.
+			let res = await client.request(
 				withNs(`/job/${input.jobId}/versions`, cfg.namespace),
 			);
+			if (!res.ok) {
+				const [first] = await resolvePackJobIds(cfg, input.jobId);
+				if (first)
+					res = await client.request(
+						withNs(`/job/${first}/versions`, cfg.namespace),
+					);
+			}
 			if (!res.ok) return [];
 			const body = (await res.json()) as {
 				Versions?: Array<{
@@ -870,14 +886,21 @@ fi`;
 		.input(serverInput.extend({ jobId: z.string(), version: z.number().int() }))
 		.mutation(async ({ input, ctx }) => {
 			const cfg = await resolveNomad(ctx, input.serverId);
-			const res = await nomadClient(cfg).request(
-				withNs(`/job/${input.jobId}/revert`, cfg.namespace),
+			const client = nomadClient(cfg);
+			// A Nomad Pack's job id != appName — resolve the pack's real job id.
+			let jobId = input.jobId;
+			const probe = await client.request(
+				withNs(`/job/${jobId}/versions`, cfg.namespace),
+			);
+			if (!probe.ok) {
+				const [first] = await resolvePackJobIds(cfg, input.jobId);
+				if (first) jobId = first;
+			}
+			const res = await client.request(
+				withNs(`/job/${jobId}/revert`, cfg.namespace),
 				{
 					method: "POST",
-					body: JSON.stringify({
-						JobID: input.jobId,
-						JobVersion: input.version,
-					}),
+					body: JSON.stringify({ JobID: jobId, JobVersion: input.version }),
 				},
 			);
 			if (!res.ok) {

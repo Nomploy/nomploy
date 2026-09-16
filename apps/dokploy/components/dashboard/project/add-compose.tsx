@@ -284,13 +284,14 @@ export const AddCompose = ({ environmentId, projectName }: Props) => {
 											</SelectTrigger>
 										</FormControl>
 										<SelectContent>
-											<SelectItem value="docker-compose">
-												Docker Compose
-											</SelectItem>
 											<SelectItem value="nomad">
-												Nomad (compose or HCL jobspec)
+												Nomad (compose or HCL jobspec) — recommended
 											</SelectItem>
 											<SelectItem value="nomad-pack">Nomad Pack</SelectItem>
+											<SelectItem value="docker-compose">
+												Docker Compose (legacy — runs on host, not scheduled by
+												Nomad, no HA)
+											</SelectItem>
 										</SelectContent>
 									</Select>
 									<FormMessage />
