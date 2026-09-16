@@ -242,6 +242,32 @@ export const ComposeActions = ({ composeId }: Props) => {
 					/>
 				</div>
 			)}
+			{canUpdateService && (
+				<div className="flex flex-row items-center gap-2 rounded-md px-4 py-2 border">
+					{/* When on, every service image is re-pulled on deploy so a pushed
+					    moving tag (e.g. :latest) actually lands. Off = only moving tags
+					    are re-pulled; pinned tags use the cache. */}
+					<span className="text-sm font-medium">Force pull</span>
+					<Switch
+						aria-label="Toggle force pull"
+						checked={data?.forcePull ?? true}
+						onCheckedChange={async (enabled) => {
+							await update({
+								composeId,
+								forcePull: enabled,
+							})
+								.then(async () => {
+									toast.success("Force Pull Updated");
+									await refetch();
+								})
+								.catch(() => {
+									toast.error("Error updating Force Pull");
+								});
+						}}
+						className="flex flex-row gap-2 items-center data-[state=checked]:bg-primary"
+					/>
+				</div>
+			)}
 		</div>
 	);
 };

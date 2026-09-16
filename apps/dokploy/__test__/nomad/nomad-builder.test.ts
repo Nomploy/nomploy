@@ -217,6 +217,45 @@ services:
 		expect(hcl).toContain('EMPTY = ""');
 	});
 
+	it("force_pull: moving tags by default, all when forcePull=true", async () => {
+		const base = {
+			...compose,
+			appName: "fpjob",
+			composeFile: `
+services:
+  web:
+    image: myrepo/web:latest
+  db:
+    image: postgres:17-alpine
+`,
+			domains: [],
+		};
+		const hclOf = async (c: unknown) =>
+			Buffer.from(
+				(await getBuildNomadCommand(c as typeof compose)).match(
+					/echo "([A-Za-z0-9+/=]+)" \| base64 -d/,
+				)?.[1] ?? "",
+				"base64",
+			).toString("utf8");
+
+		// Default (forcePull unset): only the moving :latest tag re-pulls.
+		const def = await hclOf(base);
+		expect(def).toMatch(/image = "myrepo\/web:latest"\n\s*force_pull = true/);
+		expect(def).not.toMatch(
+			/image = "postgres:17-alpine"\n\s*force_pull = true/,
+		);
+
+		// forcePull = true: every image re-pulls, even the pinned one.
+		const forced = await hclOf({ ...base, forcePull: true });
+		expect(forced).toMatch(
+			/image = "postgres:17-alpine"\n\s*force_pull = true/,
+		);
+
+		// forcePull = false: nothing re-pulls (operator opted out).
+		const off = await hclOf({ ...base, forcePull: false });
+		expect(off).not.toContain("force_pull = true");
+	});
+
 	it("persists compose volumes as docker volumes (named/bind/anonymous)", async () => {
 		const volCompose = {
 			...compose,
