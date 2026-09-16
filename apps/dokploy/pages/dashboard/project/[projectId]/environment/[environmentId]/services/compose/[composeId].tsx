@@ -13,6 +13,7 @@ import { type ReactElement, useEffect, useState } from "react";
 import { toast } from "sonner";
 import superjson from "superjson";
 import { ShowImport } from "@/components/dashboard/application/advanced/import/show-import";
+import { ShowVersionHistory } from "@/components/dashboard/application/advanced/show-version-history";
 import { ShowVolumes } from "@/components/dashboard/application/advanced/volumes/show-volumes";
 import { ShowDeployments } from "@/components/dashboard/application/deployments/show-deployments";
 import { ShowDomains } from "@/components/dashboard/application/domains/show-domains";
@@ -448,6 +449,10 @@ const Service = (
 											<div className="flex flex-col gap-4 pt-2.5">
 												<AddCommandCompose composeId={composeId} />
 												<ShowVolumes id={composeId} type="compose" />
+												<ShowVersionHistory
+													appName={data?.appName || ""}
+													serverId={data?.serverId || undefined}
+												/>
 												<ShowImport composeId={composeId} />
 												<IsolatedDeploymentTab composeId={composeId} />
 											</div>
