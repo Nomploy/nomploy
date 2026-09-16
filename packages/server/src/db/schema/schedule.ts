@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { boolean, pgEnum, pgTable, text } from "drizzle-orm/pg-core";
+import { boolean, integer, pgEnum, pgTable, text } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -16,6 +16,9 @@ export const scheduleType = pgEnum("scheduleType", [
 	"compose",
 	"server",
 	"dokploy-server",
+	// Scale a Nomad service's task group to a fixed count on a cron (e.g. down at
+	// night). Runs a scale call against the Nomad API, not a shell command.
+	"nomad-scale",
 ]);
 
 export const schedules = pgTable("schedule", {
@@ -30,6 +33,9 @@ export const schedules = pgTable("schedule", {
 		.notNull()
 		.$defaultFn(() => generateAppName("schedule")),
 	serviceName: text("serviceName"),
+	// Target replica count for scheduleType="nomad-scale" (serviceName is the task
+	// group to scale; the job is the linked app/compose appName).
+	scaleCount: integer("scaleCount"),
 	shellType: shellTypes("shellType").notNull().default("bash"),
 	scheduleType: scheduleType("scheduleType").notNull().default("application"),
 	command: text("command").notNull(),

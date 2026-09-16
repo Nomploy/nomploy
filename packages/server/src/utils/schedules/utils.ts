@@ -10,7 +10,7 @@ import {
 import { findScheduleById } from "@nomploy/server/services/schedule";
 import { scheduledJobs, scheduleJob as scheduleJobNode } from "node-schedule";
 import { getComposeContainer, getServiceContainer } from "../docker/utils";
-import { execAsyncRemote } from "../process/execAsync";
+import { execAsync, execAsyncRemote } from "../process/execAsync";
 import { spawnAsync } from "../process/spawnAsync";
 
 export const scheduleJob = (schedule: Schedule) => {
@@ -46,6 +46,7 @@ export const runCommand = async (scheduleId: string) => {
 		serviceName,
 		appName,
 		serverId,
+		scaleCount,
 	} = await findScheduleById(scheduleId);
 
 	const deployment = await createDeploymentSchedule({
@@ -53,6 +54,44 @@ export const runCommand = async (scheduleId: string) => {
 		title: "Schedule",
 		description: "Schedule",
 	});
+
+	// Scheduled scaling: scale a Nomad service's task group to a fixed count via the
+	// Nomad API (the control plane's NOMAD_ADDRESS/NOMAD_TOKEN env). serviceName is
+	// the task group; the job id is the linked app/compose appName.
+	if (scheduleType === "nomad-scale") {
+		const jobId = compose?.appName || application?.appName || "";
+		const group = serviceName || "";
+		const count = scaleCount ?? 1;
+		const body = JSON.stringify({
+			Target: { Group: group },
+			Count: count,
+			Message: "scheduled scale (nomploy)",
+		});
+		// Single-quote the JSON for the shell; it contains no single quotes.
+		const scaleCmd = `
+set -e
+echo "Scheduled scale: ${jobId} / ${group} -> ${count}" >> ${deployment.logPath}
+ADDR="\${NOMAD_ADDRESS:-http://127.0.0.1:4646}"
+code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+  -H "X-Nomad-Token: \${NOMAD_TOKEN:-}" -H "Content-Type: application/json" \
+  "$ADDR/v1/job/${jobId}/scale" -d '${body}')
+if [ "$code" = "200" ]; then
+  echo "✅ Scaled ${jobId}/${group} to ${count}" >> ${deployment.logPath}
+else
+  echo "❌ Scale failed (HTTP $code)" >> ${deployment.logPath}
+  exit 1
+fi
+`;
+		try {
+			if (serverId) await execAsyncRemote(serverId, scaleCmd);
+			else await execAsync(scaleCmd);
+			await updateDeploymentStatus(deployment.deploymentId, "done");
+		} catch (error) {
+			await updateDeploymentStatus(deployment.deploymentId, "error");
+			throw error;
+		}
+		return;
+	}
 
 	if (scheduleType === "application" || scheduleType === "compose") {
 		let containerId = "";
