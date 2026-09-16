@@ -49,6 +49,8 @@ import {
 } from "@nomploy/server/setup/nomad-mesh";
 import {
 	execAsync,
+	execAsync,
+	execAsyncRemote,
 	execAsyncRemote,
 } from "@nomploy/server/utils/process/execAsync";
 import { TRPCError } from "@trpc/server";
@@ -466,6 +468,49 @@ export const nomadRouter = createTRPCRouter({
 					memoryMb: Math.round(v.mem / (1024 * 1024)),
 				})),
 			};
+		}),
+
+	// Browse the packs available in a Nomad Pack registry so the user can pick one
+	// instead of typing a name. Adds the registry to the local cache (idempotent) and
+	// enumerates the cached pack directories. Defaults to the community registry; pass
+	// a registry URL (e.g. nomploy's own) to browse that.
+	listNomadPacks: withPermission("server", "read")
+		.input(
+			z.object({
+				serverId: z.string().optional(),
+				registryUrl: z.string().optional(),
+			}),
+		)
+		.query(async ({ input }) => {
+			const url =
+				input.registryUrl?.trim() ||
+				"github.com/hashicorp/nomad-pack-community-registry";
+			// The URL is interpolated into a shell command — allow only safe chars.
+			if (!/^[a-zA-Z0-9_.:/@#?=&~-]+$/.test(url)) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Invalid registry URL",
+				});
+			}
+			const name = "nomploy-browse";
+			const cmd = `
+command -v nomad-pack >/dev/null 2>&1 || { echo "__NO_PACK__"; exit 0; }
+nomad-pack registry add "${name}" "${url}" >/dev/null 2>&1 || true
+D=$(ls -d "$HOME/.cache/nomad/packs/${name}/"*/ 2>/dev/null | head -1)
+[ -n "$D" ] && ls -1 "$D" 2>/dev/null | grep '@' | sed 's/@.*//' | sort -u || true
+`;
+			try {
+				const { stdout } = input.serverId
+					? await execAsyncRemote(input.serverId, cmd)
+					: await execAsync(cmd);
+				if (stdout.includes("__NO_PACK__")) return [];
+				return stdout
+					.split("\n")
+					.map((s) => s.trim())
+					.filter((s) => s && !s.startsWith("__"));
+			} catch {
+				return [];
+			}
 		}),
 
 	getJobScale: withPermission("server", "read")
