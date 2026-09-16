@@ -268,6 +268,34 @@ export const ComposeActions = ({ composeId }: Props) => {
 					/>
 				</div>
 			)}
+			{canUpdateService && (
+				<div className="flex flex-row items-center gap-2 rounded-md px-4 py-2 border">
+					{/* Off (shared): all services run in one Nomad group, share a netns and
+						    reach each other on localhost — scales as a unit. On (independent):
+						    one group per service so each scales on its own deploy.replicas /
+						    x-nomad-scaling; bare service names still resolve via /etc/hosts
+						    aliases. Redeploy to apply. */}
+					<span className="text-sm font-medium">Independent scaling</span>
+					<Switch
+						aria-label="Toggle independent per-service scaling"
+						checked={data?.deployMode === "independent"}
+						onCheckedChange={async (enabled) => {
+							await update({
+								composeId,
+								deployMode: enabled ? "independent" : "shared",
+							})
+								.then(async () => {
+									toast.success("Deploy Mode Updated");
+									await refetch();
+								})
+								.catch(() => {
+									toast.error("Error updating Deploy Mode");
+								});
+						}}
+						className="flex flex-row gap-2 items-center data-[state=checked]:bg-primary"
+					/>
+				</div>
+			)}
 		</div>
 	);
 };

@@ -235,24 +235,41 @@ export const getBuildNomadCommand = async (
 		// Rolling-update strategy: zero-downtime canary when safe (no RW volume),
 		// else a plain rolling restart — both auto_revert. See deriveUpdateConfig.
 		const update = deriveUpdateConfig(services);
-		jobSpec = segmentation
-			? generateNomadJobSpec(
-					appName,
-					services,
-					domains,
-					segmentation,
-					compose.nodePool,
-					update,
-					compose.forcePull ?? undefined,
-				)
-			: generateNomadComposeJobSpec(
-					appName,
-					services,
-					domains,
-					compose.nodePool,
-					update,
-					compose.forcePull ?? undefined,
-				);
+		// Three translations, in priority order:
+		//  1. Isolated project → Connect mesh (per-service groups + Envoy sidecars). A
+		//     security boundary, so it wins even if independent mode is also requested.
+		//  2. deployMode="independent" → per-service groups (each scales on its own),
+		//     no mesh, bare-name discovery via /etc/hosts aliases.
+		//  3. default → single shared-netns group (compose-faithful, localhost comms).
+		if (segmentation) {
+			jobSpec = generateNomadJobSpec(
+				appName,
+				services,
+				domains,
+				segmentation,
+				compose.nodePool,
+				update,
+				compose.forcePull ?? undefined,
+			);
+		} else if (compose.deployMode === "independent") {
+			jobSpec = generateNomadIndependentComposeJobSpec(
+				appName,
+				services,
+				domains,
+				compose.nodePool,
+				update,
+				compose.forcePull ?? undefined,
+			);
+		} else {
+			jobSpec = generateNomadComposeJobSpec(
+				appName,
+				services,
+				domains,
+				compose.nodePool,
+				update,
+				compose.forcePull ?? undefined,
+			);
+		}
 	}
 	const encodedJobSpec = encodeBase64(jobSpec);
 
@@ -570,6 +587,169 @@ ${tasks}
   }
 }
 `;
+};
+
+/**
+ * Independent-services compose translation: one Nomad **group per service** (so each
+ * scales on its own `count`/`scaling`) instead of the single shared-netns group.
+ * Inter-service traffic no longer goes over `localhost`; each service is reachable at
+ * its node's wg0 IP + a STATIC host port (= its container port), and every consumer
+ * gets a `/etc/hosts` alias (generateHostsAliasTemplate) so bare compose names keep
+ * resolving with no rewriting. Uses the existing WireGuard overlay — no mesh, no
+ * Envoy sidecar, no CNI changes.
+ *
+ * Caveat: a port-bearing service runs at most one replica per node (static host port
+ * is node-unique); scaling past node count waits on the node autoscaler.
+ */
+export const generateNomadIndependentComposeJobSpec = (
+	appName: string,
+	services: NomadServiceSpec[],
+	domains: Domain[],
+	nodePool?: string | null,
+	update?: NomadUpdateConfig,
+	forcePull?: boolean,
+): string => {
+	const taskGroups = services
+		.map((service) =>
+			generateIndependentTaskGroup(
+				appName,
+				service,
+				domains,
+				services,
+				forcePull,
+			),
+		)
+		.join("\n\n");
+
+	const nodePoolLine =
+		nodePool && nodePool !== "default" ? `  node_pool = "${nodePool}"` : "";
+
+	return `job "${appName}" {
+  namespace = "default"
+  type      = "service"
+${nodePoolLine}
+${generateUpdateBlock(update)}
+
+${taskGroups}
+}
+`;
+};
+
+/**
+ * One task group for a single service in independent mode. Mirrors generateTaskGroup
+ * (host networking on wg0, like the app path) but reserves a STATIC host port equal
+ * to each container port and injects the /etc/hosts sibling-alias template so bare
+ * compose service names resolve across groups. Shares every leaf helper with the
+ * other paths.
+ *
+ * Static host port = container port is what lets bare-name discovery work with no env
+ * rewriting and no CNI changes: a sibling registers its Consul service at
+ * `<node wg IP>:<native port>`, the alias maps its bare name to that node IP, and the
+ * consumer's `<name>:<native port>` reaches it over the existing WireGuard mesh. The
+ * cost is that a port-bearing service can run at most one replica per node (a static
+ * host port is node-unique); excess replicas stay pending until the node autoscaler
+ * adds capacity. Fine for the common shape (scale the web tier, single DB).
+ */
+const generateIndependentTaskGroup = (
+	appName: string,
+	service: NomadServiceSpec,
+	domains: Domain[],
+	allServices: NomadServiceSpec[],
+	forcePull?: boolean,
+): string => {
+	const envBlock = generateEnvBlock(service.env);
+	const secretsBlock = service.secrets
+		? `\n\n${generateSecretsTemplate(appName)}`
+		: "";
+	// Consul service = Traefik routing + health (domain-bearing services). Nomad
+	// service = sibling discovery consumed by the /etc/hosts aliases (Consul-ACL-free).
+	const consulServices = generateConsulServices(appName, service, domains);
+	const discoveryService = generateNomadDiscoveryService(appName, service);
+	const resourcesBlock = generateResourcesBlock(service.resources);
+	const scalingBlock = generateScalingBlock(service.scaling);
+	const entrypointLine = service.entrypoint
+		? `\n        entrypoint = ${JSON.stringify(service.entrypoint)}`
+		: "";
+
+	const hasPorts = service.ports.length > 0;
+	const dnsServers = clusterDnsServers()
+		.map((ip) => `"${ip}"`)
+		.join(", ");
+	// Static host port pinned to the container port so `<name>:<native port>` from a
+	// sibling lands on the right port over the mesh (see the fn doc). Host networking
+	// (no bridge mode) advertises the node's wg0 IP in Consul — routable cross-node
+	// via the existing /32 overlay routes.
+	const portLines = service.ports
+		.map(
+			(p) =>
+				`      port "${p.label}" {\n        static = ${p.to}\n        to = ${p.to}\n      }`,
+		)
+		.join("\n");
+	// Keep the Consul DNS block so names that aren't sibling aliases (e.g. a managed
+	// database) still resolve via *.service.consul.
+	const networkBlock = `    network {
+      dns {
+        servers  = [${dnsServers}]
+        searches = ["service.consul"]
+      }
+${portLines}
+    }`;
+	const portsConfig = hasPorts
+		? `\n        ports = [${service.ports.map((p) => `"${p.label}"`).join(", ")}]`
+		: "";
+
+	const fileMounts = generateFileMounts(service.fileMounts);
+	const hostsAlias = generateHostsAliasTemplate(appName, allServices, service);
+	const allVolumeEntries = [
+		...volumeEntries(appName, service.volumes),
+		...fileMounts.volumes,
+		...(hostsAlias ? [hostsAlias.volume] : []),
+	];
+	const volumesConfig = allVolumeEntries.length
+		? `\n        volumes = [${allVolumeEntries.join(", ")}]`
+		: "";
+	const hostsTemplate = hostsAlias ? `\n\n${hostsAlias.template}` : "";
+
+	const spreadBlock =
+		service.replicas > 1
+			? `    spread {
+      attribute = "\${node.unique.id}"
+    }
+`
+			: "";
+
+	return `  group "${service.name}" {
+    count = ${service.replicas}
+${spreadBlock}
+${scalingBlock}${networkBlock}
+${
+	hasPorts
+		? `
+${consulServices}
+
+${discoveryService}
+`
+		: ""
+}
+    restart {
+      attempts = 5
+      interval = "10m"
+      delay    = "10s"
+      mode     = "delay"
+    }
+
+    task "${service.name}" {
+      driver = "docker"
+
+      config {
+        image = "${service.image}"${dockerForcePull(service.image, forcePull)}${portsConfig}${entrypointLine}${volumesConfig}
+      }
+
+${envBlock}${secretsBlock}${fileMounts.templates}${hostsTemplate}
+
+${resourcesBlock}
+    }
+  }`;
 };
 
 export const generateNomadJobSpec = (
@@ -960,6 +1140,94 @@ EOFILE
 		templates: templates.length ? `\n\n${templates.join("\n\n")}` : "",
 		volumes,
 	};
+};
+
+/**
+ * Independent-mode discovery. In single-group compose all services share a netns and
+ * reach each other on `localhost`; split into per-service groups (so each scales on
+ * its own) that no longer holds. This renders a per-alloc `/etc/hosts` that aliases
+ * every sibling's bare compose name (`postgres`, `redis`) to that sibling's
+ * app-scoped Consul service address — so `postgres:5432` keeps working with **no env
+ * rewriting**, and the Consul name stays app-scoped (`<app>-<svc>-<port>`) so two apps'
+ * `postgres` never collide on the shared cluster.
+ *
+ * The aliased address is the sibling's node wg0 IP (services register with the
+ * default host address mode), reached at the sibling's STATIC host port over the
+ * existing WireGuard overlay — no CNI/mesh changes. Only port-bearing siblings are
+ * discoverable (a port-less worker isn't reachable, so it's skipped). `files dns`
+ * order (nsswitch) means these host entries win over Consul DNS for the bare name.
+ * change_mode=restart: a sibling reschedule re-renders and restarts the consumer so
+ * it re-reads the file (a single-file bind mount doesn't reflect the atomic rewrite
+ * in place). Returns null when the service has no discoverable siblings.
+ */
+const generateHostsAliasTemplate = (
+	appName: string,
+	services: NomadServiceSpec[],
+	self: NomadServiceSpec,
+): { template: string; volume: string } | null => {
+	const siblings = services.filter(
+		(s) => s.name !== self.name && s.ports.length > 0,
+	);
+	if (siblings.length === 0) return null;
+
+	const ranges = siblings
+		.map((s) => {
+			const svc = `${appName}-${s.name}-${s.ports[0].to}`;
+			// `nomadService` (Nomad-native discovery) not `service` (Consul): the cluster
+			// runs Consul ACLs and Nomad templates get no Consul token, so a Consul query
+			// 403s — nomadService uses the alloc's own Nomad identity. .Address is the
+			// sibling's node wg0 IP. JSON.stringify quotes the name safely in the directive.
+			return `{{- range nomadService ${JSON.stringify(svc)} }}
+{{ .Address }} ${s.name}
+{{- end }}`;
+		})
+		.join("\n");
+
+	// A full /etc/hosts (we bind-mount over Docker's own): keep the standard loopback
+	// entries, then the sibling aliases. No `${` in the data, so a plain heredoc is
+	// safe; consul-template's default `{{ }}` delimiters are intentionally left active.
+	const data = `127.0.0.1 localhost
+::1 localhost ip6-localhost ip6-loopback
+${ranges}
+`;
+
+	const template = `      template {
+        destination     = "local/hosts"
+        change_mode     = "restart"
+        data            = <<EOHOSTS
+${data}
+EOHOSTS
+      }`;
+	return { template, volume: '"local/hosts:/etc/hosts"' };
+};
+
+/**
+ * Independent-mode discovery registration: a Nomad-native service (provider="nomad")
+ * on the service's primary port, named to match what generateHostsAliasTemplate
+ * queries (`<app>-<svc>-<primary port>`). Nomad-native (not Consul) so the sibling's
+ * `/etc/hosts` template can resolve it without a Consul token (the cluster runs Consul
+ * ACLs). The tcp check gates discovery on health — a consumer's alias only populates
+ * once this service is up, giving app→db startup ordering for free. Returns "" for a
+ * port-less service (nothing to discover).
+ */
+const generateNomadDiscoveryService = (
+	appName: string,
+	service: NomadServiceSpec,
+): string => {
+	if (service.ports.length === 0) return "";
+	const primary = service.ports[0];
+	const name = `${appName}-${service.name}-${primary.to}`;
+	return `    service {
+      name     = "${name}"
+      port     = "${primary.label}"
+      provider = "nomad"
+
+      check {
+        type     = "tcp"
+        interval = "10s"
+        timeout  = "3s"
+      }
+    }`;
 };
 
 // ─── Consul + Traefik Integration ────────────────────────────────────────────

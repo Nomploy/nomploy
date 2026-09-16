@@ -58,6 +58,13 @@ export const compose = pgTable("compose", {
 	// Nomad node pool (autoscaling group) to run this compose's services in.
 	// Null/"default" = the built-in default pool. Emitted as the job's `node_pool`.
 	nodePool: text("nodePool"),
+	// How the compose's services map onto Nomad groups:
+	//  - "shared" (default): one group, all services share a netns and reach each
+	//    other on localhost — the compose-faithful translation. Scales as a unit.
+	//  - "independent": one group per service so each scales on its own count/policy;
+	//    bare-name discovery is preserved via per-alloc /etc/hosts aliases. Needs the
+	//    cluster's per-node CNI subnets routed over WireGuard. See builders/nomad.ts.
+	deployMode: text("deployMode").notNull().default("shared"),
 	// Github
 	repository: text("repository"),
 	owner: text("owner"),
