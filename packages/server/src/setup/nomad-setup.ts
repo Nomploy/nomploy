@@ -157,6 +157,10 @@ providers:
       address: "${TRAEFIK_CONSUL_ADDRESS}"
     exposedByDefault: false
     prefix: traefik
+    # Default is 15s. Lower so a canary cutover converges fast: the old alloc is
+    # removed and the new one picked up within a few seconds, well inside a group's
+    # shutdown_delay — otherwise Traefik keeps routing to a stopped alloc → 502.
+    refreshInterval: "5s"
   file:
     directory: "/etc/nomploy/traefik/dynamic"
     watch: true
