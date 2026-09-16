@@ -21,30 +21,36 @@ import {
 import { api } from "@/utils/api";
 
 interface Props {
-	composeId: string;
+	id: string;
+	type: "compose" | "application";
 }
 
 /**
- * Scheduled scaling for a compose: create cron schedules that scale a task group to
- * a fixed count (e.g. down at night, up in the morning). Backed by scheduleType
- * "nomad-scale" — the runner calls the Nomad scale API on the cron. Kept as its own
- * small form; the generic schedule form is command-only.
+ * Scheduled scaling: cron schedules that scale a task group to a fixed count (e.g.
+ * down at night, up in the morning). Backed by scheduleType "nomad-scale" — the
+ * runner calls the Nomad scale API on the cron. Works for compose (pick a service)
+ * and applications (single "app" group). Kept as its own small form; the generic
+ * schedule form is command-only.
  */
-export const ScheduleScale = ({ composeId }: Props) => {
+export const ScheduleScale = ({ id, type }: Props) => {
 	const utils = api.useUtils();
-	const { data: services } = api.compose.loadServices.useQuery(
-		{ composeId, type: "cache" },
-		{ enabled: !!composeId },
+	const isCompose = type === "compose";
+	// Compose has multiple services; an application is a single "app" task group.
+	const { data: composeServices } = api.compose.loadServices.useQuery(
+		{ composeId: id, type: "cache" },
+		{ enabled: isCompose && !!id },
 	);
+	const services = isCompose ? composeServices : ["app"];
+	// schedule.list keys off the parent's own scheduleType (compose/application).
 	const { data: schedules } = api.schedule.list.useQuery(
-		{ id: composeId, scheduleType: "compose" },
-		{ enabled: !!composeId },
+		{ id, scheduleType: type },
+		{ enabled: !!id },
 	);
 	const create = api.schedule.create.useMutation();
 	const remove = api.schedule.delete.useMutation();
 
 	const [name, setName] = useState("");
-	const [group, setGroup] = useState("");
+	const [group, setGroup] = useState(isCompose ? "" : "app");
 	const [count, setCount] = useState(1);
 	const [cron, setCron] = useState("0 22 * * *");
 
@@ -53,7 +59,7 @@ export const ScheduleScale = ({ composeId }: Props) => {
 	);
 
 	const refresh = () =>
-		utils.schedule.list.invalidate({ id: composeId, scheduleType: "compose" });
+		utils.schedule.list.invalidate({ id, scheduleType: type });
 
 	const add = async () => {
 		if (!group || !name || !cron) {
@@ -65,7 +71,7 @@ export const ScheduleScale = ({ composeId }: Props) => {
 				name,
 				cronExpression: cron,
 				scheduleType: "nomad-scale",
-				composeId,
+				...(isCompose ? { composeId: id } : { applicationId: id }),
 				serviceName: group,
 				scaleCount: count,
 				command: `scale ${group} to ${count}`,
