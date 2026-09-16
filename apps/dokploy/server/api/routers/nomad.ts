@@ -403,6 +403,81 @@ export const nomadRouter = createTRPCRouter({
 			});
 		}),
 
+	// Cluster-wide SERVICE scaling activity: merge every service job's per-group
+	// scale events (Nomad's /job/:id/scale Events) into one newest-first, paginated
+	// feed, plus each group's current desired/running count. This is service replica
+	// scaling (the Nomad Autoscaler driving a scaling{} policy, or manual scales) —
+	// distinct from node autoscaling (cluster_autoscaler groups).
+	getServiceScalingActivity: withPermission("server", "read")
+		.input(
+			serverInput.extend({
+				limit: z.number().int().min(1).max(100).optional(),
+				offset: z.number().int().min(0).optional(),
+			}),
+		)
+		.query(async ({ input, ctx }) => {
+			const cfg = await resolveNomad(ctx, input.serverId);
+			const client = nomadClient(cfg);
+			const limit = input.limit ?? 10;
+			const offset = input.offset ?? 0;
+			// biome-ignore lint/suspicious/noExplicitAny: Nomad job-list/scale shapes
+			const jobs = (await client.get(
+				withNs("/jobs", cfg.namespace),
+				// biome-ignore lint/suspicious/noExplicitAny: Nomad job-list/scale shapes
+			)) as any[];
+			const serviceJobs = (jobs ?? []).filter(
+				(j) => j.Type === "service" && j.Status !== "dead",
+			);
+			const scales = await Promise.all(
+				serviceJobs.map(async (j) => {
+					const r = await client.request(
+						withNs(`/job/${j.ID}/scale`, cfg.namespace),
+					);
+					// biome-ignore lint/suspicious/noExplicitAny: Nomad scale-status shape
+					return r.ok ? ({ jobId: j.ID, scale: await r.json() } as any) : null;
+				}),
+			);
+			// biome-ignore lint/suspicious/noExplicitAny: Nomad scale-status shape
+			const services: any[] = [];
+			// biome-ignore lint/suspicious/noExplicitAny: Nomad scale-status shape
+			const allEvents: any[] = [];
+			for (const s of scales) {
+				if (!s?.scale?.TaskGroups) continue;
+				for (const [
+					group,
+					g,
+				] of Object.entries<// biome-ignore lint/suspicious/noExplicitAny: Nomad scale-status shape
+				any>(s.scale.TaskGroups)) {
+					services.push({
+						jobId: s.jobId,
+						group,
+						desired: g.Desired,
+						running: g.Running,
+						healthy: g.Healthy,
+					});
+					for (const e of g.Events ?? []) {
+						allEvents.push({
+							jobId: s.jobId,
+							group,
+							time: e.Time,
+							count: e.Count,
+							previousCount: e.PreviousCount,
+							message: e.Message,
+							error: e.Error,
+							meta: e.Meta,
+						});
+					}
+				}
+			}
+			allEvents.sort((a, b) => (b.time ?? 0) - (a.time ?? 0));
+			return {
+				services,
+				events: allEvents.slice(offset, offset + limit),
+				hasMore: allEvents.length > offset + limit,
+				total: allEvents.length,
+			};
+		}),
+
 	// Manually scale a job's task group to `count` (Nomad's scale endpoint). The
 	// autoscaler, if a scaling{} policy is present, may adjust it again later.
 	scaleNomadJob: withPermission("server", "create")
