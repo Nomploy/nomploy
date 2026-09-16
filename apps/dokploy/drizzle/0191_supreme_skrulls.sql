@@ -1,0 +1,1 @@
+ALTER TABLE "compose" ADD COLUMN "deployMode" text DEFAULT 'shared' NOT NULL;

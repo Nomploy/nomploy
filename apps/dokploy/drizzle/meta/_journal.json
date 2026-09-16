@@ -1338,6 +1338,13 @@
       "when": 1789541240901,
       "tag": "0190_empty_gunslinger",
       "breakpoints": true
+    },
+    {
+      "idx": 191,
+      "version": "7",
+      "when": 1789546529886,
+      "tag": "0191_supreme_skrulls",
+      "breakpoints": true
     }
   ]
 }

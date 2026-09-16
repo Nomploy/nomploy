@@ -64,8 +64,14 @@ const compose = {
 } as any;
 
 describe("nomad builder — compose → HCL (live)", () => {
-	it("translates a compose into a Nomad job spec", async () => {
-		const cmd = await getBuildNomadCommand(compose);
+	it("translates a compose into per-service groups (independent mode)", async () => {
+		// Independent mode puts each service in its own group, so per-service
+		// replicas/spread/scaling from the compose actually take effect (shared mode
+		// runs one group at count=1). The rich compose above exercises all of it.
+		const cmd = await getBuildNomadCommand({
+			...compose,
+			deployMode: "independent",
+		});
 
 		// getBuildNomadCommand embeds the HCL as base64 in the deploy script.
 		const match = cmd.match(/echo "([A-Za-z0-9+/=]+)" \| base64 -d/);
@@ -139,10 +145,14 @@ describe("nomad builder — compose → HCL (live)", () => {
 		const match = cmd.match(/echo "([A-Za-z0-9+/=]+)" \| base64 -d/);
 		const jobSpec = Buffer.from(match?.[1] ?? "", "base64").toString("utf8");
 
-		// The jobspec is written out byte-for-byte — not run through the compose
-		// translator (which would rename the job to the appName + add spread/dns).
-		expect(jobSpec).toBe(hcl);
-		expect(jobSpec).toContain('job "raw-app"');
+		// A native jobspec is NOT run through the compose translator (no spread/dns
+		// added) — but a single-job spec's id IS rewritten to the appName so the
+		// panel's lifecycle/logs (keyed by appName) line up. So it equals the input
+		// with only the job id swapped.
+		expect(jobSpec).toBe(hcl.replace('job "raw-app"', 'job "rawapp"'));
+		expect(jobSpec).toContain('job "rawapp"');
+		expect(jobSpec).not.toContain("spread {");
+		expect(jobSpec).not.toContain("service.consul");
 		// A native jobspec skips the docker compose build/push steps.
 		expect(cmd).not.toContain("docker compose build");
 		expect(cmd).toContain("nomad job run");
@@ -422,5 +432,128 @@ volumes:
 			autoPromote: true,
 		});
 		expect(auto).toContain("auto_promote     = true");
+	});
+});
+
+// A compose with two port-bearing services so cross-service discovery matters.
+const twoServiceCompose = {
+	...compose,
+	appName: "twoapp",
+	env: "",
+	environment: { project: { env: null }, env: null },
+	domains: [],
+	composeFile: `
+services:
+  api:
+    image: myreg/api:latest
+    ports:
+      - "3000"
+    deploy:
+      replicas: 3
+  db:
+    image: postgres:16
+    ports:
+      - "5432"
+`,
+} as typeof compose;
+
+describe("nomad builder — independent (per-service) compose mode", () => {
+	const decode = async (c: unknown): Promise<string> => {
+		const cmd = await getBuildNomadCommand(
+			c as Parameters<typeof getBuildNomadCommand>[0],
+		);
+		const match = cmd.match(/echo "([A-Za-z0-9+/=]+)" \| base64 -d/);
+		return Buffer.from(match?.[1] ?? "", "base64").toString("utf8");
+	};
+
+	it("shared mode (default) keeps a single shared-netns group", async () => {
+		const hcl = await decode(twoServiceCompose);
+		// One group named after the app, both services as tasks inside it.
+		expect(hcl).toContain('group "twoapp"');
+		expect(hcl).toContain('task "api"');
+		expect(hcl).toContain('task "db"');
+		expect(hcl).not.toContain('group "api"');
+		// Single group scales as a unit at count=1 (per-service replicas ignored).
+		expect(hcl).toContain("count = 1");
+		expect(hcl).not.toContain("count = 3");
+		// Localhost discovery via extra_hosts; no alloc addressing, no /etc/hosts alias.
+		expect(hcl).toContain("extra_hosts");
+		expect(hcl).not.toContain('address_mode = "alloc"');
+		expect(hcl).not.toContain("/etc/hosts");
+	});
+
+	it("shared mode still applies the compose-faithful translation", async () => {
+		// The rich compose (env, resources, domain, healthcheck) in the default mode.
+		const hcl = await decode(compose);
+		expect(hcl).toContain('job "myapp"');
+		expect(hcl).toContain('group "myapp"');
+		expect(hcl).toContain('task "web"');
+		expect(hcl).toContain('task "worker"');
+		// Env resolution, resources, Traefik routing, and health check all survive.
+		expect(hcl).toContain("https://api.example.com");
+		expect(hcl).toContain("cpu    = 500");
+		expect(hcl).toContain("traefik.enable=true");
+		expect(hcl).toContain('path     = "/health"');
+	});
+
+	it("independent mode spreads multi-replica services across nodes", async () => {
+		const hcl = await decode({
+			...twoServiceCompose,
+			deployMode: "independent",
+		});
+		// api has replicas=3 → its group spreads across distinct nodes; db (1) doesn't
+		// need to, but the assertion just confirms spread is emitted for the scaled one.
+		expect(hcl).toContain("spread {");
+		expect(hcl).toContain("node.unique.id");
+	});
+
+	it("independent mode emits one group per service that scales on its own", async () => {
+		const hcl = await decode({
+			...twoServiceCompose,
+			deployMode: "independent",
+		});
+
+		// One Nomad group per service (not a single shared group).
+		expect(hcl).toContain('group "api"');
+		expect(hcl).toContain('group "db"');
+		expect(hcl).not.toContain('group "twoapp"');
+
+		// Each service scales on its own count (api: deploy.replicas=3, db: 1).
+		expect(hcl).toContain("count = 3");
+		expect(hcl).toContain("count = 1");
+
+		// Host networking (no bridge/mesh) with a STATIC host port pinned to the
+		// container port, so `<name>:<native port>` reaches it over the WG overlay.
+		expect(hcl).not.toContain('mode = "bridge"');
+		expect(hcl).not.toContain('address_mode = "alloc"');
+		expect(hcl).not.toContain("connect {");
+		expect(hcl).not.toContain("sidecar_service");
+		expect(hcl).toContain("static = 3000");
+		expect(hcl).toContain("static = 5432");
+
+		// App-scoped names (no cross-app collision), registered for sibling discovery
+		// with the Nomad-native provider (Consul-ACL-free templates).
+		expect(hcl).toContain('name     = "twoapp-api-3000"');
+		expect(hcl).toContain('name     = "twoapp-db-5432"');
+		expect(hcl).toContain('provider = "nomad"');
+	});
+
+	it("independent mode preserves bare-name discovery via /etc/hosts aliases", async () => {
+		const hcl = await decode({
+			...twoServiceCompose,
+			deployMode: "independent",
+		});
+
+		// Each consumer gets a rendered /etc/hosts that aliases the sibling's bare
+		// compose name to that sibling's node wg IP (via Nomad-native discovery) — so
+		// `db:5432` / `api:3000` keep working with no env rewriting.
+		expect(hcl).toContain('destination     = "local/hosts"');
+		expect(hcl).toContain('"local/hosts:/etc/hosts"');
+		expect(hcl).toContain('{{- range nomadService "twoapp-db-5432" }}');
+		expect(hcl).toContain("{{ .Address }} db");
+		expect(hcl).toContain('{{- range nomadService "twoapp-api-3000" }}');
+		expect(hcl).toContain("{{ .Address }} api");
+		// Standard loopback entries survive (we bind-mount over Docker's /etc/hosts).
+		expect(hcl).toContain("127.0.0.1 localhost");
 	});
 });
