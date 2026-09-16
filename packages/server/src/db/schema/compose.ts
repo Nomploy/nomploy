@@ -93,6 +93,12 @@ export const compose = pgTable("compose", {
 	composePath: text("composePath").notNull().default("./docker-compose.yml"),
 	suffix: text("suffix").notNull().default(""),
 	randomize: boolean("randomize").notNull().default(false),
+	// Re-pull each service's image on every deploy. Default true so a pushed moving
+	// tag (e.g. :latest) actually lands; without a re-pull Nomad reuses the cached
+	// image for the same tag and keeps running the old one. When false, only moving
+	// tags (:latest/:edge/…) are re-pulled and pinned tags use the cache (see
+	// dockerForcePull in builders/nomad.ts).
+	forcePull: boolean("forcePull").notNull().default(true),
 	isolatedDeployment: boolean("isolatedDeployment").notNull().default(false),
 	// Keep this for backward compatibility since we will not add the prefix anymore to volumes
 	isolatedDeploymentsVolume: boolean("isolatedDeploymentsVolume")

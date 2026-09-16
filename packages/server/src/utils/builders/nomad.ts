@@ -239,12 +239,16 @@ export const getBuildNomadCommand = async (
 					domains,
 					segmentation,
 					compose.nodePool,
+					undefined,
+					compose.forcePull ?? undefined,
 				)
 			: generateNomadComposeJobSpec(
 					appName,
 					services,
 					domains,
 					compose.nodePool,
+					undefined,
+					compose.forcePull ?? undefined,
 				);
 	}
 	const encodedJobSpec = encodeBase64(jobSpec);
@@ -428,6 +432,7 @@ export const generateNomadComposeJobSpec = (
 	domains: Domain[],
 	nodePool?: string | null,
 	update?: NomadUpdateConfig,
+	forcePull?: boolean,
 ): string => {
 	// Port labels must be unique WITHIN the single group (two services could both
 	// expose e.g. 3000), so scope each label by its service name.
@@ -490,7 +495,7 @@ ${portLines}
       driver = "docker"
 
       config {
-        image = "${s.image}"
+        image = "${s.image}"${dockerForcePull(s.image, forcePull)}
         extra_hosts = [${hostAliases}]${portsConfig}${entrypointLine}${volumesConfig}
       }
 
@@ -537,10 +542,11 @@ export const generateNomadJobSpec = (
 	segmentation?: NomadSegmentation,
 	nodePool?: string | null,
 	update?: NomadUpdateConfig,
+	forcePull?: boolean,
 ): string => {
 	const taskGroups = services
 		.map((service) =>
-			generateTaskGroup(appName, service, domains, segmentation),
+			generateTaskGroup(appName, service, domains, segmentation, forcePull),
 		)
 		.join("\n\n");
 
@@ -565,6 +571,7 @@ const generateTaskGroup = (
 	service: NomadServiceSpec,
 	domains: Domain[],
 	segmentation?: NomadSegmentation,
+	forcePull?: boolean,
 ): string => {
 	const envBlock = generateEnvBlock(service.env);
 	const secretsBlock = service.secrets
@@ -654,7 +661,7 @@ ${consulServices}
       driver = "docker"
 
       config {
-        image = "${service.image}"${portsConfig}${entrypointLine}${volumesConfig}
+        image = "${service.image}"${dockerForcePull(service.image, forcePull)}${portsConfig}${entrypointLine}${volumesConfig}
       }
 
 ${envBlock}${secretsBlock}${fileMounts.templates}
@@ -783,6 +790,38 @@ const generateResourcesBlock = (
         cpu    = ${resources?.cpu || 256}
         memory = ${memory}${memoryMaxLine}${gpuBlock}
       }`;
+};
+
+/**
+ * `force_pull = true` for MOVING image tags (:latest, :edge, no tag, …) so a redeploy
+ * actually re-pulls a tag that changed upstream — otherwise Nomad reuses the cached
+ * image for the same tag and silently keeps running the OLD one (a pushed :latest
+ * never lands). Pinned tags (:1.2.3, :17-alpine) are immutable, so skip the extra
+ * registry round-trip for them.
+ */
+const MOVING_IMAGE_TAGS = new Set([
+	"latest",
+	"edge",
+	"main",
+	"master",
+	"develop",
+	"nightly",
+	"stable",
+	"canary",
+]);
+const dockerForcePull = (image: string, force?: boolean): string => {
+	// Explicit setting wins: `true` = always re-pull (even pinned tags), `false` =
+	// never. When unset, fall back to the smart default (re-pull only moving tags).
+	if (force === true) return "\n        force_pull = true";
+	if (force === false) return "";
+	const lastColon = image.lastIndexOf(":");
+	const lastSlash = image.lastIndexOf("/");
+	// A ":" after the last "/" is the tag; otherwise it's a registry port → no tag
+	// (Docker defaults that to :latest, which is moving).
+	const tag = lastColon > lastSlash ? image.slice(lastColon + 1) : "latest";
+	return MOVING_IMAGE_TAGS.has(tag.toLowerCase())
+		? "\n        force_pull = true"
+		: "";
 };
 
 /** Docker volume names must be [a-zA-Z0-9][a-zA-Z0-9_.-]* — sanitize a source. */

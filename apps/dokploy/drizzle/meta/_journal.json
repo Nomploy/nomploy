@@ -1331,6 +1331,13 @@
       "when": 1789460467057,
       "tag": "0189_daffy_stone_men",
       "breakpoints": true
+    },
+    {
+      "idx": 190,
+      "version": "7",
+      "when": 1789541240901,
+      "tag": "0190_empty_gunslinger",
+      "breakpoints": true
     }
   ]
 }
