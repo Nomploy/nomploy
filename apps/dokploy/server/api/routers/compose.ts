@@ -198,7 +198,34 @@ export const composeRouter = createTRPCRouter({
 			await checkServicePermissionAndAccess(ctx, input.composeId, {
 				service: ["create"],
 			});
-			const updated = await updateCompose(input.composeId, input);
+			// Flag "redeploy needed" when a setting that only takes effect on the next
+			// deploy changed (not for cosmetic fields like name/description/autoDeploy).
+			const REDEPLOY_FIELDS = [
+				"composeFile",
+				"env",
+				"command",
+				"deployMode",
+				"nodePool",
+				"forcePull",
+				"serviceScaling",
+				"autoscalingEnabled",
+				"minReplicas",
+				"maxReplicas",
+				"autoscaleCpuTarget",
+				"autoscaleMemoryTarget",
+				"suffix",
+				"randomize",
+				"isolatedDeployment",
+				"sourceType",
+				"composePath",
+			];
+			const touchesDeploy = Object.keys(input).some((k) =>
+				REDEPLOY_FIELDS.includes(k),
+			);
+			const updated = await updateCompose(
+				input.composeId,
+				touchesDeploy ? { ...input, pendingDeploy: true } : input,
+			);
 			await audit(ctx, {
 				action: "update",
 				resourceType: "compose",
@@ -424,6 +451,8 @@ export const composeRouter = createTRPCRouter({
 				deployment: ["create"],
 			});
 			const compose = await findComposeById(input.composeId);
+			// Deploying applies the current config → clear the "redeploy needed" flag.
+			await updateCompose(input.composeId, { pendingDeploy: false });
 
 			const jobData: DeploymentJob = {
 				composeId: input.composeId,
@@ -474,6 +503,8 @@ export const composeRouter = createTRPCRouter({
 				deployment: ["create"],
 			});
 			const compose = await findComposeById(input.composeId);
+			// Redeploying applies the current config → clear the "redeploy needed" flag.
+			await updateCompose(input.composeId, { pendingDeploy: false });
 			const jobData: DeploymentJob = {
 				composeId: input.composeId,
 				titleLog: input.title || "Rebuild deployment",

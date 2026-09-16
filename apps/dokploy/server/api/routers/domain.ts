@@ -11,6 +11,7 @@ import {
 	manageDomain,
 	removeDomain,
 	removeDomainById,
+	updateCompose,
 	updateDomainById,
 	validateDomain,
 } from "@nomploy/server";
@@ -46,6 +47,9 @@ export const domainRouter = createTRPCRouter({
 					});
 				}
 				const domain = await createDomain(input);
+				// A domain change only takes effect on redeploy → flag the compose.
+				if (domain.composeId)
+					await updateCompose(domain.composeId, { pendingDeploy: true });
 				await audit(ctx, {
 					action: "create",
 					resourceType: "domain",
@@ -120,6 +124,8 @@ export const domainRouter = createTRPCRouter({
 
 			const result = await updateDomainById(input.domainId, input);
 			const domain = await findDomainById(input.domainId);
+			if (domain.composeId)
+				await updateCompose(domain.composeId, { pendingDeploy: true });
 			await audit(ctx, {
 				action: "update",
 				resourceType: "domain",
@@ -177,6 +183,8 @@ export const domainRouter = createTRPCRouter({
 			}
 
 			const result = await removeDomainById(input.domainId);
+			if (domain.composeId)
+				await updateCompose(domain.composeId, { pendingDeploy: true });
 			await audit(ctx, {
 				action: "delete",
 				resourceType: "domain",
