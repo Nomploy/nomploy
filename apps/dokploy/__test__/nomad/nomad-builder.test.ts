@@ -353,6 +353,43 @@ volumes:
 		expect(withSecrets).not.toContain(".Items");
 	});
 
+	it("default deploy: zero-downtime canary unless a RW volume is present", async () => {
+		const hclOf = async (composeFile: string) =>
+			Buffer.from(
+				(
+					await getBuildNomadCommand({
+						...compose,
+						appName: "rollapp",
+						composeFile,
+						domains: [],
+					} as typeof compose)
+				).match(/echo "([A-Za-z0-9+/=]+)" \| base64 -d/)?.[1] ?? "",
+				"base64",
+			).toString("utf8");
+
+		// Stateless (no volumes) → canary + auto_promote (zero-downtime).
+		const stateless = await hclOf(
+			"services:\n  web:\n    image: nginx:latest\n    ports:\n      - '80'\n",
+		);
+		expect(stateless).toContain("canary           = 1");
+		expect(stateless).toContain("auto_promote     = true");
+		expect(stateless).toContain("auto_revert      = true");
+
+		// A RW volume → no canary (can't share an exclusive-writer volume), plain
+		// rolling restart with auto_revert.
+		const stateful = await hclOf(
+			"services:\n  db:\n    image: postgres:17-alpine\n    volumes:\n      - data:/var/lib/postgresql/data\nvolumes:\n  data:\n",
+		);
+		expect(stateful).not.toContain("canary");
+		expect(stateful).toContain("auto_revert      = true");
+
+		// A read-only volume is shareable → canary still allowed.
+		const roVol = await hclOf(
+			"services:\n  web:\n    image: nginx:latest\n    ports:\n      - '80'\n    volumes:\n      - assets:/usr/share/nginx/html:ro\nvolumes:\n  assets:\n",
+		);
+		expect(roVol).toContain("canary           = 1");
+	});
+
 	it("emits canary/update stanza only when a strategy is set", () => {
 		const base: NomadServiceSpec = {
 			name: "app",

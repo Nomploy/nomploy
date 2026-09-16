@@ -232,6 +232,9 @@ export const getBuildNomadCommand = async (
 		// Isolated projects use the Connect mesh (per-service groups + sidecars);
 		// everything else uses the single-group, compose-faithful translation so
 		// services reach each other by name like Docker Compose.
+		// Rolling-update strategy: zero-downtime canary when safe (no RW volume),
+		// else a plain rolling restart — both auto_revert. See deriveUpdateConfig.
+		const update = deriveUpdateConfig(services);
 		jobSpec = segmentation
 			? generateNomadJobSpec(
 					appName,
@@ -239,7 +242,7 @@ export const getBuildNomadCommand = async (
 					domains,
 					segmentation,
 					compose.nodePool,
-					undefined,
+					update,
 					compose.forcePull ?? undefined,
 				)
 			: generateNomadComposeJobSpec(
@@ -247,7 +250,7 @@ export const getBuildNomadCommand = async (
 					services,
 					domains,
 					compose.nodePool,
-					undefined,
+					update,
 					compose.forcePull ?? undefined,
 				);
 	}
@@ -386,12 +389,20 @@ export interface NomadUpdateConfig {
 	maxParallel?: number;
 	canary?: number;
 	autoPromote?: boolean;
+	/**
+	 * Gate a deployment healthy on Consul "checks" (default) or on "task_states"
+	 * (the task simply running). Use task_states when the group has no service check
+	 * — otherwise health_check="checks" with nothing to check can stall a canary
+	 * until healthy_deadline and then auto_revert.
+	 */
+	healthCheck?: "checks" | "task_states";
 }
 
 const generateUpdateBlock = (update?: NomadUpdateConfig): string => {
 	const maxParallel =
 		update?.maxParallel && update.maxParallel > 0 ? update.maxParallel : 1;
 	const canary = update?.canary && update.canary > 0 ? update.canary : 0;
+	const healthCheck = update?.healthCheck ?? "checks";
 	// Canary lines only when canary > 0 — otherwise the stanza is byte-identical
 	// to the historical rolling default, so existing apps are unaffected.
 	const canaryLines =
@@ -400,11 +411,37 @@ const generateUpdateBlock = (update?: NomadUpdateConfig): string => {
 			: "";
 	return `  update {
     max_parallel     = ${maxParallel}
-    health_check     = "checks"
+    health_check     = "${healthCheck}"
     min_healthy_time = "10s"
     healthy_deadline = "5m"
     auto_revert      = true${canaryLines}
   }`;
+};
+
+/**
+ * Decide the deployment strategy for a group of services.
+ *
+ * Zero-downtime CANARY (a new alloc runs alongside the old, promoted only once
+ * healthy) is safe only when nothing in the group holds an exclusive-writer volume:
+ * two copies can't share a RW volume (a DB data dir corrupts; RO/shared volumes are
+ * fine). So canary when NO service has a read-write volume; otherwise fall back to a
+ * plain max_parallel rolling update (a brief restart) — both keep auto_revert.
+ *
+ * health_check follows whether any service exposes a port (→ a Consul check exists):
+ * without one, gate on task_states so the canary isn't stuck waiting for a check
+ * that never reports.
+ */
+export const deriveUpdateConfig = (
+	services: NomadServiceSpec[],
+): NomadUpdateConfig => {
+	const hasRwVolume = services.some((s) =>
+		(s.volumes ?? []).some((v) => v.mode !== "ro"),
+	);
+	const hasCheck = services.some((s) => s.ports.length > 0);
+	const healthCheck = hasCheck ? "checks" : "task_states";
+	return hasRwVolume
+		? { healthCheck }
+		: { canary: 1, autoPromote: true, healthCheck };
 };
 
 /**
