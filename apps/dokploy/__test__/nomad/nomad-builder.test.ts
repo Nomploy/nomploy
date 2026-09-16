@@ -291,12 +291,18 @@ volumes:
 			"base64",
 		).toString("utf8");
 
-		// Named volume → app-prefixed docker named volume (survives redeploys).
-		expect(hcl).toContain('"voljob-db_data:/var/lib/postgresql/data"');
-		// Absolute bind mount passes through, mode preserved.
+		// Named volume → a real docker named-volume MOUNT stanza (persists + inherits
+		// the image dir's ownership, so a non-root container can write). NOT a bare
+		// "name:/path" in volumes (Nomad would make that a root-owned alloc bind).
+		expect(hcl).toContain('type   = "volume"');
+		expect(hcl).toContain('source = "voljob-db_data"');
+		expect(hcl).toContain('target = "/var/lib/postgresql/data"');
+		expect(hcl).not.toContain('"voljob-db_data:/var/lib/postgresql/data"');
+		// Absolute bind mount still passes through the volumes list, mode preserved.
 		expect(hcl).toContain('"/etc/host/conf:/etc/conf:ro"');
-		// Anonymous volume → a stable per-app+target named volume.
-		expect(hcl).toContain('"voljob-cache:/cache"');
+		// Anonymous volume → an app+target-scoped named volume mount.
+		expect(hcl).toContain('source = "voljob-cache"');
+		expect(hcl).toContain('target = "/cache"');
 	});
 
 	it("emits node_pool only when the compose targets an autoscaling group", async () => {
