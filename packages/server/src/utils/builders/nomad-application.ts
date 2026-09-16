@@ -152,10 +152,16 @@ export const generateApplicationNomadJob = (
 	application: ApplicationNested,
 	domains: Domain[],
 	imageOverride?: string,
-): string =>
-	generateNomadJobSpec(
+): string => {
+	const spec = applicationToNomadSpec(application, domains, imageOverride);
+	// A canary can't run alongside the old alloc when the app holds an exclusive-
+	// writer volume (they'd share it → corruption), so force canary off there
+	// regardless of the configured count. Gate health on a check only if one exists.
+	const hasRwVolume = (spec.volumes ?? []).some((v) => v.mode !== "ro");
+	const canary = hasRwVolume ? 0 : (application.canaryCount ?? 0);
+	return generateNomadJobSpec(
 		application.appName,
-		[applicationToNomadSpec(application, domains, imageOverride)],
+		[spec],
 		domains,
 		// Isolated projects join the Connect mesh (Phase B segmentation).
 		application.environment?.project?.isolated
@@ -164,10 +170,12 @@ export const generateApplicationNomadJob = (
 		application.nodePool,
 		{
 			maxParallel: application.updateMaxParallel ?? 1,
-			canary: application.canaryCount ?? 0,
+			canary,
 			autoPromote: application.autoPromote ?? false,
+			healthCheck: spec.ports.length > 0 ? "checks" : "task_states",
 		},
 	);
+};
 
 /**
  * Deploy script fragment: push the freshly built image to its registry (built
