@@ -33,6 +33,7 @@ import { ComposeFreeMonitoring } from "@/components/dashboard/monitoring/free/co
 import { ComposePaidMonitoring } from "@/components/dashboard/monitoring/paid/container/show-paid-compose-monitoring";
 import { ShowNomadAllocations } from "@/components/dashboard/nomad/allocations/show-nomad-allocations";
 import { ScheduleScale } from "@/components/dashboard/nomad/scaling/schedule-scale";
+import { ServiceMetricsGraph } from "@/components/dashboard/nomad/scaling/service-metrics-graph";
 import { ShowNomadScaling } from "@/components/dashboard/nomad/scaling/show-nomad-scaling";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
 import { AdvanceBreadcrumb } from "@/components/shared/advance-breadcrumb";
@@ -325,6 +326,10 @@ const Service = (
 												{isNomad ? (
 													<>
 														<ShowNomadScaling
+															appName={data?.appName || ""}
+															serverId={data?.serverId || undefined}
+														/>
+														<ServiceMetricsGraph
 															appName={data?.appName || ""}
 															serverId={data?.serverId || undefined}
 														/>

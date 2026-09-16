@@ -385,6 +385,82 @@ export const nomadRouter = createTRPCRouter({
 			return per.flat();
 		}),
 
+	// Live per-service resource usage from Nomad telemetry (publish_allocation_metrics).
+	// Metrics are per-agent (no central TSDB), so scrape every ready node's
+	// /v1/metrics and sum the job's per-task cpu%/memory by task group. Current
+	// snapshot only — the client polls and builds a rolling graph.
+	getServiceMetrics: withPermission("server", "read")
+		.input(serverInput.extend({ jobId: z.string() }))
+		.query(async ({ input, ctx }) => {
+			const cfg = await resolveNomad(ctx, input.serverId);
+			const client = nomadClient(cfg);
+			// biome-ignore lint/suspicious/noExplicitAny: Nomad node list shape
+			const nodes = (await client.get(
+				withNs("/nodes", cfg.namespace),
+			)) as any[];
+			const ready = (nodes ?? []).filter((n) => n.Status === "ready");
+			// Resolve each ready node's HTTP address (bound on wg0), deduped.
+			const addrs = new Set<string>();
+			await Promise.all(
+				ready.map(async (n) => {
+					try {
+						const r = await client.request(
+							withNs(`/node/${n.ID}`, cfg.namespace),
+						);
+						if (!r.ok) return;
+						const node = (await r.json()) as { HTTPAddr?: string };
+						if (node.HTTPAddr) addrs.add(node.HTTPAddr);
+					} catch {}
+				}),
+			);
+			// The control plane's own address is always reachable — include it.
+			addrs.add(cfg.address.replace(/^https?:\/\//, "").replace(/\/$/, ""));
+
+			const cpuLine =
+				/nomad_client_allocs_cpu_total_percent\{([^}]*)\}\s+([0-9.e+-]+)/g;
+			const memLine =
+				/nomad_client_allocs_memory_usage\{([^}]*)\}\s+([0-9.e+-]+)/g;
+			const label = (labels: string, key: string) =>
+				labels.match(new RegExp(`${key}="([^"]*)"`))?.[1] ?? "";
+			// group → { cpu%, memBytes }
+			const acc: Record<string, { cpu: number; mem: number }> = {};
+			const scrape = async (addr: string) => {
+				try {
+					const ctl = new AbortController();
+					const t = setTimeout(() => ctl.abort(), 4000);
+					const res = await fetch(
+						`http://${addr}/v1/metrics?format=prometheus`,
+						{
+							headers: cfg.token ? { "X-Nomad-Token": cfg.token } : {},
+							signal: ctl.signal,
+						},
+					);
+					clearTimeout(t);
+					if (!res.ok) return;
+					const text = await res.text();
+					for (const m of text.matchAll(cpuLine)) {
+						if (label(m[1] ?? "", "job") !== input.jobId) continue;
+						const g = label(m[1] ?? "", "task_group") || input.jobId;
+						(acc[g] ??= { cpu: 0, mem: 0 }).cpu += Number(m[2]) || 0;
+					}
+					for (const m of text.matchAll(memLine)) {
+						if (label(m[1] ?? "", "job") !== input.jobId) continue;
+						const g = label(m[1] ?? "", "task_group") || input.jobId;
+						(acc[g] ??= { cpu: 0, mem: 0 }).mem += Number(m[2]) || 0;
+					}
+				} catch {}
+			};
+			await Promise.all([...addrs].map(scrape));
+			return {
+				ts: Date.now(),
+				groups: Object.entries(acc).map(([group, v]) => ({
+					group,
+					cpuPercent: Math.round(v.cpu * 10) / 10,
+					memoryMb: Math.round(v.mem / (1024 * 1024)),
+				})),
+			};
+		}),
+
 	getJobScale: withPermission("server", "read")
 		.input(serverInput.extend({ jobId: z.string() }))
 		.query(async ({ input, ctx }) => {
