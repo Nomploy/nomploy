@@ -88,8 +88,8 @@ const NomadDashboard = () => {
 					<ShowNomadNodes serverId={serverId} />
 				</TabsContent>
 				<TabsContent value="scaling" className="flex flex-col gap-4">
-					<ShowAutoscaler />
 					<ShowAutoscalingGraphs />
+					<ShowAutoscaler />
 				</TabsContent>
 				<TabsContent value="consul">
 					<ShowConsul serverId={serverId} />

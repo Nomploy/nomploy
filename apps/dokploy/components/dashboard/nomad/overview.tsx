@@ -99,7 +99,7 @@ export const NomadOverview = ({ serverId }: { serverId?: string }) => {
 		},
 	);
 	const { data: eventsRaw } = api.nomad.getAutoscalerEvents.useQuery(
-		undefined,
+		{ limit: 6 },
 		{
 			refetchInterval: 30000,
 		},
@@ -119,7 +119,7 @@ export const NomadOverview = ({ serverId }: { serverId?: string }) => {
 	const sched = schedRaw as { algorithm: string } | undefined;
 	const dns = (dnsRaw ?? []) as Dns[];
 	const groups = (groupsRaw ?? []) as GroupStatus[];
-	const events = (eventsRaw ?? []) as Ev[];
+	const events = (eventsRaw?.events ?? []) as Ev[];
 
 	// Reserved (what Nomad scheduled) vs live (what's actually used).
 	const cpuReserved =
