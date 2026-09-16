@@ -30,7 +30,17 @@ export const ShowGeneralCompose = ({ composeId }: Props) => {
 			<Card className="bg-background">
 				<CardHeader>
 					<div className="flex flex-row gap-2 justify-between flex-wrap">
-						<CardTitle className="text-xl">Deploy Settings</CardTitle>
+						<div className="flex flex-row items-center gap-2 flex-wrap">
+							<CardTitle className="text-xl">Deploy Settings</CardTitle>
+							{data?.pendingDeploy && (
+								<Badge
+									variant="outline"
+									className="border-yellow-500/50 text-yellow-600 dark:text-yellow-400"
+								>
+									Redeploy needed
+								</Badge>
+							)}
+						</div>
 						<Badge>
 							{data?.composeType === "docker-compose"
 								? "Compose"

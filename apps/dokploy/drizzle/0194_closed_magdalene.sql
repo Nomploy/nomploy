@@ -1,0 +1,1 @@
+ALTER TABLE "compose" ADD COLUMN "pendingDeploy" boolean DEFAULT false NOT NULL;

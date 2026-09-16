@@ -72,6 +72,11 @@ export const compose = pgTable("compose", {
 	//    bare-name discovery is preserved via per-alloc /etc/hosts aliases. Needs the
 	//    cluster's per-node CNI subnets routed over WireGuard. See builders/nomad.ts.
 	deployMode: text("deployMode").notNull().default("shared"),
+	// Set true whenever a redeploy-affecting setting changes (scaling, deploy mode,
+	// node pool, force pull, env, compose file, domains, …) and cleared when a deploy
+	// is triggered. Drives the "Redeploy needed" badge so a config change that only
+	// takes effect on the next deploy is visible.
+	pendingDeploy: boolean("pendingDeploy").notNull().default(false),
 	// Group-level autoscaling for SHARED mode: scales the single group (all services
 	// together) as a unit. Best for a single-service compose or an all-stateless app —
 	// scaling replicates every task in the group. In independent mode, use per-service
