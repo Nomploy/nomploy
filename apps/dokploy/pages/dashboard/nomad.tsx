@@ -3,6 +3,8 @@ import { validateRequest } from "@nomploy/server/lib/auth";
 import type { GetServerSidePropsContext } from "next";
 import { useRouter } from "next/router";
 import { type ReactElement, useState } from "react";
+import { ShowAutoscaler } from "@/components/dashboard/nomad/autoscale/show-autoscaler";
+import { ShowAutoscalingGraphs } from "@/components/dashboard/nomad/autoscale/show-autoscaling-graphs";
 import { ShowCluster } from "@/components/dashboard/nomad/cluster/show-cluster";
 import { ShowConsul } from "@/components/dashboard/nomad/consul/show-consul";
 import { ShowNomadJobs } from "@/components/dashboard/nomad/jobs/show-nomad-jobs";
@@ -68,6 +70,7 @@ const NomadDashboard = () => {
 					<TabsTrigger value="cluster">Cluster</TabsTrigger>
 					<TabsTrigger value="jobs">Jobs</TabsTrigger>
 					<TabsTrigger value="nodes">Nodes</TabsTrigger>
+					<TabsTrigger value="scaling">Scaling</TabsTrigger>
 					<TabsTrigger value="consul">Consul</TabsTrigger>
 					<TabsTrigger value="network">Network</TabsTrigger>
 					<TabsTrigger value="logs">Logs</TabsTrigger>
@@ -83,6 +86,10 @@ const NomadDashboard = () => {
 					<ShowScheduler serverId={serverId} />
 					<ShowNodeTopology serverId={serverId} />
 					<ShowNomadNodes serverId={serverId} />
+				</TabsContent>
+				<TabsContent value="scaling" className="flex flex-col gap-4">
+					<ShowAutoscaler />
+					<ShowAutoscalingGraphs />
 				</TabsContent>
 				<TabsContent value="consul">
 					<ShowConsul serverId={serverId} />
