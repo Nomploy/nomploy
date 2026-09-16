@@ -179,7 +179,8 @@ export const generatePanelNomadJob = (
       ]
 
       check {
-        type     = "tcp"
+        type     = "http"
+        path     = "/api/health"
         port     = "http"
         interval = "10s"
         timeout  = "3s"
@@ -233,6 +234,14 @@ ${updateBlock}
 
   group "${PANEL_JOB_NAME}" {
     count = 1
+
+    // On a self-update the old alloc is deregistered from Consul, then kept alive
+    // for this delay before it's killed — giving Traefik time to refresh its
+    // Consul catalog and stop routing to it. Without it, Traefik briefly forwards
+    // to the dead old alloc during a cutover (a 502 that reads as a logout in the
+    // panel). Pairs with the http /api/health check so the canary is only promoted
+    // once the new panel actually serves.
+    shutdown_delay = "10s"
 
     restart {
       attempts = 3
