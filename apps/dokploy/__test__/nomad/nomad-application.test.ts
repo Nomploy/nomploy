@@ -134,9 +134,13 @@ describe("nomad application builder — application → HCL", () => {
 		]);
 
 		const hcl = generateApplicationNomadJob(appWithMounts, []);
-		// Named volume → app-prefixed docker named volume (persists across redeploys).
-		expect(hcl).toContain('"mountapp-data:/var/lib/data"');
-		// Absolute bind mount passes through.
+		// Named volume → a real docker named-volume MOUNT stanza (persists + inherits
+		// image dir ownership), not a root-owned alloc bind.
+		expect(hcl).toContain('type   = "volume"');
+		expect(hcl).toContain('source = "mountapp-data"');
+		expect(hcl).toContain('target = "/var/lib/data"');
+		expect(hcl).not.toContain('"mountapp-data:/var/lib/data"');
+		// Absolute bind mount passes through the volumes list.
 		expect(hcl).toContain('"/srv/conf:/etc/conf"');
 		// file mount → template stanza + a bind of the rendered file at mountPath.
 		expect(hcl).toContain('destination     = "local/file-0"');

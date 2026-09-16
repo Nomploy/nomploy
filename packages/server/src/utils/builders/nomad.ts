@@ -634,12 +634,13 @@ ${portLines}
 			const volumesConfig = allVolumeEntries.length
 				? `\n        volumes = [${allVolumeEntries.join(", ")}]`
 				: "";
+			const mountBlocks = namedVolumeMounts(appName, s.volumes);
 			return `    task "${s.name}" {
       driver = "docker"
 
       config {
         image = "${s.image}"${dockerForcePull(s.image, forcePull)}
-        extra_hosts = [${hostAliases}]${portsConfig}${entrypointLine}${volumesConfig}
+        extra_hosts = [${hostAliases}]${portsConfig}${entrypointLine}${volumesConfig}${mountBlocks}
       }
 
 ${envBlock}${secretsBlock}${fileMounts.templates}
@@ -818,6 +819,7 @@ ${portLines}
 	const volumesConfig = allVolumeEntries.length
 		? `\n        volumes = [${allVolumeEntries.join(", ")}]`
 		: "";
+	const mountBlocks = namedVolumeMounts(appName, service.volumes);
 	const hostsTemplate = hostsAlias ? `\n\n${hostsAlias.template}` : "";
 
 	const spreadBlock =
@@ -852,7 +854,7 @@ ${discoveryService}
       driver = "docker"
 
       config {
-        image = "${service.image}"${dockerForcePull(service.image, forcePull)}${portsConfig}${entrypointLine}${volumesConfig}
+        image = "${service.image}"${dockerForcePull(service.image, forcePull)}${portsConfig}${entrypointLine}${volumesConfig}${mountBlocks}
       }
 
 ${envBlock}${secretsBlock}${fileMounts.templates}${hostsTemplate}
@@ -962,6 +964,7 @@ ${portLines}
 	const volumesConfig = allVolumeEntries.length
 		? `\n        volumes = [${allVolumeEntries.join(", ")}]`
 		: "";
+	const mountBlocks = namedVolumeMounts(appName, service.volumes);
 
 	// Spread replicas across distinct nodes so a multi-replica service uses the
 	// whole cluster instead of bin-packing onto one box. Soft (spread, not a
@@ -989,7 +992,7 @@ ${consulServices}
       driver = "docker"
 
       config {
-        image = "${service.image}"${dockerForcePull(service.image, forcePull)}${portsConfig}${entrypointLine}${volumesConfig}
+        image = "${service.image}"${dockerForcePull(service.image, forcePull)}${portsConfig}${entrypointLine}${volumesConfig}${mountBlocks}
       }
 
 ${envBlock}${secretsBlock}${fileMounts.templates}
@@ -1159,51 +1162,70 @@ const sanitizeVolumeName = (s: string): string =>
 		.replace(/^[-.]+/, "")
 		.replace(/-+$/, "") || "vol";
 
+/** The app-scoped docker volume name for a named/anonymous compose volume. Prefixed
+ * with the app so two apps that both declare e.g. `db_data` don't collide. */
+const namedVolumeSource = (
+	appName: string,
+	v: NonNullable<NomadServiceSpec["volumes"]>[number],
+): string =>
+	v.source
+		? `${appName}-${sanitizeVolumeName(v.source)}`
+		: `${appName}-${sanitizeVolumeName(v.target)}`; // anonymous
+
 /**
- * Map a service's compose `volumes:` to the docker driver's `volumes` config so
- * data PERSISTS across a redeploy (each deploy is a new alloc; without this the
- * container's writable layer — e.g. a Postgres data dir — is wiped every time).
+ * HOST BIND entries for the docker driver's `volumes` config (`host:container`).
+ * Only real host paths belong here — NOT named/anonymous volumes: a bare name in
+ * `volumes` is interpreted by Nomad as a path relative to the alloc dir, i.e. a
+ * root-owned bind that is WIPED on every reschedule (not a docker volume at all).
+ * Named/anonymous volumes are emitted as `mount { type = "volume" }` stanzas instead
+ * (see namedVolumeMounts).
  *
- * - Named volume  → `<appName>-<name>:<target>` docker named volume. Prefixed with
- *   the app so two apps that both declare e.g. `db_data` don't collide on the host;
- *   docker auto-creates it and it survives redeploys.
  * - Absolute bind → `<host>:<target>` passed through.
- * - Relative bind → a stable per-app host dir (there's no compose project dir on
- *   Nomad), so it still persists.
- * - Anonymous     → a stable per-app+target named volume (so it, too, persists).
- *
- * Requires the docker plugin's `volumes { enabled = true }` (set in install.sh).
- * NOTE: docker volumes are node-local — if the alloc reschedules to another node
- * the data does not follow. The compose model is single-host.
+ * - Relative bind → a stable per-app host dir (there's no compose project dir on Nomad).
  */
 const volumeEntries = (
 	appName: string,
 	volumes?: NomadServiceSpec["volumes"],
 ): string[] => {
 	if (!volumes || volumes.length === 0) return [];
-	return volumes.map((v) => {
+	return volumes.flatMap((v) => {
+		if (!v.source || v.named) return []; // named/anonymous → namedVolumeMounts
 		const mode = v.mode ? `:${v.mode}` : "";
-		if (!v.source) {
-			const name = `${appName}-${sanitizeVolumeName(v.target)}`;
-			return `"${name}:${v.target}${mode}"`;
-		}
-		if (v.named) {
-			return `"${appName}-${sanitizeVolumeName(v.source)}:${v.target}${mode}"`;
-		}
-		if (v.source.startsWith("/")) {
-			return `"${v.source}:${v.target}${mode}"`;
-		}
+		if (v.source.startsWith("/")) return [`"${v.source}:${v.target}${mode}"`];
 		const rel = sanitizeVolumeName(v.source.replace(/^\.\/?/, ""));
-		return `"/var/lib/nomploy/volumes/${appName}/${rel}:${v.target}${mode}"`;
+		return [`"/var/lib/nomploy/volumes/${appName}/${rel}:${v.target}${mode}"`];
 	});
 };
 
-const generateVolumesConfig = (
+/**
+ * Named + anonymous compose volumes → docker `mount { type = "volume" }` stanzas so
+ * data PERSISTS across a redeploy (each deploy is a new alloc). This is deliberately
+ * NOT `volumes = ["name:/path"]`: Nomad treats a bare name there as an alloc-relative
+ * bind (root-owned + wiped on reschedule). A real docker named volume, on first mount
+ * over a populated image path, inherits that path's ownership — so a non-root
+ * container (e.g. USER 1000) can write to it (fixes EACCES on an uploads dir).
+ *
+ * Requires the docker plugin's `volumes { enabled = true }` (set in install.sh).
+ * NOTE: docker volumes are node-local — if the alloc reschedules to another node the
+ * data does not follow. The compose model is single-host.
+ */
+const namedVolumeMounts = (
 	appName: string,
 	volumes?: NomadServiceSpec["volumes"],
 ): string => {
-	const entries = volumeEntries(appName, volumes);
-	return entries.length ? `\n        volumes = [${entries.join(", ")}]` : "";
+	if (!volumes || volumes.length === 0) return "";
+	const blocks = volumes.flatMap((v) => {
+		if (v.source && !v.named) return []; // host bind → volumeEntries
+		const ro = v.mode === "ro" ? "\n          readonly = true" : "";
+		return [
+			`        mount {
+          type   = "volume"
+          target = ${JSON.stringify(v.target)}
+          source = ${JSON.stringify(namedVolumeSource(appName, v))}${ro}
+        }`,
+		];
+	});
+	return blocks.length ? `\n${blocks.join("\n")}` : "";
 };
 
 /**
