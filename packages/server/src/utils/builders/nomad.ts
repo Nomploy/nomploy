@@ -661,6 +661,9 @@ ${generateJobMeta(deployedAt)}${generateUpdateBlock(update)}
 
   group "${appName}" {
     count = ${groupScaling ? groupScaling.min : 1}
+    # Stay alive briefly after deregistering from Consul so Traefik stops routing
+    # here before the alloc dies — smooth rollout.
+    shutdown_delay = "10s"
 ${groupScaling ? generateScalingBlock(groupScaling) : ""}
     # Compose has no cross-task ordering here (tasks start together), so a service
     # that talks to another on boot (app → db) may need a few retries while its
@@ -832,6 +835,9 @@ ${portLines}
 
 	return `  group "${service.name}" {
     count = ${service.replicas}
+    # Stay alive briefly after deregistering from Consul so Traefik (and sibling
+    # /etc/hosts templates) stop routing here before the alloc dies — smooth rollout.
+    shutdown_delay = "10s"
 ${spreadBlock}
 ${scalingBlock}${networkBlock}
 ${
@@ -979,6 +985,9 @@ ${portLines}
 
 	return `  group "${service.name}" {
     count = ${service.replicas}
+    # Stay alive briefly after deregistering from Consul so Traefik (and sibling
+    # /etc/hosts templates) stop routing here before the alloc dies — smooth rollout.
+    shutdown_delay = "10s"
 ${spreadBlock}
 ${scalingBlock}${networkBlock}
 ${
