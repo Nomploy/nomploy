@@ -72,6 +72,15 @@ export const compose = pgTable("compose", {
 	//    bare-name discovery is preserved via per-alloc /etc/hosts aliases. Needs the
 	//    cluster's per-node CNI subnets routed over WireGuard. See builders/nomad.ts.
 	deployMode: text("deployMode").notNull().default("shared"),
+	// Group-level autoscaling for SHARED mode: scales the single group (all services
+	// together) as a unit. Best for a single-service compose or an all-stateless app —
+	// scaling replicates every task in the group. In independent mode, use per-service
+	// serviceScaling instead. Mirrors the application autoscaling fields.
+	autoscalingEnabled: boolean("autoscalingEnabled").notNull().default(false),
+	minReplicas: integer("minReplicas").notNull().default(1),
+	maxReplicas: integer("maxReplicas").notNull().default(3),
+	autoscaleCpuTarget: integer("autoscaleCpuTarget"),
+	autoscaleMemoryTarget: integer("autoscaleMemoryTarget"),
 	// Per-service scaling overrides set from the panel UI, keyed by compose service
 	// name. Lets a user set replicas / autoscaling WITHOUT editing deploy.replicas or
 	// x-nomad-scaling in the compose file; the builder merges these over the parsed

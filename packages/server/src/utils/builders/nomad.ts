@@ -284,6 +284,24 @@ export const getBuildNomadCommand = async (
 		// Stamp every deploy so Nomad always creates a new allocation → images get
 		// re-pulled (force_pull is a no-op on an unchanged spec; see generateJobMeta).
 		const deployedAt = new Date().toISOString();
+		// Shared-mode group autoscaling: scale the single group (all services together)
+		// as a unit. Ignored by the independent path (which scales per service). Default
+		// a 70% CPU target if enabled with none set, so it actually scales.
+		const groupScaling = compose.autoscalingEnabled
+			? (() => {
+					const min = Math.max(1, compose.minReplicas ?? 1);
+					const hasTarget =
+						compose.autoscaleCpuTarget != null ||
+						compose.autoscaleMemoryTarget != null;
+					return {
+						min,
+						max: Math.max(min, compose.maxReplicas ?? 3),
+						cpuTarget:
+							compose.autoscaleCpuTarget ?? (hasTarget ? undefined : 70),
+						memoryTarget: compose.autoscaleMemoryTarget ?? undefined,
+					};
+				})()
+			: undefined;
 		// Three translations, in priority order:
 		//  1. Isolated project → Connect mesh (per-service groups + Envoy sidecars). A
 		//     security boundary, so it wins even if independent mode is also requested.
@@ -320,6 +338,7 @@ export const getBuildNomadCommand = async (
 				update,
 				compose.forcePull ?? undefined,
 				deployedAt,
+				groupScaling,
 			);
 		}
 	}
@@ -556,6 +575,7 @@ export const generateNomadComposeJobSpec = (
 	update?: NomadUpdateConfig,
 	forcePull?: boolean,
 	deployedAt?: string,
+	groupScaling?: NomadServiceSpec["scaling"],
 ): string => {
 	// Port labels must be unique WITHIN the single group (two services could both
 	// expose e.g. 3000), so scope each label by its service name.
@@ -639,8 +659,8 @@ ${nodePoolLine}
 ${generateJobMeta(deployedAt)}${generateUpdateBlock(update)}
 
   group "${appName}" {
-    count = 1
-
+    count = ${groupScaling ? groupScaling.min : 1}
+${groupScaling ? generateScalingBlock(groupScaling) : ""}
     # Compose has no cross-task ordering here (tasks start together), so a service
     # that talks to another on boot (app → db) may need a few retries while its
     # dependency comes up. Be generous so transient startup ordering self-heals.

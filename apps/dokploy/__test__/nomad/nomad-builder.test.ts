@@ -622,3 +622,39 @@ describe("nomad builder — deploy stamp forces a re-pull", () => {
 		expect(hcl).toContain("deployed_at =");
 	});
 });
+
+describe("nomad builder — shared-mode group autoscaling", () => {
+	it("emits a scaling block on the single group when enabled", async () => {
+		const hcl = Buffer.from(
+			(
+				await getBuildNomadCommand({
+					...compose,
+					deployMode: "shared",
+					autoscalingEnabled: true,
+					minReplicas: 2,
+					maxReplicas: 5,
+					autoscaleCpuTarget: 65,
+					// biome-ignore lint/suspicious/noExplicitAny: test mock
+				} as any)
+			).match(/echo "([A-Za-z0-9+/=]+)" \| base64 -d/)?.[1] ?? "",
+			"base64",
+		).toString("utf8");
+		// Single group (shared) that now scales as a unit, starting at min.
+		expect(hcl).toContain('group "myapp"');
+		expect(hcl).toContain("count = 2");
+		expect(hcl).toContain("scaling {");
+		expect(hcl).toContain("max     = 5");
+		expect(hcl).toContain("target = 65");
+	});
+
+	it("stays at count=1 with no scaling when disabled", async () => {
+		const hcl = Buffer.from(
+			(await getBuildNomadCommand({ ...compose, deployMode: "shared" })).match(
+				/echo "([A-Za-z0-9+/=]+)" \| base64 -d/,
+			)?.[1] ?? "",
+			"base64",
+		).toString("utf8");
+		expect(hcl).toContain("count = 1");
+		expect(hcl).not.toContain("scaling {");
+	});
+});
