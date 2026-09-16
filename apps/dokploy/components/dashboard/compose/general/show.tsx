@@ -11,6 +11,7 @@ import { ShowNomadPackForm } from "../nomad-pack/show";
 import { ComposeActions } from "./actions";
 import { ShowProviderFormCompose } from "./generic/show";
 import { ShowComposeNodePool } from "./node-pool";
+import { ShowServiceScaling } from "./service-scaling";
 
 interface Props {
 	composeId: string;
@@ -56,6 +57,9 @@ export const ShowGeneralCompose = ({ composeId }: Props) => {
 			)}
 			{data?.composeType === "nomad" && (
 				<ShowComposeNodePool composeId={composeId} />
+			)}
+			{data?.composeType === "nomad" && (
+				<ShowServiceScaling composeId={composeId} />
 			)}
 		</>
 	);

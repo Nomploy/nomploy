@@ -1345,6 +1345,13 @@
       "when": 1789546529886,
       "tag": "0191_supreme_skrulls",
       "breakpoints": true
+    },
+    {
+      "idx": 192,
+      "version": "7",
+      "when": 1789549066328,
+      "tag": "0192_worthless_the_fallen",
+      "breakpoints": true
     }
   ]
 }

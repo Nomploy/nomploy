@@ -167,6 +167,49 @@ const healthCheckSnippet = (name: string, mode: "job" | "pack"): string =>
 // ─── Main Entry Point ────────────────────────────────────────────────────────
 
 /**
+ * Apply per-service scaling overrides (set from the panel UI, keyed by service name)
+ * onto the parsed services, in place. The UI wins over the compose file so a user can
+ * set replicas/autoscaling without editing deploy.replicas / x-nomad-scaling. Only
+ * takes effect in independent mode (shared mode runs one group at count=1, so
+ * per-service counts are inert either way).
+ *
+ * - replicas set → override the fixed count.
+ * - autoscaling.enabled true → replace the scaling policy (and start at min); if no
+ *   target is given, default a 70% CPU target so it actually scales (mirrors the app
+ *   autoscaling UI).
+ * - autoscaling present but disabled → clear any compose-file scaling.
+ * - service absent from the map → left untouched.
+ */
+export const applyServiceScalingOverrides = (
+	services: NomadServiceSpec[],
+	overrides?: NomadComposeNested["serviceScaling"],
+): void => {
+	if (!overrides) return;
+	for (const service of services) {
+		const o = overrides[service.name];
+		if (!o) continue;
+		if (o.replicas != null) service.replicas = o.replicas;
+		if (o.autoscaling?.enabled) {
+			const min = Math.max(1, o.autoscaling.min);
+			const hasTarget =
+				o.autoscaling.cpuTarget != null || o.autoscaling.memoryTarget != null;
+			service.scaling = {
+				min,
+				max: Math.max(min, o.autoscaling.max),
+				cpuTarget: o.autoscaling.cpuTarget ?? (hasTarget ? undefined : 70),
+				memoryTarget: o.autoscaling.memoryTarget ?? undefined,
+				cooldown: service.scaling?.cooldown,
+				evaluationInterval: service.scaling?.evaluationInterval,
+			};
+			// An autoscaled service starts at its min; the autoscaler takes over.
+			service.replicas = min;
+		} else if (o.autoscaling && !o.autoscaling.enabled) {
+			service.scaling = undefined;
+		}
+	}
+};
+
+/**
  * Build the full Nomad deploy command from a compose configuration.
  * This replaces getBuildComposeCommand for Nomad orchestrator.
  */
@@ -225,6 +268,9 @@ export const getBuildNomadCommand = async (
 		const envVars = resolveNomadEnvVars(compose);
 		// Parse compose file into Nomad services
 		const services = parseComposeToNomadServices(composeFile, envVars);
+		// Merge per-service scaling set from the panel UI over the compose-file values
+		// (UI wins), so users can set replicas/autoscaling without editing the YAML.
+		applyServiceScalingOverrides(services, compose.serviceScaling);
 		// Generate Nomad HCL job spec. Isolated projects join the Connect mesh.
 		const segmentation = compose.environment?.project?.isolated
 			? { projectId: compose.environment.projectId }
@@ -235,6 +281,9 @@ export const getBuildNomadCommand = async (
 		// Rolling-update strategy: zero-downtime canary when safe (no RW volume),
 		// else a plain rolling restart — both auto_revert. See deriveUpdateConfig.
 		const update = deriveUpdateConfig(services);
+		// Stamp every deploy so Nomad always creates a new allocation → images get
+		// re-pulled (force_pull is a no-op on an unchanged spec; see generateJobMeta).
+		const deployedAt = new Date().toISOString();
 		// Three translations, in priority order:
 		//  1. Isolated project → Connect mesh (per-service groups + Envoy sidecars). A
 		//     security boundary, so it wins even if independent mode is also requested.
@@ -250,6 +299,7 @@ export const getBuildNomadCommand = async (
 				compose.nodePool,
 				update,
 				compose.forcePull ?? undefined,
+				deployedAt,
 			);
 		} else if (compose.deployMode === "independent") {
 			jobSpec = generateNomadIndependentComposeJobSpec(
@@ -259,6 +309,7 @@ export const getBuildNomadCommand = async (
 				compose.nodePool,
 				update,
 				compose.forcePull ?? undefined,
+				deployedAt,
 			);
 		} else {
 			jobSpec = generateNomadComposeJobSpec(
@@ -268,6 +319,7 @@ export const getBuildNomadCommand = async (
 				compose.nodePool,
 				update,
 				compose.forcePull ?? undefined,
+				deployedAt,
 			);
 		}
 	}
@@ -448,6 +500,22 @@ const generateUpdateBlock = (update?: NomadUpdateConfig): string => {
  * without one, gate on task_states so the canary isn't stuck waiting for a check
  * that never reports.
  */
+/**
+ * A job-level `meta { deployed_at = … }` stamp. Injected with a fresh timestamp on
+ * every deploy so `nomad job run` always sees a changed job → new deployment → new
+ * allocation → the docker driver re-pulls images (force_pull only fires when an alloc
+ * is created; re-running a byte-identical spec no-ops, so a pushed :latest would never
+ * land). Empty when no timestamp is given, keeping the pure generators deterministic
+ * for tests.
+ */
+const generateJobMeta = (deployedAt?: string): string =>
+	deployedAt
+		? `  meta {
+    deployed_at = ${JSON.stringify(deployedAt)}
+  }
+`
+		: "";
+
 export const deriveUpdateConfig = (
 	services: NomadServiceSpec[],
 ): NomadUpdateConfig => {
@@ -487,6 +555,7 @@ export const generateNomadComposeJobSpec = (
 	nodePool?: string | null,
 	update?: NomadUpdateConfig,
 	forcePull?: boolean,
+	deployedAt?: string,
 ): string => {
 	// Port labels must be unique WITHIN the single group (two services could both
 	// expose e.g. 3000), so scope each label by its service name.
@@ -567,7 +636,7 @@ ${resourcesBlock}
   namespace = "default"
   type      = "service"
 ${nodePoolLine}
-${generateUpdateBlock(update)}
+${generateJobMeta(deployedAt)}${generateUpdateBlock(update)}
 
   group "${appName}" {
     count = 1
@@ -608,6 +677,7 @@ export const generateNomadIndependentComposeJobSpec = (
 	nodePool?: string | null,
 	update?: NomadUpdateConfig,
 	forcePull?: boolean,
+	deployedAt?: string,
 ): string => {
 	const taskGroups = services
 		.map((service) =>
@@ -628,7 +698,7 @@ export const generateNomadIndependentComposeJobSpec = (
   namespace = "default"
   type      = "service"
 ${nodePoolLine}
-${generateUpdateBlock(update)}
+${generateJobMeta(deployedAt)}${generateUpdateBlock(update)}
 
 ${taskGroups}
 }
@@ -760,6 +830,7 @@ export const generateNomadJobSpec = (
 	nodePool?: string | null,
 	update?: NomadUpdateConfig,
 	forcePull?: boolean,
+	deployedAt?: string,
 ): string => {
 	const taskGroups = services
 		.map((service) =>
@@ -776,7 +847,7 @@ export const generateNomadJobSpec = (
   namespace = "default"
   type      = "service"
 ${nodePoolLine}
-${generateUpdateBlock(update)}
+${generateJobMeta(deployedAt)}${generateUpdateBlock(update)}
 
 ${taskGroups}
 }

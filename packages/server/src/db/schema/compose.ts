@@ -1,5 +1,12 @@
 import { relations } from "drizzle-orm";
-import { boolean, integer, pgEnum, pgTable, text } from "drizzle-orm/pg-core";
+import {
+	boolean,
+	integer,
+	jsonb,
+	pgEnum,
+	pgTable,
+	text,
+} from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -65,6 +72,27 @@ export const compose = pgTable("compose", {
 	//    bare-name discovery is preserved via per-alloc /etc/hosts aliases. Needs the
 	//    cluster's per-node CNI subnets routed over WireGuard. See builders/nomad.ts.
 	deployMode: text("deployMode").notNull().default("shared"),
+	// Per-service scaling overrides set from the panel UI, keyed by compose service
+	// name. Lets a user set replicas / autoscaling WITHOUT editing deploy.replicas or
+	// x-nomad-scaling in the compose file; the builder merges these over the parsed
+	// values (UI wins). Only meaningful in deployMode="independent" (shared mode runs
+	// one group at count=1). See getBuildNomadCommand.
+	serviceScaling:
+		jsonb("serviceScaling").$type<
+			Record<
+				string,
+				{
+					replicas?: number;
+					autoscaling?: {
+						enabled: boolean;
+						min: number;
+						max: number;
+						cpuTarget?: number;
+						memoryTarget?: number;
+					};
+				}
+			>
+		>(),
 	// Github
 	repository: text("repository"),
 	owner: text("owner"),
@@ -208,6 +236,24 @@ const createSchema = createInsertSchema(compose, {
 		.optional(),
 	triggerType: z.enum(["push", "tag"]).optional(),
 	composeStatus: z.enum(["idle", "running", "done", "error"]).optional(),
+	deployMode: z.enum(["shared", "independent"]).optional(),
+	serviceScaling: z
+		.record(
+			z.string(),
+			z.object({
+				replicas: z.number().int().min(1).optional(),
+				autoscaling: z
+					.object({
+						enabled: z.boolean(),
+						min: z.number().int().min(1),
+						max: z.number().int().min(1),
+						cpuTarget: z.number().int().min(1).max(100).optional(),
+						memoryTarget: z.number().int().min(1).max(100).optional(),
+					})
+					.optional(),
+			}),
+		)
+		.optional(),
 });
 
 export const apiCreateCompose = createSchema.pick({

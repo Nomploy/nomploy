@@ -1,4 +1,5 @@
 import {
+	applyServiceScalingOverrides,
 	generateNomadJobSpec,
 	getBuildNomadCommand,
 	type NomadServiceSpec,
@@ -555,5 +556,69 @@ describe("nomad builder — independent (per-service) compose mode", () => {
 		expect(hcl).toContain("{{ .Address }} api");
 		// Standard loopback entries survive (we bind-mount over Docker's /etc/hosts).
 		expect(hcl).toContain("127.0.0.1 localhost");
+	});
+});
+
+describe("nomad builder — per-service scaling overrides (UI)", () => {
+	const base = (): NomadServiceSpec[] => [
+		{ name: "web", image: "web:latest", ports: [], replicas: 1, env: {} },
+		{ name: "db", image: "postgres:16", ports: [], replicas: 1, env: {} },
+	];
+
+	it("overrides replicas from the UI (wins over compose)", () => {
+		const services = base();
+		applyServiceScalingOverrides(services, { web: { replicas: 4 } });
+		expect(services.find((s) => s.name === "web")?.replicas).toBe(4);
+		expect(services.find((s) => s.name === "db")?.replicas).toBe(1);
+	});
+
+	it("enables autoscaling from the UI and starts at min", () => {
+		const services = base();
+		applyServiceScalingOverrides(services, {
+			web: { autoscaling: { enabled: true, min: 2, max: 6, cpuTarget: 65 } },
+		});
+		const web = services.find((s) => s.name === "web");
+		expect(web?.scaling).toEqual(
+			expect.objectContaining({ min: 2, max: 6, cpuTarget: 65 }),
+		);
+		expect(web?.replicas).toBe(2); // starts at min
+	});
+
+	it("defaults a CPU target when autoscaling is enabled with none set", () => {
+		const services = base();
+		applyServiceScalingOverrides(services, {
+			web: { autoscaling: { enabled: true, min: 1, max: 3 } },
+		});
+		expect(services.find((s) => s.name === "web")?.scaling?.cpuTarget).toBe(70);
+	});
+
+	it("disabling autoscaling from the UI clears any compose scaling", () => {
+		const services = base();
+		services[0]!.scaling = { min: 1, max: 5, cpuTarget: 80 };
+		applyServiceScalingOverrides(services, {
+			web: { autoscaling: { enabled: false, min: 1, max: 1 } },
+		});
+		expect(services.find((s) => s.name === "web")?.scaling).toBeUndefined();
+	});
+
+	it("leaves services absent from the override map untouched", () => {
+		const services = base();
+		services[1]!.replicas = 2;
+		applyServiceScalingOverrides(services, { web: { replicas: 3 } });
+		expect(services.find((s) => s.name === "db")?.replicas).toBe(2);
+	});
+});
+
+describe("nomad builder — deploy stamp forces a re-pull", () => {
+	it("stamps a job-level meta.deployed_at on every deploy", async () => {
+		// getBuildNomadCommand always stamps so Nomad creates a NEW alloc (force_pull
+		// only re-pulls on alloc creation; an unchanged spec would no-op).
+		const cmd = await getBuildNomadCommand(compose);
+		const hcl = Buffer.from(
+			cmd.match(/echo "([A-Za-z0-9+/=]+)" \| base64 -d/)?.[1] ?? "",
+			"base64",
+		).toString("utf8");
+		expect(hcl).toContain("meta {");
+		expect(hcl).toContain("deployed_at =");
 	});
 });
