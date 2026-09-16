@@ -153,6 +153,10 @@ export const applications = pgTable("application", {
 	ulimitsSwarm: json("ulimitsSwarm").$type<UlimitsSwarm>(),
 	//
 	replicas: integer("replicas").default(1).notNull(),
+	// Set true when a redeploy-affecting setting changes (env, build, ports, mounts,
+	// resources, replicas, autoscaling, domains, …) and cleared on deploy/redeploy.
+	// Drives the "Redeploy needed" badge. Same mechanism as compose.pendingDeploy.
+	pendingDeploy: boolean("pendingDeploy").notNull().default(false),
 	// Nomad horizontal autoscaling for this app. When enabled, the app's Nomad
 	// job gets a scaling{} block (min/max + CPU/memory target) that the Nomad
 	// Autoscaler drives — same mechanism compose services get via x-nomad-scaling.

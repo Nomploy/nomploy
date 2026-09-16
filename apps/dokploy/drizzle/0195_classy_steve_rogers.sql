@@ -1,0 +1,1 @@
+ALTER TABLE "application" ADD COLUMN "pendingDeploy" boolean DEFAULT false NOT NULL;
