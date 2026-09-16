@@ -333,7 +333,7 @@ const Service = (
 															appName={data?.appName || ""}
 															serverId={data?.serverId || undefined}
 														/>
-														<ScheduleScale composeId={composeId} />
+														<ScheduleScale id={composeId} type="compose" />
 														<ShowNomadAllocations
 															appName={data?.appName || ""}
 															serverId={data?.serverId || undefined}

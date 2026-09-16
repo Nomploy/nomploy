@@ -38,6 +38,8 @@ import { ShowVolumeBackups } from "@/components/dashboard/application/volume-bac
 import { DeleteService } from "@/components/dashboard/compose/delete-service";
 import { ContainerFreeMonitoring } from "@/components/dashboard/monitoring/free/container/show-free-container-monitoring";
 import { ContainerPaidMonitoring } from "@/components/dashboard/monitoring/paid/container/show-paid-container-monitoring";
+import { ScheduleScale } from "@/components/dashboard/nomad/scaling/schedule-scale";
+import { ServiceMetricsGraph } from "@/components/dashboard/nomad/scaling/service-metrics-graph";
 import { ShowNomadScaling } from "@/components/dashboard/nomad/scaling/show-nomad-scaling";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
 import { AdvanceBreadcrumb } from "@/components/shared/advance-breadcrumb";
@@ -426,6 +428,11 @@ const Service = (
 													appName={data?.appName || ""}
 													serverId={data?.serverId || undefined}
 												/>
+												<ServiceMetricsGraph
+													appName={data?.appName || ""}
+													serverId={data?.serverId || undefined}
+												/>
+												<ScheduleScale id={applicationId} type="application" />
 												<ShowDeployStrategy
 													applicationId={applicationId}
 													appName={data?.appName || undefined}
