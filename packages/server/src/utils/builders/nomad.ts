@@ -1165,14 +1165,17 @@ const generateHostsAliasTemplate = (
 	services: NomadServiceSpec[],
 	self: NomadServiceSpec,
 ): { template: string; volume: string } | null => {
-	const siblings = services.filter(
-		(s) => s.name !== self.name && s.ports.length > 0,
-	);
+	const siblings = services
+		.filter((s) => s.name !== self.name)
+		.map((s) => ({ name: s.name, primary: s.ports[0] }))
+		.filter(
+			(s): s is { name: string; primary: NomadPort } => s.primary != null,
+		);
 	if (siblings.length === 0) return null;
 
 	const ranges = siblings
 		.map((s) => {
-			const svc = `${appName}-${s.name}-${s.ports[0].to}`;
+			const svc = `${appName}-${s.name}-${s.primary.to}`;
 			// `nomadService` (Nomad-native discovery) not `service` (Consul): the cluster
 			// runs Consul ACLs and Nomad templates get no Consul token, so a Consul query
 			// 403s — nomadService uses the alloc's own Nomad identity. .Address is the
@@ -1214,8 +1217,8 @@ const generateNomadDiscoveryService = (
 	appName: string,
 	service: NomadServiceSpec,
 ): string => {
-	if (service.ports.length === 0) return "";
 	const primary = service.ports[0];
+	if (!primary) return "";
 	const name = `${appName}-${service.name}-${primary.to}`;
 	return `    service {
       name     = "${name}"
