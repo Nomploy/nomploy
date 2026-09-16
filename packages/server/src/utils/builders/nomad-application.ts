@@ -174,6 +174,10 @@ export const generateApplicationNomadJob = (
 			autoPromote: application.autoPromote ?? false,
 			healthCheck: spec.ports.length > 0 ? "checks" : "task_states",
 		},
+		undefined,
+		// Stamp every deploy so Nomad creates a new alloc and re-pulls the image
+		// (force_pull no-ops on an unchanged spec). See generateJobMeta in nomad.ts.
+		new Date().toISOString(),
 	);
 };
 
