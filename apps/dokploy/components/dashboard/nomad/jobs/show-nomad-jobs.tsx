@@ -101,8 +101,20 @@ export const ShowNomadJobs = ({ serverId }: { serverId?: string }) => {
 									<StatusBadge status={job.Status} />
 								</TableCell>
 								<TableCell>
-									{job.JobSummary?.Summary &&
-										Object.entries(job.JobSummary.Summary).map(
+									{(() => {
+										// Nomad keeps stale summary keys for groups a job no longer has
+										// (e.g. after switching a compose from multi-group to single-group),
+										// so JobSummary.Summary can list removed groups as "0/0". Show only
+										// groups with active allocations; fall back to all when a job has
+										// none running (so a stopped/pending job still shows its groups).
+										const entries: [string, any][] = Object.entries(
+											job.JobSummary?.Summary ?? {},
+										);
+										const active = entries.filter(
+											([, s]: [string, any]) =>
+												s.Running + s.Starting + s.Queued > 0,
+										);
+										return (active.length > 0 ? active : entries).map(
 											([group, summary]: [string, any]) => (
 												<div key={group} className="text-sm">
 													{group}: {summary.Running}/
@@ -110,7 +122,8 @@ export const ShowNomadJobs = ({ serverId }: { serverId?: string }) => {
 													running
 												</div>
 											),
-										)}
+										);
+									})()}
 								</TableCell>
 								<TableCell>
 									<div className="flex gap-1">
