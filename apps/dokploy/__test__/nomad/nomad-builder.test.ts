@@ -305,6 +305,43 @@ volumes:
 		expect(hcl).toContain('target = "/cache"');
 	});
 
+	it("renders inline compose configs as file-mount templates", async () => {
+		const cfgCompose = {
+			...compose,
+			appName: "cfgjob",
+			composeFile: `
+services:
+  web:
+    image: nginx:alpine
+    configs:
+      - source: nginx_conf
+        target: /etc/nginx/nginx.conf
+      - shorty
+configs:
+  nginx_conf:
+    content: |
+      server { listen 8080; }
+  shorty:
+    content: "hello there"
+`,
+			domains: [],
+		};
+
+		const cmd = await getBuildNomadCommand(cfgCompose);
+		const hcl = Buffer.from(
+			cmd.match(/echo "([A-Za-z0-9+/=]+)" \| base64 -d/)?.[1] ?? "",
+			"base64",
+		).toString("utf8");
+
+		// Inline config content → a Nomad template stanza with the content verbatim…
+		expect(hcl).toContain("template {");
+		expect(hcl).toContain("server { listen 8080; }");
+		expect(hcl).toContain("hello there");
+		// …mounted at the long-syntax target and the short-syntax default (/<name>).
+		expect(hcl).toContain(":/etc/nginx/nginx.conf");
+		expect(hcl).toContain(":/shorty");
+	});
+
 	it("emits node_pool only when the compose targets an autoscaling group", async () => {
 		// No pool → the job runs in the default pool (no node_pool stanza).
 		const defCmd = await getBuildNomadCommand(compose);

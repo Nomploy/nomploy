@@ -26,8 +26,19 @@ export const parseComposeToNomadServices = (
 	// volume (`db_data:/path`) apart from a bind mount (`/host:/path`, `./rel:/path`).
 	const declaredVolumes = new Set(Object.keys(spec.volumes ?? {}));
 
+	// Inline `configs:` content → rendered into the alloc as file mounts (a Nomad
+	// template stanza + a docker mount at the config's target). Only configs with a
+	// literal `content:` are supported here; `file:`/`external:` configs reference
+	// repo files that aren't available when parsing just the YAML string.
+	const configContents = new Map<string, string>();
+	for (const [cname, def] of Object.entries(spec.configs ?? {})) {
+		if (typeof def?.content === "string") {
+			configContents.set(cname, def.content);
+		}
+	}
+
 	return Object.entries(spec.services).map(([name, service]) =>
-		convertService(name, service, envVars, declaredVolumes),
+		convertService(name, service, envVars, declaredVolumes, configContents),
 	);
 };
 
@@ -39,6 +50,7 @@ const convertService = (
 	service: DefinitionsService,
 	envVars: Record<string, string>,
 	declaredVolumes: Set<string>,
+	configContents: Map<string, string>,
 ): NomadServiceSpec => {
 	const image = service.image || name;
 	const ports = extractPorts(service);
@@ -49,6 +61,7 @@ const convertService = (
 	const resources = extractResources(service);
 	const scaling = extractScaling(service);
 	const volumes = extractVolumes(service, declaredVolumes);
+	const fileMounts = extractFileMounts(service, configContents);
 
 	return {
 		name,
@@ -61,7 +74,32 @@ const convertService = (
 		resources,
 		scaling,
 		volumes,
+		fileMounts,
 	};
+};
+
+/**
+ * Map a service's `configs:` (short `- name` or long `{source, target}`) to file
+ * mounts, using the inline content collected from the top-level `configs:` block.
+ * Short syntax and a missing target default to `/<config-name>` (Docker's default
+ * config mount path). Configs without inline content (file/external) are skipped.
+ */
+const extractFileMounts = (
+	service: DefinitionsService,
+	configContents: Map<string, string>,
+): NomadServiceSpec["fileMounts"] => {
+	const svcConfigs = service.configs;
+	if (!svcConfigs || svcConfigs.length === 0) return undefined;
+	const out: NonNullable<NomadServiceSpec["fileMounts"]> = [];
+	for (const c of svcConfigs) {
+		const source = typeof c === "string" ? c : c.source;
+		if (!source) continue;
+		const content = configContents.get(source);
+		if (content == null) continue;
+		const target = typeof c === "string" || !c.target ? `/${source}` : c.target;
+		out.push({ content, mountPath: target });
+	}
+	return out.length > 0 ? out : undefined;
 };
 
 /**
