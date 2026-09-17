@@ -59,15 +59,17 @@ interface Props {
 // Nomad-scheduled apps: logs come from the running allocation of the app's job
 // (jobId === appName), via the Nomad API (works across cluster nodes) rather
 // than a local docker container.
-const NomadAppLogs = ({
-	appName,
-	serverId,
-}: {
-	appName: string;
-	serverId?: string;
-}) => {
+const NomadAppLogs = ({ appName }: { appName: string; serverId?: string }) => {
+	// Nomad is ONE cluster managed by the control-plane agent (the panel holds its
+	// token); worker/other server nodes don't independently serve authed Nomad
+	// queries — the deploy path already submits every job from the control plane
+	// for exactly this reason. So logs/allocations are always read from the control
+	// plane (serverId omitted), regardless of which node the job is pinned to;
+	// /client/fs/logs is forwarded to the owning node by the server. Passing the
+	// resource's serverId here queried that server's (empty/misconfigured) Nomad
+	// and returned no allocations, so a running DB showed "No running allocation".
 	const { data: allocs, isPending } = api.nomad.getJobAllocations.useQuery(
-		{ jobId: appName, serverId },
+		{ jobId: appName },
 		{ enabled: !!appName, refetchInterval: 10000 },
 	);
 	// Show EVERY allocation, newest first — not just running ones. A database (or
@@ -101,7 +103,6 @@ const NomadAppLogs = ({
 			allocId: allocId || "",
 			taskName: taskName || "",
 			logType,
-			serverId,
 		},
 		{ enabled: !!allocId && !!taskName, refetchInterval: 5000 },
 	);
