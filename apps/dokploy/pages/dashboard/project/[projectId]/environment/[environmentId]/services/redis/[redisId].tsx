@@ -282,6 +282,7 @@ const Redis = (
 															<div> */}
 															<ContainerFreeMonitoring
 																appName={data?.appName || ""}
+															appType="nomad"
 															/>
 															{/* </div> */}
 															{/* )} */}

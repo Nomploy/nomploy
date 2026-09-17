@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ServiceMetricsGraph } from "@/components/dashboard/nomad/scaling/service-metrics-graph";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { api } from "@/utils/api";
@@ -115,7 +116,39 @@ export const convertMemoryToBytes = (
 	}
 };
 
+/**
+ * The Monitoring tab. Nomad-scheduled services (databases, apps, translated
+ * compose) read CPU/memory from Nomad telemetry via ServiceMetricsGraph — the
+ * old docker-stats-over-SSH path returned zeros for cluster-scheduled containers.
+ * Non-Nomad (legacy docker-compose/stack on the host) keeps the docker-stats view.
+ */
 export const ContainerFreeMonitoring = ({
+	appName,
+	appType = "application",
+}: Props) => {
+	if (appType === "nomad") {
+		return <NomadServiceMonitoring appName={appName} />;
+	}
+	return <DockerContainerMonitoring appName={appName} appType={appType} />;
+};
+
+// CPU + memory from Nomad's per-alloc telemetry. Block/Network I/O are not part
+// of Nomad's default per-alloc metrics, so they're intentionally omitted rather
+// than shown as always-zero.
+const NomadServiceMonitoring = ({ appName }: { appName: string }) => (
+	<div className="flex flex-col gap-4 rounded-xl bg-background">
+		<header className="space-y-1">
+			<h1 className="font-semibold text-2xl tracking-tight">Monitoring</h1>
+			<p className="text-muted-foreground text-sm">
+				Live CPU and memory from Nomad telemetry, summed across the service's
+				task groups.
+			</p>
+		</header>
+		<ServiceMetricsGraph appName={appName} />
+	</div>
+);
+
+const DockerContainerMonitoring = ({
 	appName,
 	appType = "application",
 }: Props) => {
