@@ -34,7 +34,6 @@ import { AddCompose } from "@/components/dashboard/project/add-compose";
 import { AddDatabase } from "@/components/dashboard/project/add-database";
 import { AddImport } from "@/components/dashboard/project/add-import";
 import { AddPack } from "@/components/dashboard/project/add-pack";
-import { AddTemplate } from "@/components/dashboard/project/add-template";
 import { AdvancedEnvironmentSelector } from "@/components/dashboard/project/advanced-environment-selector";
 import { DuplicateProject } from "@/components/dashboard/project/duplicate-project";
 import { EnvironmentVariables } from "@/components/dashboard/project/environment-variables";
@@ -1069,13 +1068,12 @@ const EnvironmentPage = (
 												</Button>
 											</DropdownMenuTrigger>
 											<DropdownMenuContent
-												className="w-[200px] space-y-2"
+												className="w-[220px] space-y-1"
 												align="end"
 											>
-												<DropdownMenuLabel className="text-sm font-normal">
-													Actions
+												<DropdownMenuLabel className="font-normal text-muted-foreground text-xs">
+													Build your own
 												</DropdownMenuLabel>
-												<DropdownMenuSeparator />
 												<AddApplication
 													projectName={projectData?.name}
 													environmentId={environmentId}
@@ -1088,11 +1086,18 @@ const EnvironmentPage = (
 													projectName={projectData?.name}
 													environmentId={environmentId}
 												/>
-												<AddTemplate environmentId={environmentId} />
+												<DropdownMenuSeparator />
+												<DropdownMenuLabel className="font-normal text-muted-foreground text-xs">
+													From a catalog
+												</DropdownMenuLabel>
 												<AddPack
 													projectName={projectData?.name}
 													environmentId={environmentId}
 												/>
+												<DropdownMenuSeparator />
+												<DropdownMenuLabel className="font-normal text-muted-foreground text-xs">
+													Tools
+												</DropdownMenuLabel>
 												<AddAiAssistant
 													projectName={projectData?.name}
 													environmentId={environmentId}
