@@ -29,18 +29,17 @@ interface TaskGroupSpec {
  * (min/max + whether the Nomad Autoscaler is driving it, from the job's
  * scaling{} block) and a manual "scale to N" control.
  */
-export const ShowNomadScaling = ({ appName, serverId }: Props) => {
+export const ShowNomadScaling = ({ appName }: Props) => {
+	// One cluster: read the job + scale + submit scales from the control plane
+	// (no serverId), like logs/versions. [[nomploy-nomad-reads-control-plane]]
 	const {
 		data: job,
 		isLoading: jobLoading,
 		isError: jobError,
 		error: jobErr,
-	} = api.nomad.getJob.useQuery(
-		{ jobId: appName, serverId },
-		{ enabled: !!appName },
-	);
+	} = api.nomad.getJob.useQuery({ jobId: appName }, { enabled: !!appName });
 	const { data: scale, refetch } = api.nomad.getJobScale.useQuery(
-		{ jobId: appName, serverId },
+		{ jobId: appName },
 		{ enabled: !!appName, refetchInterval: 10000 },
 	);
 	const scaleMut = api.nomad.scaleNomadJob.useMutation();
@@ -81,7 +80,6 @@ export const ShowNomadScaling = ({ appName, serverId }: Props) => {
 				jobId: appName,
 				group: g.Name,
 				count,
-				serverId,
 			});
 			toast.success(`Scaled ${g.Name} to ${count}`);
 			await refetch();
