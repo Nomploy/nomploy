@@ -205,7 +205,7 @@ const Redis = (
 												isCloud && data?.serverId
 													? "md:grid-cols-5"
 													: data?.serverId
-														? "md:grid-cols-4"
+														? "md:grid-cols-5"
 														: "md:grid-cols-5",
 											)}
 										>
@@ -218,12 +218,9 @@ const Redis = (
 											{permissions?.logs.read && (
 												<TabsTrigger value="logs">Logs</TabsTrigger>
 											)}
-											{permissions?.monitoring.read &&
-												((data?.serverId && isCloud) || !data?.server) && (
-													<TabsTrigger value="monitoring">
-														Monitoring
-													</TabsTrigger>
-												)}
+											{permissions?.monitoring.read && (
+												<TabsTrigger value="monitoring">Monitoring</TabsTrigger>
+											)}
 											{permissions?.service.create && (
 												<TabsTrigger value="advanced">Advanced</TabsTrigger>
 											)}
@@ -282,7 +279,7 @@ const Redis = (
 															<div> */}
 															<ContainerFreeMonitoring
 																appName={data?.appName || ""}
-															appType="nomad"
+																appType="nomad"
 															/>
 															{/* </div> */}
 															{/* )} */}

@@ -206,7 +206,7 @@ const MySql = (
 													isCloud && data?.serverId
 														? "md:grid-cols-6"
 														: data?.serverId
-															? "md:grid-cols-5"
+															? "md:grid-cols-6"
 															: "md:grid-cols-6",
 												)}
 											>
@@ -219,12 +219,11 @@ const MySql = (
 												{permissions?.logs.read && (
 													<TabsTrigger value="logs">Logs</TabsTrigger>
 												)}
-												{permissions?.monitoring.read &&
-													((data?.serverId && isCloud) || !data?.server) && (
-														<TabsTrigger value="monitoring">
-															Monitoring
-														</TabsTrigger>
-													)}
+												{permissions?.monitoring.read && (
+													<TabsTrigger value="monitoring">
+														Monitoring
+													</TabsTrigger>
+												)}
 												<TabsTrigger value="backups">Backups</TabsTrigger>
 												{permissions?.service.create && (
 													<TabsTrigger value="advanced">Advanced</TabsTrigger>
@@ -263,7 +262,7 @@ const MySql = (
 															<>
 																<ContainerFreeMonitoring
 																	appName={data?.appName || ""}
-																appType="nomad"
+																	appType="nomad"
 																/>
 															</>
 														)}
