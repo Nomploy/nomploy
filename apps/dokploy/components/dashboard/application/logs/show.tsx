@@ -21,6 +21,8 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/utils/api";
+import { TerminalLine } from "../../docker/logs/terminal-line";
+import { parseLogs } from "../../docker/logs/utils";
 export const DockerLogs = dynamic(
 	() =>
 		import("@/components/dashboard/docker/logs/docker-logs-id").then(
@@ -107,8 +109,13 @@ const NomadAppLogs = ({ appName }: { appName: string; serverId?: string }) => {
 		{ enabled: !!allocId && !!taskName, refetchInterval: 5000 },
 	);
 
+	// Colorize the raw log text the same way the Docker/alloc log viewers do
+	// (ANSI → HTML, per-line error/warn/success classification) instead of a flat
+	// green dump.
+	const parsed = logs ? parseLogs(logs) : [];
+
 	// Tail to the newest lines on load and each refresh.
-	const scrollRef = useRef<HTMLPreElement>(null);
+	const scrollRef = useRef<HTMLDivElement>(null);
 	useEffect(() => {
 		const el = scrollRef.current;
 		if (el) el.scrollTop = el.scrollHeight;
@@ -164,18 +171,30 @@ const NomadAppLogs = ({ appName }: { appName: string; serverId?: string }) => {
 						</SelectContent>
 					</Select>
 				</div>
-				<pre
+				<div
 					ref={scrollRef}
-					className="bg-black text-green-400 p-4 rounded-lg overflow-auto max-h-[500px] text-xs font-mono whitespace-pre-wrap"
+					className="max-h-[500px] space-y-0 overflow-y-auto rounded-md border bg-[#fafafa] p-3 custom-logs-scrollbar dark:bg-[#050506]"
 				>
-					{!allocId
-						? sorted.length === 0
-							? "No allocations yet"
-							: "Select an allocation"
-						: isLoading
-							? "Loading..."
-							: logs || "No logs available"}
-				</pre>
+					{!allocId ? (
+						<span className="font-mono text-muted-foreground text-xs">
+							{sorted.length === 0
+								? "No allocations yet"
+								: "Select an allocation"}
+						</span>
+					) : isLoading ? (
+						<span className="font-mono text-muted-foreground text-xs">
+							Loading...
+						</span>
+					) : parsed.length > 0 ? (
+						parsed.map((log, i) => (
+							<TerminalLine key={`${log.rawTimestamp}-${i}`} log={log} />
+						))
+					) : (
+						<span className="font-mono text-muted-foreground text-xs">
+							No logs available
+						</span>
+					)}
+				</div>
 			</CardContent>
 		</Card>
 	);
