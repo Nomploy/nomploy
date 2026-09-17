@@ -44,12 +44,25 @@ const REGISTRIES = [
 
 // Brand logos come from Simple Icons' CDN, keyed by a slug derived from the pack
 // name. Most packs are named after the tool (redis, grafana, traefik…) so this
-// hits often; when it 404s we fall back to a generic box icon.
-const logoSlug = (name: string) =>
-	name
+// hits often; when it 404s we fall back to a generic box icon. A few pack names
+// differ from their Simple Icons slug — map those explicitly.
+const LOGO_ALIASES: Record<string, string> = {
+	postgres: "postgresql",
+	postgresql: "postgresql",
+	mariadb: "mariadb",
+	mongo: "mongodb",
+	mongodb: "mongodb",
+	elasticsearch: "elasticsearch",
+	rabbitmq: "rabbitmq",
+};
+
+const logoSlug = (name: string) => {
+	const base = name
 		.toLowerCase()
 		.replace(/[^a-z0-9]+/g, "")
 		.trim();
+	return LOGO_ALIASES[base] ?? base;
+};
 
 const PackLogo = ({ name }: { name: string }) => {
 	const [errored, setErrored] = useState(false);
