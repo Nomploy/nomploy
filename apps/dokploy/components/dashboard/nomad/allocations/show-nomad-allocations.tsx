@@ -5,7 +5,7 @@ import {
 	MemoryStick,
 	RefreshCw,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -249,6 +249,14 @@ const AllocLogViewer = ({
 	// and level keywords via getLogType.
 	const parsed = logs ? parseLogs(logs) : [];
 
+	// Jump to the newest lines whenever the log content changes (initial load and
+	// each 5s poll) so the latest output is what you see first, like a tail.
+	const scrollRef = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		const el = scrollRef.current;
+		if (el) el.scrollTop = el.scrollHeight;
+	}, [logs]);
+
 	return (
 		<div className="relative">
 			<Button
@@ -259,7 +267,10 @@ const AllocLogViewer = ({
 			>
 				<RefreshCw className="h-3 w-3" />
 			</Button>
-			<div className="overflow-y-auto max-h-[300px] space-y-0 border p-3 bg-[#fafafa] dark:bg-[#050506] rounded-md custom-logs-scrollbar">
+			<div
+				ref={scrollRef}
+				className="overflow-y-auto max-h-[300px] space-y-0 border p-3 bg-[#fafafa] dark:bg-[#050506] rounded-md custom-logs-scrollbar"
+			>
 				{isLoading ? (
 					<span className="text-xs text-muted-foreground font-mono">
 						Loading...
