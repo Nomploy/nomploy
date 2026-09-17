@@ -192,16 +192,14 @@ const Libsql = (
 												isCloud && data?.serverId
 													? "md:grid-cols-6"
 													: data?.serverId
-														? "md:grid-cols-5"
+														? "md:grid-cols-6"
 														: "md:grid-cols-6",
 											)}
 										>
 											<TabsTrigger value="general">General</TabsTrigger>
 											<TabsTrigger value="environment">Environment</TabsTrigger>
 											<TabsTrigger value="logs">Logs</TabsTrigger>
-											{((data?.serverId && isCloud) || !data?.server) && (
-												<TabsTrigger value="monitoring">Monitoring</TabsTrigger>
-											)}
+											{<TabsTrigger value="monitoring">Monitoring</TabsTrigger>}
 											<TabsTrigger value="backups">Backups</TabsTrigger>
 											<TabsTrigger value="advanced">Advanced</TabsTrigger>
 										</TabsList>
@@ -256,7 +254,7 @@ const Libsql = (
 															<div> */}
 														<ContainerFreeMonitoring
 															appName={data?.appName || ""}
-														appType="nomad"
+															appType="nomad"
 														/>
 														{/* </div> */}
 														{/* )} */}

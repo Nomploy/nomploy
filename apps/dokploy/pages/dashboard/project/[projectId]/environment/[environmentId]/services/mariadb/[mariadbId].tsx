@@ -206,7 +206,7 @@ const Mariadb = (
 												isCloud && data?.serverId
 													? "md:grid-cols-6"
 													: data?.serverId
-														? "md:grid-cols-5"
+														? "md:grid-cols-6"
 														: "md:grid-cols-6",
 											)}
 										>
@@ -219,12 +219,9 @@ const Mariadb = (
 											{permissions?.logs.read && (
 												<TabsTrigger value="logs">Logs</TabsTrigger>
 											)}
-											{permissions?.monitoring.read &&
-												((data?.serverId && isCloud) || !data?.server) && (
-													<TabsTrigger value="monitoring">
-														Monitoring
-													</TabsTrigger>
-												)}
+											{permissions?.monitoring.read && (
+												<TabsTrigger value="monitoring">Monitoring</TabsTrigger>
+											)}
 											<TabsTrigger value="backups">Backups</TabsTrigger>
 											{permissions?.service.create && (
 												<TabsTrigger value="advanced">Advanced</TabsTrigger>
@@ -284,7 +281,7 @@ const Mariadb = (
 															<div> */}
 															<ContainerFreeMonitoring
 																appName={data?.appName || ""}
-															appType="nomad"
+																appType="nomad"
 															/>
 															{/* </div> */}
 															{/* )} */}
