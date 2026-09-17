@@ -2,6 +2,7 @@ import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { badgeStateColor } from "@/components/dashboard/application/logs/show";
+import { ServiceMetricsGraph } from "@/components/dashboard/nomad/scaling/service-metrics-graph";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,6 +31,39 @@ interface Props {
 }
 
 export const ComposeFreeMonitoring = ({
+	appName,
+	appType = "stack",
+	serverId,
+}: Props) => {
+	// Nomad-translated compose: read CPU/memory from Nomad telemetry for the whole
+	// job (appName), rather than picking a single docker container (which returns
+	// zeros for cluster-scheduled allocs). [[nomploy-nomad-reads-control-plane]]
+	if (appType === "nomad") {
+		return (
+			<>
+				<CardHeader>
+					<CardTitle className="text-xl">Monitoring</CardTitle>
+					<CardDescription>
+						Live CPU and memory from Nomad telemetry, summed across the
+						compose's task groups.
+					</CardDescription>
+				</CardHeader>
+				<CardContent>
+					<ServiceMetricsGraph appName={appName} />
+				</CardContent>
+			</>
+		);
+	}
+	return (
+		<ComposeDockerMonitoring
+			appName={appName}
+			appType={appType}
+			serverId={serverId}
+		/>
+	);
+};
+
+const ComposeDockerMonitoring = ({
 	appName,
 	appType = "stack",
 	serverId,

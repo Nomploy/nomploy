@@ -263,6 +263,7 @@ const MySql = (
 															<>
 																<ContainerFreeMonitoring
 																	appName={data?.appName || ""}
+																appType="nomad"
 																/>
 															</>
 														)}
