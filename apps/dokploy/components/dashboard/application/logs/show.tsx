@@ -1,6 +1,6 @@
 import { Loader2 } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import {
 	Card,
@@ -38,9 +38,12 @@ export const badgeStateColor = (state: string) => {
 			return "green";
 		case "exited":
 		case "shutdown":
+		case "failed":
+		case "lost":
 			return "red";
 		case "accepted":
 		case "created":
+		case "pending":
 			return "blue";
 		default:
 			return "default";
@@ -67,19 +70,30 @@ const NomadAppLogs = ({
 		{ jobId: appName, serverId },
 		{ enabled: !!appName, refetchInterval: 10000 },
 	);
+	// Show EVERY allocation, newest first — not just running ones. A database (or
+	// app) that is still starting or that crash-looped on boot has no running
+	// alloc, and its logs are exactly what explains why; filtering to running hid
+	// them. Nomad keeps a dead alloc's logs until GC, so we can still read them.
 	// biome-ignore lint/suspicious/noExplicitAny: raw Nomad alloc stubs
-	const running = (allocs || []).filter(
-		(a: any) => a.ClientStatus === "running",
+	const sorted = [...(allocs || [])].sort(
+		// biome-ignore lint/suspicious/noExplicitAny: raw Nomad alloc stubs
+		(a: any, b: any) => (b.CreateTime ?? 0) - (a.CreateTime ?? 0),
 	);
 	const [allocId, setAllocId] = useState<string | undefined>();
 	const [logType, setLogType] = useState<"stdout" | "stderr">("stdout");
 
 	useEffect(() => {
-		if (!allocId && running.length > 0) setAllocId(running[0].ID);
-	}, [running, allocId]);
+		if (allocId && sorted.some((a: any) => a.ID === allocId)) return;
+		// Prefer the newest running alloc; otherwise the newest alloc overall (so a
+		// crashed/pending deploy still surfaces its logs).
+		// biome-ignore lint/suspicious/noExplicitAny: raw Nomad alloc stubs
+		const preferred =
+			sorted.find((a: any) => a.ClientStatus === "running") ?? sorted[0];
+		if (preferred) setAllocId(preferred.ID);
+	}, [sorted, allocId]);
 
 	// biome-ignore lint/suspicious/noExplicitAny: raw Nomad alloc stub
-	const current: any = running.find((a: any) => a.ID === allocId);
+	const current: any = sorted.find((a: any) => a.ID === allocId);
 	const taskName = current?.TaskGroup as string | undefined;
 
 	const { data: logs, isLoading } = api.nomad.getAllocationLogs.useQuery(
@@ -92,12 +106,20 @@ const NomadAppLogs = ({
 		{ enabled: !!allocId && !!taskName, refetchInterval: 5000 },
 	);
 
+	// Tail to the newest lines on load and each refresh.
+	const scrollRef = useRef<HTMLPreElement>(null);
+	useEffect(() => {
+		const el = scrollRef.current;
+		if (el) el.scrollTop = el.scrollHeight;
+	}, [logs]);
+
 	return (
 		<Card className="bg-background">
 			<CardHeader>
 				<CardTitle className="text-xl">Logs</CardTitle>
 				<CardDescription>
-					Logs from the running Nomad allocation, in real time
+					Logs from the Nomad allocation, in real time (pick an older/failed
+					allocation to see why a deploy didn't start)
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
@@ -115,13 +137,16 @@ const NomadAppLogs = ({
 						</SelectTrigger>
 						<SelectContent>
 							<SelectGroup>
-								{running.map((a: any) => (
+								{/* biome-ignore lint/suspicious/noExplicitAny: raw Nomad alloc stubs */}
+								{sorted.map((a: any) => (
 									<SelectItem key={a.ID} value={a.ID}>
 										{a.TaskGroup} ({a.ID.slice(0, 8)}){" "}
-										<Badge variant="green">running</Badge>
+										<Badge variant={badgeStateColor(a.ClientStatus)}>
+											{a.ClientStatus}
+										</Badge>
 									</SelectItem>
 								))}
-								<SelectLabel>Allocations ({running.length})</SelectLabel>
+								<SelectLabel>Allocations ({sorted.length})</SelectLabel>
 							</SelectGroup>
 						</SelectContent>
 					</Select>
@@ -138,9 +163,14 @@ const NomadAppLogs = ({
 						</SelectContent>
 					</Select>
 				</div>
-				<pre className="bg-black text-green-400 p-4 rounded-lg overflow-auto max-h-[500px] text-xs font-mono whitespace-pre-wrap">
+				<pre
+					ref={scrollRef}
+					className="bg-black text-green-400 p-4 rounded-lg overflow-auto max-h-[500px] text-xs font-mono whitespace-pre-wrap"
+				>
 					{!allocId
-						? "No running allocation"
+						? sorted.length === 0
+							? "No allocations yet"
+							: "Select an allocation"
 						: isLoading
 							? "Loading..."
 							: logs || "No logs available"}
