@@ -538,6 +538,25 @@ const generateJobMeta = (deployedAt?: string): string =>
 `
 		: "";
 
+/**
+ * A service with a node-local writable volume must always land on the node that
+ * holds that volume's data — otherwise a reschedule to another node mounts a
+ * fresh, empty volume (data "loss") or fails on a node without the docker
+ * volumes plugin enabled. Pin such jobs to the control-plane node (where the
+ * panel creates the volume on first deploy), mirroring how databases pin. RO or
+ * volumeless services stay free to spread. Drop this once state lives in shared
+ * (S3/RWX) storage — then the service is stateless and can spread again.
+ */
+const controlPlanePin = (services: NomadServiceSpec[]): string =>
+	services.some((s) => (s.volumes ?? []).some((v) => v.mode !== "ro"))
+		? `  constraint {
+    attribute = "\${meta.nomploy_control_plane}"
+    operator  = "="
+    value     = "true"
+  }
+`
+		: "";
+
 export const deriveUpdateConfig = (
 	services: NomadServiceSpec[],
 	allowCanaryWithVolume = false,
@@ -664,7 +683,7 @@ ${resourcesBlock}
   namespace = "default"
   type      = "service"
 ${nodePoolLine}
-${generateJobMeta(deployedAt)}${generateUpdateBlock(update)}
+${controlPlanePin(services)}${generateJobMeta(deployedAt)}${generateUpdateBlock(update)}
 
   group "${appName}" {
     count = ${groupScaling ? groupScaling.min : 1}
@@ -729,7 +748,7 @@ export const generateNomadIndependentComposeJobSpec = (
   namespace = "default"
   type      = "service"
 ${nodePoolLine}
-${generateJobMeta(deployedAt)}${generateUpdateBlock(update)}
+${controlPlanePin(services)}${generateJobMeta(deployedAt)}${generateUpdateBlock(update)}
 
 ${taskGroups}
 }
@@ -902,7 +921,7 @@ export const generateNomadJobSpec = (
   namespace = "default"
   type      = "service"
 ${nodePoolLine}
-${generateJobMeta(deployedAt)}${generateUpdateBlock(update)}
+${controlPlanePin(services)}${generateJobMeta(deployedAt)}${generateUpdateBlock(update)}
 
 ${taskGroups}
 }
