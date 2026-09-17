@@ -296,6 +296,34 @@ export const ComposeActions = ({ composeId }: Props) => {
 					/>
 				</div>
 			)}
+			{canUpdateService && (
+				<div className="flex flex-row items-center gap-2 rounded-md px-4 py-2 border">
+					{/* Off (default): a writable volume forces a plain rolling restart — a
+					    canary would run a 2nd alloc sharing the same exclusive volume
+					    (corruption risk). On: allow the zero-downtime canary anyway, for
+					    apps that tolerate brief concurrent access (cache, read-mostly,
+					    low-write uploads). Redeploy to apply. */}
+					<span className="text-sm font-medium">Canary with volume</span>
+					<Switch
+						aria-label="Allow canary deploy despite a writable volume"
+						checked={data?.allowCanaryWithVolume ?? false}
+						onCheckedChange={async (enabled) => {
+							await update({
+								composeId,
+								allowCanaryWithVolume: enabled,
+							})
+								.then(async () => {
+									toast.success("Canary-with-volume updated");
+									await refetch();
+								})
+								.catch(() => {
+									toast.error("Error updating canary setting");
+								});
+						}}
+						className="flex flex-row gap-2 items-center data-[state=checked]:bg-primary"
+					/>
+				</div>
+			)}
 		</div>
 	);
 };

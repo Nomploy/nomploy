@@ -205,6 +205,7 @@ export const composeRouter = createTRPCRouter({
 				"env",
 				"command",
 				"deployMode",
+				"allowCanaryWithVolume",
 				"nodePool",
 				"forcePull",
 				"serviceScaling",

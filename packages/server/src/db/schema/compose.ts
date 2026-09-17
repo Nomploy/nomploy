@@ -77,6 +77,14 @@ export const compose = pgTable("compose", {
 	// is triggered. Drives the "Redeploy needed" badge so a config change that only
 	// takes effect on the next deploy is visible.
 	pendingDeploy: boolean("pendingDeploy").notNull().default(false),
+	// Opt-in: allow a zero-downtime canary deploy even when a service has a writable
+	// volume. Off by default because a canary runs a 2nd alloc alongside the old one,
+	// and both would mount the same single-node exclusive volume at once (corruption
+	// risk). Enable only when the app tolerates brief concurrent access to the volume
+	// (cache, read-mostly, low-write uploads) — or once state lives in shared storage.
+	allowCanaryWithVolume: boolean("allowCanaryWithVolume")
+		.notNull()
+		.default(false),
 	// Group-level autoscaling for SHARED mode: scales the single group (all services
 	// together) as a unit. Best for a single-service compose or an all-stateless app —
 	// scaling replicates every task in the group. In independent mode, use per-service

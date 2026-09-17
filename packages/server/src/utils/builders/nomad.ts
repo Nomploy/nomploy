@@ -280,7 +280,10 @@ export const getBuildNomadCommand = async (
 		// services reach each other by name like Docker Compose.
 		// Rolling-update strategy: zero-downtime canary when safe (no RW volume),
 		// else a plain rolling restart — both auto_revert. See deriveUpdateConfig.
-		const update = deriveUpdateConfig(services);
+		const update = deriveUpdateConfig(
+			services,
+			compose.allowCanaryWithVolume ?? false,
+		);
 		// Stamp every deploy so Nomad always creates a new allocation → images get
 		// re-pulled (force_pull is a no-op on an unchanged spec; see generateJobMeta).
 		const deployedAt = new Date().toISOString();
@@ -537,13 +540,17 @@ const generateJobMeta = (deployedAt?: string): string =>
 
 export const deriveUpdateConfig = (
 	services: NomadServiceSpec[],
+	allowCanaryWithVolume = false,
 ): NomadUpdateConfig => {
 	const hasRwVolume = services.some((s) =>
 		(s.volumes ?? []).some((v) => v.mode !== "ro"),
 	);
 	const hasCheck = services.some((s) => s.ports.length > 0);
 	const healthCheck = hasCheck ? "checks" : "task_states";
-	return hasRwVolume
+	// A RW volume normally forces a plain rolling restart (a canary's 2nd alloc
+	// would share the exclusive volume). The opt-in flag lets the user accept that
+	// for apps that tolerate brief concurrent access, restoring zero-downtime.
+	return hasRwVolume && !allowCanaryWithVolume
 		? { healthCheck }
 		: { canary: 1, autoPromote: true, healthCheck };
 };
