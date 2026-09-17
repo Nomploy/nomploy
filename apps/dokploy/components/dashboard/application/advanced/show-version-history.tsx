@@ -23,13 +23,17 @@ interface Props {
  * that version's full spec (image + env + resources) as a new deployment, with
  * no rebuild. Complements the image-based rollback with a true "undo this deploy".
  */
-export const ShowVersionHistory = ({ appName, serverId }: Props) => {
+export const ShowVersionHistory = ({ appName }: Props) => {
+	// Nomad is one cluster; job versions + revert are cluster API calls that only
+	// the control-plane agent (which holds the token) serves — never the resource's
+	// per-server Nomad. Omit serverId so these hit the control plane (see the logs
+	// viewer for the same fix). [[nomploy-nomad-reads-control-plane]]
 	const {
 		data: versions,
 		isLoading,
 		refetch,
 	} = api.nomad.getJobVersions.useQuery(
-		{ jobId: appName || "", serverId },
+		{ jobId: appName || "" },
 		{ enabled: !!appName, refetchInterval: 15000 },
 	);
 	const revert = api.nomad.revertJob.useMutation();
@@ -37,7 +41,7 @@ export const ShowVersionHistory = ({ appName, serverId }: Props) => {
 	const doRevert = async (version: number) => {
 		if (!appName) return;
 		try {
-			await revert.mutateAsync({ jobId: appName, version, serverId });
+			await revert.mutateAsync({ jobId: appName, version });
 			toast.success(`Reverting to version ${version}…`);
 			await refetch();
 		} catch (e) {

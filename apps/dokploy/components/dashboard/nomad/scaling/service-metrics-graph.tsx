@@ -36,9 +36,12 @@ const config = {
  * window — no history before the page was opened (there's no metrics TSDB). Sums
  * cpu%/memory across the service's task groups.
  */
-export const ServiceMetricsGraph = ({ appName, serverId }: Props) => {
+export const ServiceMetricsGraph = ({ appName }: Props) => {
+	// Metrics are scraped from every ready node by the control-plane agent; read
+	// from the control plane (no serverId) so a job pinned to a non-hub node still
+	// reports. [[nomploy-nomad-reads-control-plane]]
 	const { data } = api.nomad.getServiceMetrics.useQuery(
-		{ jobId: appName, serverId },
+		{ jobId: appName },
 		{ enabled: !!appName, refetchInterval: 5000 },
 	);
 	const [points, setPoints] = useState<Point[]>([]);
