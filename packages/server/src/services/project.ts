@@ -48,19 +48,107 @@ export const createProject = async (
 };
 
 export const findProjectById = async (projectId: string) => {
+	// Load only summary columns for each service, not every column. The Dokploy
+	// application table alone is ~99 columns; selecting all of them across every
+	// service type builds a json_build_array that exceeds Postgres's 100-argument
+	// limit ("cannot pass more than 100 arguments to a function"), which broke this
+	// query (and thus opening a project). The list/overview only needs id, name,
+	// status, etc. — full config is fetched per-service via its own `.one` query.
+	const serverCols = { columns: { name: true, serverId: true } } as const;
 	const project = await db.query.projects.findFirst({
 		where: eq(projects.projectId, projectId),
 		with: {
 			environments: {
 				with: {
-					applications: true,
-					compose: true,
-					libsql: true,
-					mariadb: true,
-					mongo: true,
-					mysql: true,
-					postgres: true,
-					redis: true,
+					applications: {
+						with: { server: serverCols },
+						columns: {
+							name: true,
+							applicationId: true,
+							createdAt: true,
+							applicationStatus: true,
+							description: true,
+							serverId: true,
+							icon: true,
+						},
+					},
+					compose: {
+						with: { server: serverCols },
+						columns: {
+							composeId: true,
+							name: true,
+							createdAt: true,
+							composeStatus: true,
+							description: true,
+							serverId: true,
+						},
+					},
+					libsql: {
+						with: { server: serverCols },
+						columns: {
+							libsqlId: true,
+							name: true,
+							createdAt: true,
+							applicationStatus: true,
+							description: true,
+							serverId: true,
+						},
+					},
+					mariadb: {
+						with: { server: serverCols },
+						columns: {
+							mariadbId: true,
+							name: true,
+							createdAt: true,
+							applicationStatus: true,
+							description: true,
+							serverId: true,
+						},
+					},
+					mongo: {
+						with: { server: serverCols },
+						columns: {
+							mongoId: true,
+							name: true,
+							createdAt: true,
+							applicationStatus: true,
+							description: true,
+							serverId: true,
+						},
+					},
+					mysql: {
+						with: { server: serverCols },
+						columns: {
+							mysqlId: true,
+							name: true,
+							createdAt: true,
+							applicationStatus: true,
+							description: true,
+							serverId: true,
+						},
+					},
+					postgres: {
+						with: { server: serverCols },
+						columns: {
+							postgresId: true,
+							name: true,
+							createdAt: true,
+							applicationStatus: true,
+							description: true,
+							serverId: true,
+						},
+					},
+					redis: {
+						with: { server: serverCols },
+						columns: {
+							redisId: true,
+							name: true,
+							createdAt: true,
+							applicationStatus: true,
+							description: true,
+							serverId: true,
+						},
+					},
 				},
 			},
 			projectTags: {
