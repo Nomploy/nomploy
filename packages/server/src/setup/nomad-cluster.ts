@@ -290,6 +290,12 @@ plugin "docker" {
   config {
     allow_privileged = true
     auth { config = "/root/.docker/config.json" }
+    # Allow docker named-volume + host mounts (defaults to false). Required for
+    # any service with a volume that lands on this node; without it the alloc
+    # fails "volumes are not enabled; cannot mount volume".
+    volumes {
+      enabled = true
+    }
   }
 }
 NOMAD
@@ -378,6 +384,12 @@ plugin "docker" {
   config {
     allow_privileged = true
     auth { config = "/root/.docker/config.json" }
+    # Allow docker named-volume + host mounts (defaults to false). Required for
+    # any service with a volume that lands on this node; without it the alloc
+    # fails "volumes are not enabled; cannot mount volume".
+    volumes {
+      enabled = true
+    }
   }
 }
 NOMAD
