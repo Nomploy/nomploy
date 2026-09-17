@@ -163,6 +163,11 @@ plugin "docker" {
     auth {
       config = "/root/.docker/config.json"
     }
+    # Allow docker named-volume + host mounts (defaults to false); volume-backed
+    # services fail "volumes are not enabled" without it.
+    volumes {
+      enabled = true
+    }
   }
 }
 NOMADHCL
