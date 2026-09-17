@@ -117,8 +117,8 @@ export const ShowNomadPackForm = ({ composeId }: Props) => {
 								</SelectTrigger>
 								<SelectContent>
 									{(packs ?? []).map((p) => (
-										<SelectItem key={p} value={p}>
-											{p}
+										<SelectItem key={p.name} value={p.name}>
+											{p.name}
 										</SelectItem>
 									))}
 								</SelectContent>

@@ -491,21 +491,50 @@ export const nomadRouter = createTRPCRouter({
 				});
 			}
 			const name = "nomploy-browse";
+			// List each pack dir and dump its metadata.hcl so we can surface a
+			// description/version/homepage in the gallery (not just a bare name).
 			const cmd = `
 command -v nomad-pack >/dev/null 2>&1 || { echo "__NO_PACK__"; exit 0; }
 nomad-pack registry add "${name}" "${url}" >/dev/null 2>&1 || true
 D=$(ls -d "$HOME/.cache/nomad/packs/${name}/"*/ 2>/dev/null | head -1)
-[ -n "$D" ] && ls -1 "$D" 2>/dev/null | grep '@' | sed 's/@.*//' | sort -u || true
+[ -n "$D" ] || exit 0
+for p in "$D"*@*/; do
+  [ -d "$p" ] || continue
+  b=$(basename "$p"); echo "__PACK__:\${b%@*}"
+  cat "$p/metadata.hcl" 2>/dev/null || true
+  echo "__END__"
+done
 `;
 			try {
 				const { stdout } = input.serverId
 					? await execAsyncRemote(input.serverId, cmd)
 					: await execAsync(cmd);
 				if (stdout.includes("__NO_PACK__")) return [];
-				return stdout
-					.split("\n")
-					.map((s) => s.trim())
-					.filter((s) => s && !s.startsWith("__"));
+				// Parse the __PACK__:name … __END__ blocks; pull the first
+				// description/version/url out of the pack's HCL metadata.
+				const packs: {
+					name: string;
+					description: string;
+					version: string;
+					url: string;
+				}[] = [];
+				const seen = new Set<string>();
+				const blocks = stdout.split("__PACK__:").slice(1);
+				for (const block of blocks) {
+					const nl = block.indexOf("\n");
+					const packName = (nl === -1 ? block : block.slice(0, nl)).trim();
+					if (!packName || seen.has(packName)) continue;
+					seen.add(packName);
+					const body = block.slice(nl + 1).split("__END__")[0] ?? "";
+					const grab = (re: RegExp) => re.exec(body)?.[1]?.trim() ?? "";
+					packs.push({
+						name: packName,
+						description: grab(/description\s*=\s*"([^"]*)"/),
+						version: grab(/version\s*=\s*"([^"]*)"/),
+						url: grab(/url\s*=\s*"([^"]*)"/),
+					});
+				}
+				return packs.sort((a, b) => a.name.localeCompare(b.name));
 			} catch {
 				return [];
 			}
