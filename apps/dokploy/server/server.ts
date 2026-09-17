@@ -12,6 +12,7 @@ import {
 	sendNomployRestartNotifications,
 	setupDirectories,
 } from "@nomploy/server";
+import { waitForDatabase } from "@nomploy/server/db";
 import { config } from "dotenv";
 import next from "next";
 import { NOMPLOY_VERSION } from "./nomploy-version";
@@ -47,8 +48,15 @@ if (process.env.NODE_ENV === "production" && !IS_CLOUD) {
 
 const app = next({ dev, turbopack: process.env.TURBOPACK === "1" });
 const handle = app.getRequestHandler();
-void app.prepare().then(async () => {
+void (async () => {
+	// Wait out a transient DB blip BEFORE Next.js boots — app.prepare() triggers
+	// better-auth DB calls, and an unhandled CONNECT_TIMEOUT there exits the
+	// process (a rolling deploy or raft blip would otherwise fail the new alloc).
+	if (process.env.NODE_ENV === "production" && !IS_CLOUD) {
+		await waitForDatabase();
+	}
 	try {
+		await app.prepare();
 		console.log("Running NomployVersion: ", NOMPLOY_VERSION);
 		const server = http.createServer((req, res) => {
 			handle(req, res);
@@ -123,4 +131,4 @@ void app.prepare().then(async () => {
 	} catch (e) {
 		console.error("Main Server Error", e);
 	}
-});
+})();
