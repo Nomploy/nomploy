@@ -77,17 +77,20 @@ export const deleteServer = async (serverId: string) => {
 };
 
 export const haveActiveServices = async (serverId: string) => {
+	// Only the counts are used below, so select a single id column per relation —
+	// eager-loading every column overflows Postgres's 100-argument json_build_array
+	// limit (the application table alone is ~99 columns).
 	const currentServer = await db.query.server.findFirst({
 		where: eq(server.serverId, serverId),
 		with: {
-			applications: true,
-			compose: true,
-			libsql: true,
-			mariadb: true,
-			mongo: true,
-			mysql: true,
-			postgres: true,
-			redis: true,
+			applications: { columns: { applicationId: true } },
+			compose: { columns: { composeId: true } },
+			libsql: { columns: { libsqlId: true } },
+			mariadb: { columns: { mariadbId: true } },
+			mongo: { columns: { mongoId: true } },
+			mysql: { columns: { mysqlId: true } },
+			postgres: { columns: { postgresId: true } },
+			redis: { columns: { redisId: true } },
 		},
 	});
 
