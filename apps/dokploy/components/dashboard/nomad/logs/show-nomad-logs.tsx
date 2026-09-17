@@ -1,5 +1,5 @@
 import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -123,6 +123,13 @@ const LogViewer = ({
 		{ refetchInterval: 5000 },
 	);
 
+	// Tail behavior: scroll to the newest lines on load and each refresh.
+	const scrollRef = useRef<HTMLPreElement>(null);
+	useEffect(() => {
+		const el = scrollRef.current;
+		if (el) el.scrollTop = el.scrollHeight;
+	}, [logs]);
+
 	return (
 		<div className="relative">
 			<Button
@@ -133,7 +140,10 @@ const LogViewer = ({
 			>
 				<RefreshCw className="h-3 w-3" />
 			</Button>
-			<pre className="bg-black text-green-400 p-4 rounded-lg overflow-auto max-h-[500px] text-xs font-mono whitespace-pre-wrap">
+			<pre
+				ref={scrollRef}
+				className="bg-black text-green-400 p-4 rounded-lg overflow-auto max-h-[500px] text-xs font-mono whitespace-pre-wrap"
+			>
 				{isLoading && "Loading..."}
 				{!isLoading && (logs || "No logs available")}
 			</pre>
