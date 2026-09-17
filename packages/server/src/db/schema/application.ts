@@ -182,6 +182,12 @@ export const applications = pgTable("application", {
 	updateMaxParallel: integer("updateMaxParallel").notNull().default(1),
 	canaryCount: integer("canaryCount").notNull().default(0),
 	autoPromote: boolean("autoPromote").notNull().default(false),
+	// Opt-in: allow a canary deploy even when the app has a writable volume (a
+	// canary's 2nd alloc would otherwise share the exclusive volume). Off by
+	// default; enable only if the app tolerates brief concurrent volume access.
+	allowCanaryWithVolume: boolean("allowCanaryWithVolume")
+		.notNull()
+		.default(false),
 	applicationStatus: applicationStatus("applicationStatus")
 		.notNull()
 		.default("idle"),

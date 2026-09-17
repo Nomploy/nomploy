@@ -1,0 +1,2 @@
+ALTER TABLE "application" ADD COLUMN "allowCanaryWithVolume" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "compose" ADD COLUMN "allowCanaryWithVolume" boolean DEFAULT false NOT NULL;

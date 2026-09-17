@@ -156,9 +156,13 @@ export const generateApplicationNomadJob = (
 	const spec = applicationToNomadSpec(application, domains, imageOverride);
 	// A canary can't run alongside the old alloc when the app holds an exclusive-
 	// writer volume (they'd share it → corruption), so force canary off there
-	// regardless of the configured count. Gate health on a check only if one exists.
+	// regardless of the configured count — unless the user opts in (the app
+	// tolerates brief concurrent access). Gate health on a check only if one exists.
 	const hasRwVolume = (spec.volumes ?? []).some((v) => v.mode !== "ro");
-	const canary = hasRwVolume ? 0 : (application.canaryCount ?? 0);
+	const canary =
+		hasRwVolume && !application.allowCanaryWithVolume
+			? 0
+			: (application.canaryCount ?? 0);
 	return generateNomadJobSpec(
 		application.appName,
 		[spec],

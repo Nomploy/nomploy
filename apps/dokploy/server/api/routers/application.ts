@@ -438,6 +438,7 @@ export const applicationRouter = createTRPCRouter({
 				updateMaxParallel: z.number().int().min(1).max(50),
 				canaryCount: z.number().int().min(0).max(50),
 				autoPromote: z.boolean(),
+				allowCanaryWithVolume: z.boolean().optional(),
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
@@ -448,6 +449,9 @@ export const applicationRouter = createTRPCRouter({
 				updateMaxParallel: input.updateMaxParallel,
 				canaryCount: input.canaryCount,
 				autoPromote: input.autoPromote,
+				allowCanaryWithVolume: input.allowCanaryWithVolume ?? false,
+				// Deploy-strategy change only takes effect on the next deploy.
+				pendingDeploy: true,
 			});
 			const application = await findApplicationById(input.applicationId);
 			await audit(ctx, {

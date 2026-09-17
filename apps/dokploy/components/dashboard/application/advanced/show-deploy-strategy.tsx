@@ -49,6 +49,7 @@ export const ShowDeployStrategy = ({
 	const [maxParallel, setMaxParallel] = useState(1);
 	const [canaryCount, setCanaryCount] = useState(1);
 	const [autoPromote, setAutoPromote] = useState(false);
+	const [allowCanaryWithVolume, setAllowCanaryWithVolume] = useState(false);
 
 	useEffect(() => {
 		if (!data) return;
@@ -57,6 +58,7 @@ export const ShowDeployStrategy = ({
 		setMaxParallel(data.updateMaxParallel ?? 1);
 		setCanaryCount(canary > 0 ? canary : (data.replicas ?? 1));
 		setAutoPromote(!!data.autoPromote);
+		setAllowCanaryWithVolume(!!data.allowCanaryWithVolume);
 	}, [data]);
 
 	const onSave = async () => {
@@ -66,6 +68,7 @@ export const ShowDeployStrategy = ({
 				updateMaxParallel: Math.max(1, maxParallel),
 				canaryCount: mode === "canary" ? Math.max(1, canaryCount) : 0,
 				autoPromote,
+				allowCanaryWithVolume,
 			});
 			toast.success("Deployment strategy saved — redeploy to apply");
 			await refetch();
@@ -144,6 +147,21 @@ export const ShowDeployStrategy = ({
 									onCheckedChange={setAutoPromote}
 								/>
 							</div>
+							<div className="flex items-center justify-between rounded-lg border p-3 sm:col-span-2">
+								<div className="space-y-0.5">
+									<Label>Allow canary with a writable volume</Label>
+									<p className="text-muted-foreground text-xs">
+										By default a writable volume forces a plain restart (a
+										canary would run a 2nd copy sharing the same exclusive
+										volume). Enable only if the app tolerates brief concurrent
+										access to it.
+									</p>
+								</div>
+								<Switch
+									checked={allowCanaryWithVolume}
+									onCheckedChange={setAllowCanaryWithVolume}
+								/>
+							</div>
 						</>
 					)}
 				</div>
@@ -169,13 +187,14 @@ export const ShowDeployStrategy = ({
 // manual Promote / Cancel (health-gated rollout).
 const CanaryPromotion = ({
 	appName,
-	serverId,
 }: {
 	appName: string;
 	serverId?: string;
 }) => {
+	// One cluster: read the deployment + promote/cancel from the control plane
+	// (no serverId), like the other Nomad reads. [[nomploy-nomad-reads-control-plane]]
 	const { data: dep, refetch } = api.nomad.getLatestDeployment.useQuery(
-		{ jobId: appName, serverId },
+		{ jobId: appName },
 		{ enabled: !!appName, refetchInterval: 5000 },
 	);
 	const promote = api.nomad.promoteDeployment.useMutation();
@@ -185,7 +204,7 @@ const CanaryPromotion = ({
 
 	const doPromote = async () => {
 		try {
-			await promote.mutateAsync({ deploymentId: dep.id, serverId });
+			await promote.mutateAsync({ deploymentId: dep.id });
 			toast.success("Deployment promoted");
 			await refetch();
 		} catch (e) {
@@ -194,7 +213,7 @@ const CanaryPromotion = ({
 	};
 	const doFail = async () => {
 		try {
-			await fail.mutateAsync({ deploymentId: dep.id, serverId });
+			await fail.mutateAsync({ deploymentId: dep.id });
 			toast.success("Deployment cancelled — reverting");
 			await refetch();
 		} catch (e) {
