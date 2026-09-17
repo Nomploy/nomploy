@@ -33,6 +33,7 @@ import { AddApplication } from "@/components/dashboard/project/add-application";
 import { AddCompose } from "@/components/dashboard/project/add-compose";
 import { AddDatabase } from "@/components/dashboard/project/add-database";
 import { AddImport } from "@/components/dashboard/project/add-import";
+import { AddPack } from "@/components/dashboard/project/add-pack";
 import { AddTemplate } from "@/components/dashboard/project/add-template";
 import { AdvancedEnvironmentSelector } from "@/components/dashboard/project/advanced-environment-selector";
 import { DuplicateProject } from "@/components/dashboard/project/duplicate-project";
@@ -1088,6 +1089,10 @@ const EnvironmentPage = (
 													environmentId={environmentId}
 												/>
 												<AddTemplate environmentId={environmentId} />
+												<AddPack
+													projectName={projectData?.name}
+													environmentId={environmentId}
+												/>
 												<AddAiAssistant
 													projectName={projectData?.name}
 													environmentId={environmentId}
