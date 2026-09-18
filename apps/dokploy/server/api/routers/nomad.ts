@@ -490,6 +490,50 @@ export const nomadRouter = createTRPCRouter({
 					message: "Invalid registry URL",
 				});
 			}
+
+			// Fast path: a registry published to GitHub Pages exposes a static
+			// packs.json (name/description/version/homepage for every pack).
+			// github.com/<org>/<repo> → https://<org>.github.io/<repo>/api/packs.json.
+			// One HTTP GET — no nomad-pack CLI on the host, no metadata.hcl parsing,
+			// richer data, and works even where nomad-pack isn't installed. Falls back
+			// to the host cache-scrape below for registries without the API.
+			const gh = url.match(
+				/^(?:https?:\/\/)?github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/.*)?$/i,
+			);
+			if (gh) {
+				const apiUrl = `https://${gh[1].toLowerCase()}.github.io/${gh[2]}/api/packs.json`;
+				try {
+					const ctl = new AbortController();
+					const t = setTimeout(() => ctl.abort(), 6000);
+					const res = await fetch(apiUrl, { signal: ctl.signal });
+					clearTimeout(t);
+					if (res.ok) {
+						const data = (await res.json()) as {
+							packs?: {
+								name?: string;
+								description?: string;
+								version?: string;
+								appUrl?: string;
+								sourceUrl?: string;
+							}[];
+						};
+						if (Array.isArray(data.packs) && data.packs.length > 0) {
+							return data.packs
+								.filter((p) => p.name)
+								.map((p) => ({
+									name: p.name as string,
+									description: p.description ?? "",
+									version: p.version ?? "",
+									url: p.appUrl || p.sourceUrl || "",
+								}))
+								.sort((a, b) => a.name.localeCompare(b.name));
+						}
+					}
+				} catch {
+					// Unreachable / not published — fall through to the cache-scrape.
+				}
+			}
+
 			const name = "nomploy-browse";
 			// List each pack dir and dump its metadata.hcl so we can surface a
 			// description/version/homepage in the gallery (not just a bare name).
