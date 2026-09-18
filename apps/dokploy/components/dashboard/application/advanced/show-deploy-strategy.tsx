@@ -1,8 +1,7 @@
-import { CheckCircle2, Loader2, Rocket, Save, XCircle } from "lucide-react";
+import { Loader2, Rocket, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AlertBlock } from "@/components/shared/alert-block";
-import { Badge } from "@/components/ui/badge";
+import { DeploymentPanel } from "@/components/dashboard/nomad/deployment-panel";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -37,11 +36,7 @@ interface Props {
  *   healthy, then promote — automatically, or manually (health-gated). The
  *   promotion panel below appears live while a canary deploy is in flight.
  */
-export const ShowDeployStrategy = ({
-	applicationId,
-	appName,
-	serverId,
-}: Props) => {
+export const ShowDeployStrategy = ({ applicationId, appName }: Props) => {
 	const { data, refetch } = api.application.one.useQuery({ applicationId });
 	const save = api.application.saveDeployStrategy.useMutation();
 
@@ -176,111 +171,8 @@ export const ShowDeployStrategy = ({
 					</Button>
 				</div>
 
-				{appName && <CanaryPromotion appName={appName} serverId={serverId} />}
+				{appName && <DeploymentPanel appName={appName} />}
 			</CardContent>
 		</Card>
-	);
-};
-
-// Live panel for an in-flight deployment. Polls the job's latest Nomad
-// deployment and, when canaries are healthy but not yet promoted, offers a
-// manual Promote / Cancel (health-gated rollout).
-const CanaryPromotion = ({
-	appName,
-}: {
-	appName: string;
-	serverId?: string;
-}) => {
-	// One cluster: read the deployment + promote/cancel from the control plane
-	// (no serverId), like the other Nomad reads. [[nomploy-nomad-reads-control-plane]]
-	const { data: dep, refetch } = api.nomad.getLatestDeployment.useQuery(
-		{ jobId: appName },
-		{ enabled: !!appName, refetchInterval: 5000 },
-	);
-	const promote = api.nomad.promoteDeployment.useMutation();
-	const fail = api.nomad.failDeployment.useMutation();
-
-	if (!dep || dep.status !== "running") return null;
-
-	const doPromote = async () => {
-		try {
-			await promote.mutateAsync({ deploymentId: dep.id });
-			toast.success("Deployment promoted");
-			await refetch();
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : "Promote failed");
-		}
-	};
-	const doFail = async () => {
-		try {
-			await fail.mutateAsync({ deploymentId: dep.id });
-			toast.success("Deployment cancelled — reverting");
-			await refetch();
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : "Cancel failed");
-		}
-	};
-
-	return (
-		<div className="mt-2 rounded-lg border p-4 space-y-3">
-			<div className="flex items-center justify-between">
-				<span className="font-medium">Deployment in progress</span>
-				<Badge variant={dep.awaitingPromotion ? "default" : "secondary"}>
-					{dep.awaitingPromotion ? "awaiting promotion" : dep.status}
-				</Badge>
-			</div>
-			<p className="text-muted-foreground text-sm">{dep.description}</p>
-			<div className="space-y-1">
-				{dep.groups.map((g) => (
-					<div key={g.name} className="flex items-center gap-2 text-sm">
-						<span className="font-mono">{g.name}</span>
-						{g.desiredCanaries > 0 ? (
-							<span className="text-muted-foreground">
-								canaries {g.placedCanaries}/{g.desiredCanaries} · healthy{" "}
-								{g.healthyAllocs} · {g.promoted ? "promoted" : "pending"}
-							</span>
-						) : (
-							<span className="text-muted-foreground">
-								{g.healthyAllocs}/{g.desiredTotal} healthy
-							</span>
-						)}
-					</div>
-				))}
-			</div>
-			{dep.awaitingPromotion && (
-				<AlertBlock type="info">
-					Canaries are healthy and waiting for promotion.
-				</AlertBlock>
-			)}
-			<div className="flex gap-2">
-				<Button
-					type="button"
-					size="sm"
-					onClick={doPromote}
-					disabled={!dep.awaitingPromotion || promote.isPending}
-				>
-					{promote.isPending ? (
-						<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-					) : (
-						<CheckCircle2 className="mr-2 h-4 w-4" />
-					)}
-					Promote
-				</Button>
-				<Button
-					type="button"
-					size="sm"
-					variant="destructive"
-					onClick={doFail}
-					disabled={fail.isPending}
-				>
-					{fail.isPending ? (
-						<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-					) : (
-						<XCircle className="mr-2 h-4 w-4" />
-					)}
-					Cancel
-				</Button>
-			</div>
-		</div>
 	);
 };
