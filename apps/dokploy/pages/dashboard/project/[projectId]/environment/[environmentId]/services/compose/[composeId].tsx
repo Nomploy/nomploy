@@ -32,6 +32,7 @@ import { ShowBackups } from "@/components/dashboard/database/backups/show-backup
 import { ComposeFreeMonitoring } from "@/components/dashboard/monitoring/free/container/show-free-compose-monitoring";
 import { ComposePaidMonitoring } from "@/components/dashboard/monitoring/paid/container/show-paid-compose-monitoring";
 import { ShowNomadAllocations } from "@/components/dashboard/nomad/allocations/show-nomad-allocations";
+import { DeploymentPanel } from "@/components/dashboard/nomad/deployment-panel";
 import { ScheduleScale } from "@/components/dashboard/nomad/scaling/schedule-scale";
 import { ServiceMetricsGraph } from "@/components/dashboard/nomad/scaling/service-metrics-graph";
 import { ShowNomadScaling } from "@/components/dashboard/nomad/scaling/show-nomad-scaling";
@@ -325,6 +326,9 @@ const Service = (
 											<div className="flex flex-col gap-4 pt-2.5">
 												{isNomad ? (
 													<>
+														{/* Live deployment status + Promote/Cancel — the
+														    escape hatch for a rollout wedged unhealthy. */}
+														<DeploymentPanel appName={data?.appName || ""} />
 														<ShowNomadScaling
 															appName={data?.appName || ""}
 															serverId={data?.serverId || undefined}
