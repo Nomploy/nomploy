@@ -129,41 +129,118 @@ export const projectRouter = createTRPCRouter({
 					with: {
 						environments: {
 							with: {
+								// Summary columns only — matching findProjectById (the owner
+								// branch) so project.one returns a consistent shape, and to
+								// stay under Postgres's 100-arg json_build_array limit.
+								// [[nomploy-json-build-array-100-arg-limit]]
 								applications: {
 									where: buildServiceFilter(
 										applications.applicationId,
 										accessedServices,
 									),
+									with: { server: { columns: { name: true, serverId: true } } },
+									columns: {
+										name: true,
+										applicationId: true,
+										createdAt: true,
+										applicationStatus: true,
+										description: true,
+										serverId: true,
+										icon: true,
+									},
 								},
 								compose: {
 									where: buildServiceFilter(
 										compose.composeId,
 										accessedServices,
 									),
+									with: { server: { columns: { name: true, serverId: true } } },
+									columns: {
+										composeId: true,
+										name: true,
+										createdAt: true,
+										composeStatus: true,
+										description: true,
+										serverId: true,
+									},
 								},
 								libsql: {
 									where: buildServiceFilter(libsql.libsqlId, accessedServices),
+									with: { server: { columns: { name: true, serverId: true } } },
+									columns: {
+										libsqlId: true,
+										name: true,
+										createdAt: true,
+										applicationStatus: true,
+										description: true,
+										serverId: true,
+									},
 								},
 								mariadb: {
 									where: buildServiceFilter(
 										mariadb.mariadbId,
 										accessedServices,
 									),
+									with: { server: { columns: { name: true, serverId: true } } },
+									columns: {
+										mariadbId: true,
+										name: true,
+										createdAt: true,
+										applicationStatus: true,
+										description: true,
+										serverId: true,
+									},
 								},
 								mongo: {
 									where: buildServiceFilter(mongo.mongoId, accessedServices),
+									with: { server: { columns: { name: true, serverId: true } } },
+									columns: {
+										mongoId: true,
+										name: true,
+										createdAt: true,
+										applicationStatus: true,
+										description: true,
+										serverId: true,
+									},
 								},
 								mysql: {
 									where: buildServiceFilter(mysql.mysqlId, accessedServices),
+									with: { server: { columns: { name: true, serverId: true } } },
+									columns: {
+										mysqlId: true,
+										name: true,
+										createdAt: true,
+										applicationStatus: true,
+										description: true,
+										serverId: true,
+									},
 								},
 								postgres: {
 									where: buildServiceFilter(
 										postgres.postgresId,
 										accessedServices,
 									),
+									with: { server: { columns: { name: true, serverId: true } } },
+									columns: {
+										postgresId: true,
+										name: true,
+										createdAt: true,
+										applicationStatus: true,
+										description: true,
+										serverId: true,
+									},
 								},
 								redis: {
 									where: buildServiceFilter(redis.redisId, accessedServices),
+									with: { server: { columns: { name: true, serverId: true } } },
+									columns: {
+										redisId: true,
+										name: true,
+										createdAt: true,
+										applicationStatus: true,
+										description: true,
+										serverId: true,
+									},
 								},
 							},
 						},

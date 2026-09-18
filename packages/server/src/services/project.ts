@@ -194,28 +194,41 @@ export const updateProjectById = async (
 };
 
 export const validUniqueServerAppName = async (appName: string) => {
+	// Only the row COUNT per relation is used below, so select a single id column
+	// each. Without `columns`, drizzle selects every column into a json_build_array
+	// that overflows Postgres's 100-argument limit (the application table alone is
+	// ~99 cols) — which made EVERY compose/service create throw. See
+	// [[nomploy-json-build-array-100-arg-limit]].
 	const query = await db.query.environments.findMany({
+		columns: { environmentId: true },
 		with: {
 			applications: {
 				where: eq(applications.appName, appName),
+				columns: { applicationId: true },
 			},
 			libsql: {
 				where: eq(libsql.appName, appName),
+				columns: { libsqlId: true },
 			},
 			mariadb: {
 				where: eq(mariadb.appName, appName),
+				columns: { mariadbId: true },
 			},
 			mongo: {
 				where: eq(mongo.appName, appName),
+				columns: { mongoId: true },
 			},
 			mysql: {
 				where: eq(mysql.appName, appName),
+				columns: { mysqlId: true },
 			},
 			postgres: {
 				where: eq(postgres.appName, appName),
+				columns: { postgresId: true },
 			},
 			redis: {
 				where: eq(redis.appName, appName),
+				columns: { redisId: true },
 			},
 		},
 	});
