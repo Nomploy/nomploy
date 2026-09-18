@@ -579,6 +579,22 @@ done
 # important on small control-plane nodes.
 $SUDO nomad operator scheduler set-config -memory-oversubscription=true >/dev/null 2>&1 || true
 
+# Swap safety-valve on the control-plane node. A rolling panel deploy runs two
+# panels at once (old + canary, up to memory_max=2048 each) beside Postgres on a
+# small host — without swap that overlap starves Postgres into transient connect
+# timeouts, crash-looping the new panel (downtime). A 2G swapfile (low swappiness
+# so RAM is still preferred) absorbs the spike. Idempotent.
+if ! $SUDO swapon --show 2>/dev/null | grep -q /swapfile; then
+	$SUDO dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none 2>/dev/null &&
+		$SUDO chmod 600 /swapfile &&
+		$SUDO mkswap /swapfile >/dev/null 2>&1 &&
+		$SUDO swapon /swapfile 2>/dev/null || true
+	grep -q "/swapfile" /etc/fstab 2>/dev/null ||
+		echo "/swapfile none swap sw 0 0" | $SUDO tee -a /etc/fstab >/dev/null
+fi
+$SUDO sysctl -w vm.swappiness=10 >/dev/null 2>&1 || true
+echo "vm.swappiness=10" | $SUDO tee /etc/sysctl.d/99-nomploy.conf >/dev/null 2>&1 || true
+
 $SUDO mkdir -p /etc/nomploy
 $SUDO tee /etc/nomploy/nomploy.nomad.hcl >/dev/null <<PANELHCL
 job "nomploy" {
