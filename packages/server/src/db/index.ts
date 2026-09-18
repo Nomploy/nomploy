@@ -17,17 +17,31 @@ const globalForDb = globalThis as unknown as {
 	db?: Database;
 };
 
+// Connection resilience: the panel and Postgres share the host, and a rolling
+// panel deploy (two panels briefly overlapping on a small hub) can put Postgres
+// under transient memory pressure — a connect that fails fast then cascades into
+// a boot crash-loop (write CONNECT_TIMEOUT 127.0.0.1:5432). A generous
+// connect_timeout lets a pressured Postgres accept the connection instead of
+// failing, and lifetime/idle recycling keeps the pool from wedging on a stale
+// connection after the blip. Pairs with waitForDatabase() (boot-time retry).
+const pgOptions: Parameters<typeof postgres>[1] = {
+	connect_timeout: 30,
+	idle_timeout: 20,
+	max_lifetime: 60 * 30,
+	max: 20,
+};
+
 let dbConnection: Database;
 
 if (process.env.NODE_ENV === "production") {
 	// En producción no usamos global cache
-	dbConnection = drizzle(postgres(dbUrl), {
+	dbConnection = drizzle(postgres(dbUrl, pgOptions), {
 		schema,
 	});
 } else {
 	// En desarrollo reutilizamos conexión para evitar múltiples conexiones
 	if (!globalForDb.db) {
-		globalForDb.db = drizzle(postgres(dbUrl), {
+		globalForDb.db = drizzle(postgres(dbUrl, pgOptions), {
 			schema,
 		});
 	}
