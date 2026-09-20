@@ -55,6 +55,13 @@ export const DeploymentPanel = ({ appName }: { appName: string }) => {
 				</Badge>
 			</div>
 			<p className="text-muted-foreground text-sm">{dep.description}</p>
+			{dep.blockedReason && (
+				<AlertBlock type="error">
+					{dep.blockedReason} The deploy is wedged — free up resources (or
+					reduce this service's memory / turn off canary-with-volume so it
+					doesn't need a second alloc), then Cancel and redeploy.
+				</AlertBlock>
+			)}
 			<div className="space-y-1">
 				{dep.groups.map((g) => (
 					<div key={g.name} className="flex items-center gap-2 text-sm">

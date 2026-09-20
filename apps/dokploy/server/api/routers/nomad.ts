@@ -758,12 +758,61 @@ done
 						g.placedCanaries >= g.desiredCanaries &&
 						g.healthyAllocs >= g.desiredCanaries,
 				);
+			// When a deployment is running but can't place its allocs, surface WHY from
+			// the latest eval's placement failures — so a wedged deploy is diagnosable
+			// in the UI instead of via `nomad eval status`. Common causes: no node has
+			// enough memory (e.g. a canary needs a 2nd alloc on a pinned node with no
+			// room), or a constraint filtered every node.
+			let blockedReason: string | null = null;
+			if (d.Status === "running") {
+				try {
+					const er = await nomadClient(cfg).request(
+						withNs(`/job/${input.jobId}/evaluations`, cfg.namespace),
+					);
+					if (er.ok) {
+						const evals = (await er.json()) as {
+							CreateIndex?: number;
+							FailedTGAllocs?: Record<
+								string,
+								{
+									NodesExhausted?: number;
+									DimensionExhausted?: Record<string, number> | null;
+									ConstraintFiltered?: Record<string, number> | null;
+								}
+							> | null;
+						}[];
+						const latest = (evals ?? [])
+							.filter(
+								(e) =>
+									e.FailedTGAllocs && Object.keys(e.FailedTGAllocs).length > 0,
+							)
+							.sort((a, b) => (b.CreateIndex ?? 0) - (a.CreateIndex ?? 0))[0];
+						const f = latest?.FailedTGAllocs
+							? Object.values(latest.FailedTGAllocs)[0]
+							: undefined;
+						if (f) {
+							const parts: string[] = [];
+							const dims = Object.keys(f.DimensionExhausted ?? {});
+							if (dims.length)
+								parts.push(`no node has enough ${dims.join(", ")}`);
+							const cons = Object.keys(f.ConstraintFiltered ?? {});
+							if (cons.length)
+								parts.push(`every node filtered by: ${cons.join("; ")}`);
+							if (!parts.length && f.NodesExhausted)
+								parts.push("no node has capacity");
+							if (parts.length)
+								blockedReason = `Can't schedule — ${parts.join("; ")}.`;
+						}
+					}
+				} catch {}
+			}
 			return {
 				id: d.ID,
 				status: d.Status,
 				description: d.StatusDescription,
 				groups,
 				awaitingPromotion,
+				blockedReason,
 			};
 		}),
 
