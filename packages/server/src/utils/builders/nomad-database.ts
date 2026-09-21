@@ -45,10 +45,25 @@ export interface NomadDatabaseInput {
 
 const hclString = (s: string) => JSON.stringify(s);
 
+// The DB's data dir lives in a Nomad host volume named after the app.
+const dataHostVolumeName = (db: NomadDatabaseInput): string =>
+	`${db.appName}-data`;
+
+// Use the managed host volume for the data dir unless the user already mounted
+// their own storage there (a bind or named volume targeting db.dataPath).
+const usesDataHostVolume = (db: NomadDatabaseInput): boolean =>
+	!(db.mounts || []).some(
+		(m) =>
+			((m.type === "volume" && m.volumeName) ||
+				(m.type === "bind" && m.hostPath)) &&
+			m.mountPath === db.dataPath,
+	);
+
 /**
  * Generate the Nomad HCL for a stateful single-instance database:
  * - count = 1, pinned to its node (node-local data volume).
- * - a named docker volume for the data dir (persists across restarts/redeploys)
+ * - a dynamic Nomad HOST VOLUME for the data dir (prune-immune and
+ *   scheduler-aware — see usesDataHostVolume / getBuildNomadDatabaseCommand),
  *   plus any user-defined mounts.
  * - a dynamic port mapped to the engine port (avoids fixed-port clashes when
  *   several databases share a node) registered in Consul as the appName so other
@@ -71,9 +86,7 @@ export const generateDatabaseNomadJob = (db: NomadDatabaseInput): string => {
 		? Math.round(Number.parseInt(db.memoryLimit) / (1024 * 1024))
 		: 512;
 
-	// Configured mounts as docker driver volume strings. Databases already carry a
-	// volume mount for their data dir, so add a fallback named volume only if no
-	// mount targets the data path (avoids a duplicate mount point).
+	// User-configured extra mounts as docker driver volume strings.
 	const volumes: string[] = [];
 	for (const m of db.mounts || []) {
 		if (m.type === "volume" && m.volumeName)
@@ -81,9 +94,34 @@ export const generateDatabaseNomadJob = (db: NomadDatabaseInput): string => {
 		else if (m.type === "bind" && m.hostPath)
 			volumes.push(`${m.hostPath}:${m.mountPath}`);
 	}
-	if (!volumes.some((v) => v.endsWith(`:${db.dataPath}`)))
-		volumes.push(`${db.appName}-data:${db.dataPath}`);
 	const volumesHcl = volumes.map(hclString).join(", ");
+
+	// The engine's data dir persists in a Nomad HOST VOLUME (dynamic, created via
+	// the mkdir plugin — see getBuildNomadDatabaseCommand), not a docker named
+	// volume. A host volume is a node directory Nomad bind-mounts, so:
+	//   • it's invisible to `docker volume prune` / `docker system prune --volumes`
+	//     (which silently wiped a managed DB once), and
+	//   • the scheduler refuses to place the DB on a node that lacks the volume, so
+	//     missing data surfaces as a visible placement failure instead of Postgres
+	//     re-initializing into an empty dir.
+	// Skipped only when the user already mounted their own storage at the data dir.
+	const useHostVolume = usesDataHostVolume(db);
+	const dataVolumeStanza = useHostVolume
+		? `    volume "data" {
+      type   = "host"
+      source = ${hclString(dataHostVolumeName(db))}
+    }
+
+`
+		: "";
+	const dataVolumeMount = useHostVolume
+		? `
+      volume_mount {
+        volume      = "data"
+        destination = ${hclString(db.dataPath)}
+      }
+`
+		: "";
 
 	// The engine listens on its standard port as a STATIC host port bound on the
 	// WireGuard overlay, so other services reach it at "<appName>:<containerPort>"
@@ -120,7 +158,7 @@ export const generateDatabaseNomadJob = (db: NomadDatabaseInput): string => {
   group "db" {
     count = 1
 
-    network {
+${dataVolumeStanza}    network {
       dns {
         # All server overlay IPs (hub + HA servers), so a DB alloc still resolves
         # *.service.consul if the hub goes down. See clusterDnsServers().
@@ -152,7 +190,7 @@ ${ports.join("\n")}
         ports   = ["db"${db.externalPort ? ', "external"' : ""}${(db.extraPorts || []).map((p) => `, "p${p}"`).join("")}]
         volumes = [${volumesHcl}]${commandLine}${argsLine}
       }
-
+${dataVolumeMount}
       env {
 ${envLines}
       }
@@ -176,6 +214,36 @@ export const getBuildNomadDatabaseCommand = (
 ): string => {
 	const jobFilePath = `/etc/nomploy/jobs/${db.appName}.nomad.hcl`;
 	const encoded = encodeBase64(generateDatabaseNomadJob(db));
+	// Ensure the DB's data host volume exists on its node before the job (which
+	// references it) is submitted. Dynamic host volume via the built-in `mkdir`
+	// plugin: a prune-immune, scheduler-aware directory that replaces the old
+	// docker named volume. Idempotent — created only when missing, so redeploys
+	// reuse (and thus preserve) the existing data. `${...node.unique.name}` is a
+	// literal for Nomad (single-quoted heredoc + JS-escaped so it isn't
+	// interpolated here). Skipped when the user mounts their own data storage.
+	const hostVolume = dataHostVolumeName(db);
+	const volSpecPath = `/etc/nomploy/jobs/${db.appName}.volume.hcl`;
+	const ensureVolume = usesDataHostVolume(db)
+		? `
+if ! nomad volume status -type host ${hclString(hostVolume)} >/dev/null 2>&1; then
+  cat > "${volSpecPath}" <<'EOFVOL'
+namespace = "default"
+name      = ${hclString(hostVolume)}
+type      = "host"
+plugin_id = "mkdir"
+capability {
+  access_mode     = "single-node-writer"
+  attachment_mode = "file-system"
+}
+constraint {
+  attribute = "\${node.unique.name}"
+  value     = ${hclString(db.targetNodeName)}
+}
+EOFVOL
+  echo "Creating data host volume ${hostVolume} on ${db.targetNodeName}…"
+  nomad volume create "${volSpecPath}"
+fi`
+		: "";
 	// NOTE: don't wrap the submit in `{ … } || { … }` — bash suspends `set -e` inside a
 	// group that's the left operand of `||`, so a failing `nomad job run` (e.g. a 403)
 	// would keep going and still print success. Check the exit status explicitly.
@@ -184,6 +252,7 @@ set -e
 mkdir -p /etc/nomploy/jobs
 echo "${encoded}" | base64 -d > "${jobFilePath}"
 echo "Nomad job file written: ✅"
+${ensureVolume}
 if ! nomad job run "${jobFilePath}" 2>&1; then
 	echo "Error: ❌ Nomad database deployment failed"
 	# Surface the container's own logs — the deployment error alone rarely shows

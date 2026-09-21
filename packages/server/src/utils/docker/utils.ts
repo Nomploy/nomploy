@@ -390,7 +390,7 @@ export const startServiceRemote = async (serverId: string, appName: string) => {
 export const removeService = async (
 	appName: string,
 	serverId?: string | null,
-	_deleteVolumes = false,
+	deleteVolumes = false,
 ) => {
 	try {
 		const command = `nomad job stop -purge ${appName}`;
@@ -399,6 +399,20 @@ export const removeService = async (
 			await execAsyncRemote(serverId, command);
 		} else {
 			await execAsync(command);
+		}
+
+		// A managed DB's data lives in a Nomad host volume named "<appName>-data"
+		// (see nomad-database.ts). Stopping the job does NOT remove it — that's the
+		// point (redeploys keep the data). Only tear it down when the caller
+		// explicitly asked to delete data too. Volume API calls need the cluster
+		// token, so ALWAYS run from the control plane; best-effort (no-op for
+		// services that have no such volume, or if it's briefly still in use).
+		if (deleteVolumes) {
+			try {
+				await execAsync(
+					`nomad volume delete -type host ${appName}-data 2>/dev/null || true`,
+				);
+			} catch {}
 		}
 	} catch (error) {
 		return error;
