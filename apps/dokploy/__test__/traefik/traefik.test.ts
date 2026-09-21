@@ -128,6 +128,9 @@ const baseApp: ApplicationNested = {
 	username: null,
 	dockerContextPath: null,
 	ulimitsSwarm: null,
+	pendingDeploy: false,
+	allowCanaryWithVolume: false,
+	configFiles: [],
 };
 
 const baseDomain: Domain = {

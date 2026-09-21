@@ -141,6 +141,12 @@ export const applicationToNomadSpec = (
 		fileMounts: fileMounts.length > 0 ? fileMounts : undefined,
 		// Inject secrets from nomad/jobs/<appName> when the app opted in.
 		secrets: !!application.nomadSecretsEnabled,
+		// Config files whose content lives in the same variable (keyed by varKey),
+		// rendered to a file and mounted at mountPath. See generateConfigFileMounts.
+		configFiles:
+			application.configFiles && application.configFiles.length > 0
+				? application.configFiles
+				: undefined,
 	};
 };
 

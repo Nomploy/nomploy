@@ -147,6 +147,68 @@ const withNs = (path: string, namespace: string) => {
 	return `${path}${sep}namespace=${encodeURIComponent(namespace)}`;
 };
 
+// Keys with this prefix in a job's Nomad Variable (nomad/jobs/<appName>) hold
+// config-FILE content (rendered to a mounted file), not env secrets. The two
+// share one variable because Nomad's workload identity only reliably grants a
+// task read access to that single job-level path. Both the env-secrets template
+// (which skips these keys) and the config-file handlers key off this prefix.
+const CONFIG_FILE_PREFIX = "nmplcfg_";
+
+type NomadHttpClient = ReturnType<typeof nomadClient>;
+
+// Read a Nomad Variable's Items map (empty when the variable doesn't exist yet).
+const readVariableItems = async (
+	client: NomadHttpClient,
+	varPath: string,
+	namespace: string,
+): Promise<Record<string, string>> => {
+	const res = await client.request(withNs(varPath, namespace));
+	if (res.status === 404) return {};
+	if (!res.ok) {
+		throw new TRPCError({
+			code: "INTERNAL_SERVER_ERROR",
+			message: `Nomad variable read failed: ${res.status} ${res.statusText}`,
+		});
+	}
+	const v = (await res.json()) as { Items?: Record<string, string> };
+	return v.Items ?? {};
+};
+
+// Write the full Items set, or DELETE the variable when nothing is left (so an
+// emptied variable doesn't linger). `varPath` is the /var/... request path;
+// `logicalPath` is the nomad/jobs/... path stored in the PUT body.
+const writeOrDeleteVariable = async (
+	client: NomadHttpClient,
+	varPath: string,
+	logicalPath: string,
+	items: Record<string, string>,
+	namespace: string,
+): Promise<void> => {
+	if (Object.keys(items).length === 0) {
+		const del = await client.request(withNs(varPath, namespace), {
+			method: "DELETE",
+		});
+		if (!del.ok && del.status !== 404) {
+			throw new TRPCError({
+				code: "INTERNAL_SERVER_ERROR",
+				message: `Nomad variable delete failed: ${del.status} ${del.statusText}`,
+			});
+		}
+		return;
+	}
+	const put = await client.request(withNs(varPath, namespace), {
+		method: "PUT",
+		body: JSON.stringify({ Path: logicalPath, Items: items }),
+	});
+	if (!put.ok) {
+		const detail = await put.text().catch(() => "");
+		throw new TRPCError({
+			code: "INTERNAL_SERVER_ERROR",
+			message: `Nomad variable write failed: ${put.status} ${detail}`,
+		});
+	}
+};
+
 /**
  * Resolve a Nomad Pack deployment to its real Nomad job ids. `nomad-pack run
  * --name <appName>` sets each deployed job's `pack.deployment_name` meta to
@@ -1129,6 +1191,16 @@ fi`;
 			const allocs: any[] = await client.get(
 				withNs("/allocations?resources=true", cfg.namespace),
 			);
+			// Canonical display name per node (cluster.json), keyed by overlay IP —
+			// same mapping as getClusterMembers/getNodeTopology so every node view
+			// shows the same name instead of the raw Nomad hostname.
+			const cluster = readCluster();
+			const nameByWgIp = new Map<string, string>();
+			if (cluster) {
+				nameByWgIp.set(cluster.hubWgIp, "control-plane");
+				for (const s of cluster.servers || []) nameByWgIp.set(s.wgIp, s.name);
+				for (const p of cluster.peers || []) nameByWgIp.set(p.wgIp, p.name);
+			}
 
 			return Promise.all(
 				nodes.map(async (node: any) => {
@@ -1157,7 +1229,7 @@ fi`;
 
 					return {
 						ID: node.ID as string,
-						Name: node.Name as string,
+						Name: nameByWgIp.get(node.Address) ?? (node.Name as string),
 						Status: node.Status as string,
 						Datacenter: node.Datacenter as string,
 						allocCount,
@@ -1187,6 +1259,17 @@ fi`;
 			const serverWgIps = new Set(
 				(cluster ? allServers(cluster) : []).map((s) => s.wgIp),
 			);
+			// Canonical display name per node, keyed by overlay (WireGuard) IP —
+			// the SAME source of truth as getClusterMembers (cluster.json). Without
+			// this the topology cards show the raw Nomad node name (the OS hostname,
+			// e.g. "nomploy4") while the members table shows the mesh name
+			// ("nomad-server-2"), so the two views disagree about the same box.
+			const nameByWgIp = new Map<string, string>();
+			if (cluster) {
+				nameByWgIp.set(cluster.hubWgIp, "control-plane");
+				for (const s of cluster.servers || []) nameByWgIp.set(s.wgIp, s.name);
+				for (const p of cluster.peers || []) nameByWgIp.set(p.wgIp, p.name);
+			}
 
 			return Promise.all(
 				nodes.map(async (node: any) => {
@@ -1242,7 +1325,10 @@ fi`;
 
 					return {
 						ID: node.ID as string,
-						Name: node.Name as string,
+						// Prefer the canonical mesh name (cluster.json) over the raw Nomad
+						// node name so the topology matches the members table; fall back to
+						// the Nomad hostname for a node not (yet) in cluster.json.
+						Name: nameByWgIp.get(node.Address) ?? (node.Name as string),
 						Status: node.Status as string,
 						Datacenter: node.Datacenter as string,
 						drain: !!node.Drain,
@@ -1407,8 +1493,15 @@ fi`;
 				});
 			}
 			const v = (await res.json()) as { Items?: Record<string, string> };
+			// Config-file content shares this variable under nmplcfg_* keys (see
+			// setAppConfigFiles) — never surface those as env secrets.
+			const items = Object.fromEntries(
+				Object.entries(v.Items ?? {}).filter(
+					([k]) => !k.startsWith(CONFIG_FILE_PREFIX),
+				),
+			);
 			return {
-				items: v.Items ?? {},
+				items,
 				enabled: application.nomadSecretsEnabled,
 			};
 		}),
@@ -1433,38 +1526,28 @@ fi`;
 			const path = `/var/nomad/jobs/${application.appName}`;
 			const keys = Object.keys(input.items);
 
-			if (keys.length === 0) {
-				const del = await client.request(withNs(path, cfg.namespace), {
-					method: "DELETE",
-				});
-				if (!del.ok && del.status !== 404) {
-					throw new TRPCError({
-						code: "INTERNAL_SERVER_ERROR",
-						message: `Nomad variable delete failed: ${del.status} ${del.statusText}`,
-					});
-				}
-				await updateApplication(input.applicationId, {
-					nomadSecretsEnabled: false,
-				});
-			} else {
-				const put = await client.request(withNs(path, cfg.namespace), {
-					method: "PUT",
-					body: JSON.stringify({
-						Path: `nomad/jobs/${application.appName}`,
-						Items: input.items,
-					}),
-				});
-				if (!put.ok) {
-					const detail = await put.text().catch(() => "");
-					throw new TRPCError({
-						code: "INTERNAL_SERVER_ERROR",
-						message: `Nomad variable write failed: ${put.status} ${detail}`,
-					});
-				}
-				await updateApplication(input.applicationId, {
-					nomadSecretsEnabled: true,
-				});
-			}
+			// Read-modify-write: the same variable also holds config-file content
+			// (nmplcfg_* keys, see setAppConfigFiles). Replace only the secret keys
+			// (everything NOT nmplcfg_*) and preserve the config-file keys, so saving
+			// secrets never wipes config files (and vice versa).
+			const existing = await readVariableItems(client, path, cfg.namespace);
+			const preserved = Object.fromEntries(
+				Object.entries(existing).filter(([k]) =>
+					k.startsWith(CONFIG_FILE_PREFIX),
+				),
+			);
+			const merged = { ...preserved, ...input.items };
+
+			await writeOrDeleteVariable(
+				client,
+				path,
+				`nomad/jobs/${application.appName}`,
+				merged,
+				cfg.namespace,
+			);
+			await updateApplication(input.applicationId, {
+				nomadSecretsEnabled: keys.length > 0,
+			});
 
 			await audit(ctx, {
 				action: "update",
@@ -1473,6 +1556,91 @@ fi`;
 				resourceName: application.appName,
 			});
 			return { enabled: keys.length > 0, count: keys.length };
+		}),
+
+	// ── App config files (Nomad Variables → mounted files) ────────────────────
+	// Like secrets, but each file's content is rendered to a FILE inside the
+	// container (env=false) and docker-mounted at its mountPath, instead of
+	// injected as env. Content lives in the same variable (nomad/jobs/<appName>)
+	// under nmplcfg_<i> keys; the mount metadata (mountPath + varKey) lives in
+	// application.configFiles so the builder knows what to render. First enable
+	// needs a redeploy to add the template; after that, edits roll the task.
+	getAppConfigFiles: protectedProcedure
+		.input(z.object({ applicationId: z.string() }))
+		.query(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.applicationId, {
+				envVars: ["read"],
+			});
+			const application = await findApplicationById(input.applicationId);
+			const cfg = await resolveNomad(ctx, application.serverId ?? undefined);
+			const items = await readVariableItems(
+				nomadClient(cfg),
+				`/var/nomad/jobs/${application.appName}`,
+				cfg.namespace,
+			);
+			// Join Postgres metadata (ordered mountPaths + varKeys) with the
+			// content from the variable. Skip any whose content vanished.
+			const files = (application.configFiles ?? []).map((f) => ({
+				mountPath: f.mountPath,
+				content: items[f.varKey] ?? "",
+			}));
+			return { files, enabled: (application.configFiles ?? []).length > 0 };
+		}),
+
+	setAppConfigFiles: protectedProcedure
+		.input(
+			z.object({
+				applicationId: z.string(),
+				files: z.array(
+					z.object({
+						mountPath: z.string(),
+						content: z.string(),
+					}),
+				),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.applicationId, {
+				envVars: ["write"],
+			});
+			const application = await findApplicationById(input.applicationId);
+			const cfg = await resolveNomad(ctx, application.serverId ?? undefined);
+			const client = nomadClient(cfg);
+			const path = `/var/nomad/jobs/${application.appName}`;
+
+			// Read-modify-write, preserving the secret keys (everything NOT
+			// nmplcfg_*). Drop the old config-file keys and rewrite them from the
+			// submitted list; blank mountPaths are ignored.
+			const existing = await readVariableItems(client, path, cfg.namespace);
+			const merged: Record<string, string> = Object.fromEntries(
+				Object.entries(existing).filter(
+					([k]) => !k.startsWith(CONFIG_FILE_PREFIX),
+				),
+			);
+			const configFiles: { mountPath: string; varKey: string }[] = [];
+			input.files.forEach((f) => {
+				if (!f.mountPath.trim()) return;
+				const varKey = `${CONFIG_FILE_PREFIX}${configFiles.length}`;
+				merged[varKey] = f.content;
+				configFiles.push({ mountPath: f.mountPath.trim(), varKey });
+			});
+
+			await writeOrDeleteVariable(
+				client,
+				path,
+				`nomad/jobs/${application.appName}`,
+				merged,
+				cfg.namespace,
+			);
+			await updateApplication(input.applicationId, { configFiles });
+
+			await audit(ctx, {
+				action: "update",
+				resourceType: "application",
+				resourceId: application.applicationId,
+				resourceName: application.appName,
+			});
+			return { enabled: configFiles.length > 0, count: configFiles.length };
 		}),
 
 	getClusterResources: withPermission("server", "read")

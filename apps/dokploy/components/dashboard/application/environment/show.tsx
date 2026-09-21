@@ -16,6 +16,7 @@ import {
 import { Secrets } from "@/components/ui/secrets";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/utils/api";
+import { ShowNomadConfigFiles } from "./show-nomad-config-files";
 import { ShowNomadSecrets } from "./show-nomad-secrets";
 
 const addEnvironmentSchema = z.object({
@@ -237,6 +238,7 @@ export const ShowEnvironment = ({ applicationId }: Props) => {
 				</Form>
 			</Card>
 			<ShowNomadSecrets applicationId={applicationId} />
+			<ShowNomadConfigFiles applicationId={applicationId} />
 		</div>
 	);
 };

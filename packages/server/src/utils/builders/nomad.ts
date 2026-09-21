@@ -61,6 +61,13 @@ export interface NomadServiceSpec {
 	 * generateFileMounts.
 	 */
 	fileMounts?: { content: string; mountPath: string }[];
+	/**
+	 * Config files whose CONTENT lives in the job's Nomad Variable
+	 * (nomad/jobs/<appName>) under `varKey`, rendered to a file and docker-mounted
+	 * at `mountPath` — same distribution channel as `secrets`, but written as a
+	 * file (env=false) instead of injected as env. See generateConfigFileMounts.
+	 */
+	configFiles?: { mountPath: string; varKey: string }[];
 	scaling?: {
 		min: number;
 		max: number;
@@ -653,9 +660,11 @@ ${portLines}
 					? `\n        ports = [${s.ports.map((p) => `"${p.label}"`).join(", ")}]`
 					: "";
 			const fileMounts = generateFileMounts(s.fileMounts);
+			const configFiles = generateConfigFileMounts(appName, s.configFiles);
 			const allVolumeEntries = [
 				...volumeEntries(appName, s.volumes),
 				...fileMounts.volumes,
+				...configFiles.volumes,
 			];
 			const volumesConfig = allVolumeEntries.length
 				? `\n        volumes = [${allVolumeEntries.join(", ")}]`
@@ -669,7 +678,7 @@ ${portLines}
         extra_hosts = [${hostAliases}]${portsConfig}${entrypointLine}${volumesConfig}${mountBlocks}
       }
 
-${envBlock}${secretsBlock}${fileMounts.templates}
+${envBlock}${secretsBlock}${fileMounts.templates}${configFiles.templates}
 
 ${resourcesBlock}
     }`;
@@ -834,6 +843,7 @@ ${portLines}
 		: "";
 
 	const fileMounts = generateFileMounts(service.fileMounts);
+	const configFiles = generateConfigFileMounts(appName, service.configFiles);
 	const hostsAlias = generateHostsAliasTemplate(
 		appName,
 		allServices,
@@ -843,6 +853,7 @@ ${portLines}
 	const allVolumeEntries = [
 		...volumeEntries(appName, service.volumes),
 		...fileMounts.volumes,
+		...configFiles.volumes,
 		...(hostsAlias ? [hostsAlias.volume] : []),
 	];
 	const volumesConfig = allVolumeEntries.length
@@ -889,7 +900,7 @@ ${discoveryService}
         image = "${service.image}"${dockerForcePull(service.image, forcePull)}${portsConfig}${entrypointLine}${volumesConfig}${mountBlocks}
       }
 
-${envBlock}${secretsBlock}${fileMounts.templates}${hostsTemplate}
+${envBlock}${secretsBlock}${fileMounts.templates}${configFiles.templates}${hostsTemplate}
 
 ${resourcesBlock}
     }
@@ -989,9 +1000,11 @@ ${portLines}
 	// pinned by design in nomad-database.ts). `file` mounts are rendered as templates
 	// and bound from the alloc's local dir, so they share the same volumes list.
 	const fileMounts = generateFileMounts(service.fileMounts);
+	const configFiles = generateConfigFileMounts(appName, service.configFiles);
 	const allVolumeEntries = [
 		...volumeEntries(appName, service.volumes),
 		...fileMounts.volumes,
+		...configFiles.volumes,
 	];
 	const volumesConfig = allVolumeEntries.length
 		? `\n        volumes = [${allVolumeEntries.join(", ")}]`
@@ -1030,7 +1043,7 @@ ${consulServices}
         image = "${service.image}"${dockerForcePull(service.image, forcePull)}${portsConfig}${entrypointLine}${volumesConfig}${mountBlocks}
       }
 
-${envBlock}${secretsBlock}${fileMounts.templates}
+${envBlock}${secretsBlock}${fileMounts.templates}${configFiles.templates}
 
 ${resourcesBlock}
     }
@@ -1062,6 +1075,12 @@ ${lines}
  * env-file injection (each line is one KEY=VALUE).
  */
 const generateSecretsTemplate = (appName: string): string => {
+	// Config-file content is stored in the SAME variable under keys prefixed
+	// "nmplcfg_" (see generateConfigFileMounts) — skip those here so a config file
+	// never leaks into the env file as a bogus KEY=VALUE. The filter uses only
+	// text/template builtins (len/slice/eq), never a consul-template helper that
+	// might not be registered: guard the slice with a length check so short keys
+	// (< 8 chars) can't panic.
 	return `      template {
         destination = "secrets/nomploy.env"
         env         = true
@@ -1069,11 +1088,57 @@ const generateSecretsTemplate = (appName: string): string => {
         data        = <<EOTPL
 {{- with nomadVar "nomad/jobs/${appName}" }}
 {{- range $k, $v := . }}
+{{- $isCfg := false }}
+{{- if ge (len $k) 8 }}{{ if eq (slice $k 0 8) "nmplcfg_" }}{{ $isCfg = true }}{{ end }}{{ end }}
+{{- if not $isCfg }}
 {{ $k }}={{ $v.Value }}
+{{- end }}
 {{- end }}
 {{- end }}
 EOTPL
       }`;
+};
+
+/**
+ * Config files whose content lives in the job's Nomad Variable
+ * (nomad/jobs/<appName>) under `varKey`, distributed to the task the same way
+ * `secrets` are — but rendered to a FILE (env=false) and docker-mounted at
+ * `mountPath`, rather than injected as env. Unlike generateFileMounts (inline
+ * content baked into the HCL), the value never touches the job spec: the template
+ * body is a static consul-template expression, and the value comes in at render
+ * time from the variable, so there is NO HCL/heredoc escaping to do and the
+ * content's own `{{ }}`/`${ }` are written verbatim (a rendered variable value is
+ * data, not template source). change_mode="restart" rolls the task when the file
+ * content changes in the variable — so edits apply without a redeploy once the
+ * template is present.
+ *
+ * Returns `templates` (stanzas for the task body) and `volumes` (entries to append
+ * to the docker `volumes` list, relative to the alloc dir where `local/` lives).
+ */
+const generateConfigFileMounts = (
+	appName: string,
+	configFiles?: NomadServiceSpec["configFiles"],
+): { templates: string; volumes: string[] } => {
+	if (!configFiles || configFiles.length === 0)
+		return { templates: "", volumes: [] };
+	const templates: string[] = [];
+	const volumes: string[] = [];
+	configFiles.forEach((f, i) => {
+		if (!f.mountPath || !f.varKey) return;
+		const dest = `local/cfgfile-${i}`;
+		templates.push(`      template {
+        destination = ${JSON.stringify(dest)}
+        change_mode = "restart"
+        data        = <<EOTPL
+{{- with nomadVar "nomad/jobs/${appName}" }}{{ (index . ${JSON.stringify(f.varKey)}).Value }}{{- end }}
+EOTPL
+      }`);
+		volumes.push(`"${dest}:${f.mountPath}"`);
+	});
+	return {
+		templates: templates.length ? `\n\n${templates.join("\n\n")}` : "",
+		volumes,
+	};
 };
 
 const generateScalingBlock = (

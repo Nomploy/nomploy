@@ -154,6 +154,9 @@ const baseApp: ApplicationNested = {
 	dockerContextPath: null,
 	rollbackActive: false,
 	ulimitsSwarm: null,
+	pendingDeploy: false,
+	allowCanaryWithVolume: false,
+	configFiles: [],
 };
 
 /**

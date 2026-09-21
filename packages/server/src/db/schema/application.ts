@@ -175,6 +175,15 @@ export const applications = pgTable("application", {
 	// This flag gates emitting that template — opt-in per app so a cluster without
 	// workload-identity variable access can't break every deploy at once.
 	nomadSecretsEnabled: boolean("nomadSecretsEnabled").notNull().default(false),
+	// Config files mounted into the container from a Nomad Variable. Each file's
+	// CONTENT lives in the Variable nomad/jobs/<appName> under its `varKey` (never
+	// in the job HCL); only the mount metadata (target path + varKey) is stored
+	// here. The builder emits a template stanza per file that renders the variable
+	// value to a file and docker-mounts it at `mountPath`. See generateConfigFileMounts.
+	configFiles: json("configFiles")
+		.$type<{ mountPath: string; varKey: string }[]>()
+		.notNull()
+		.default([]),
 	// Deployment strategy → the job's Nomad `update` stanza. Defaults reproduce
 	// today's rolling deploy exactly. canaryCount > 0 enables canary deploys:
 	// N canaries run beside the old version until healthy, then promote (auto or
@@ -537,4 +546,6 @@ export const apiUpdateApplication = createSchema
 	.extend({
 		applicationId: z.string().min(1),
 	})
-	.omit({ serverId: true });
+	// configFiles is managed only via the dedicated setAppConfigFiles mutation
+	// (content lives in a Nomad Variable, not editable through the generic update).
+	.omit({ serverId: true, configFiles: true });
