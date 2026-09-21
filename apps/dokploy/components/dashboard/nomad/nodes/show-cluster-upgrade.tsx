@@ -2,6 +2,7 @@ import {
 	AlertTriangle,
 	ArrowUpCircle,
 	CheckCircle2,
+	Copy,
 	Crown,
 	Loader2,
 	PackageCheck,
@@ -12,6 +13,15 @@ import { DialogAction } from "@/components/shared/dialog-action";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+	DialogTrigger,
+} from "@/components/ui/dialog";
 import {
 	Table,
 	TableBody,
@@ -30,7 +40,55 @@ interface VersionNode {
 	role: "server" | "worker";
 	isLeader: boolean;
 	serverId: string | null;
+	isControlPlane?: boolean;
 }
+
+// The control-plane hub runs the panel inside a container without host apt/systemd
+// access, so the panel can't upgrade the host's Nomad for it. Surface the exact
+// manual step instead of a dead "manual" label. `systemctl restart nomad` does a
+// graceful raft leadership handoff, so it's safe to run even when the hub is leader.
+const CONTROL_PLANE_UPGRADE_CMD =
+	"apt-get update -qq && apt-get install -y --only-upgrade nomad && systemctl restart nomad";
+
+const ManualUpgrade = ({ node }: { node: VersionNode }) => (
+	<Dialog>
+		<DialogTrigger asChild>
+			<Button size="sm" variant="outline">
+				<ArrowUpCircle className="mr-2 h-3.5 w-3.5" />
+				Upgrade manually
+			</Button>
+		</DialogTrigger>
+		<DialogContent>
+			<DialogHeader>
+				<DialogTitle>Upgrade Nomad on {node.name} (control plane)</DialogTitle>
+				<DialogDescription>
+					The control plane runs the panel itself (in a container without host
+					access), so the panel can't upgrade its own host from here. Run this
+					on <span className="font-mono">{node.name}</span> over SSH — the
+					restart hands off raft leadership gracefully and running allocations
+					(including this panel) reattach, so there's no downtime.
+				</DialogDescription>
+			</DialogHeader>
+			<div className="break-all rounded-md bg-muted p-3 font-mono text-xs">
+				{CONTROL_PLANE_UPGRADE_CMD}
+			</div>
+			<DialogFooter>
+				<Button
+					variant="outline"
+					onClick={() =>
+						navigator.clipboard
+							?.writeText(CONTROL_PLANE_UPGRADE_CMD)
+							.then(() => toast.success("Command copied"))
+							.catch(() => {})
+					}
+				>
+					<Copy className="mr-2 h-3.5 w-3.5" />
+					Copy command
+				</Button>
+			</DialogFooter>
+		</DialogContent>
+	</Dialog>
+);
 
 /**
  * Cluster version visibility + upgrade readiness. Shows each node's Nomad/Consul
@@ -175,9 +233,7 @@ export const ShowClusterUpgrade = ({ serverId }: { serverId?: string }) => {
 													up to date
 												</span>
 											) : !n.serverId ? (
-												<span className="text-xs text-muted-foreground">
-													manual
-												</span>
+												<ManualUpgrade node={n} />
 											) : isNext ? (
 												<DialogAction
 													title={`Upgrade Nomad on ${n.name}?`}

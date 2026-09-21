@@ -993,6 +993,10 @@ done
 						isLeader: !!n.Address && n.Address === leaderIp,
 						// null for the hub (no server row) → manual upgrade.
 						serverId: serverIdByIp.get(n.Address) ?? null,
+						// The control-plane hub can't be upgraded by the panel (it runs
+						// inside a container without host apt/systemd access) → the UI
+						// shows a manual `apt`+restart step instead of an Upgrade button.
+						isControlPlane,
 					};
 				}),
 			);
