@@ -3,6 +3,7 @@ import type { Destination } from "@nomploy/server/services/destination";
 import type { Postgres } from "@nomploy/server/services/postgres";
 import type { z } from "zod";
 import { getS3Credentials } from "../backups/utils";
+import { getRunningAllocId } from "../nomad/resolve";
 import { execAsync, execAsyncRemote } from "../process/execAsync";
 import { getRestoreCommand } from "./utils";
 
@@ -25,6 +26,9 @@ export const restorePostgresBackup = async (
 		emit("Starting restore...");
 		emit(`Backup path: ${backupPath}`);
 
+		// Resolve the container's alloc id here (panel holds the Nomad token) so the
+		// restore can find it by label on the DB's node, which has no token.
+		const allocId = await getRunningAllocId(appName);
 		const command = getRestoreCommand({
 			appName,
 			credentials: {
@@ -34,6 +38,7 @@ export const restorePostgresBackup = async (
 			type: "postgres",
 			rcloneCommand,
 			restoreType: "database",
+			allocId,
 		});
 
 		emit(`Executing command: ${command}`);

@@ -3,6 +3,7 @@ import type { Destination } from "@nomploy/server/services/destination";
 import type { MySql } from "@nomploy/server/services/mysql";
 import type { z } from "zod";
 import { getS3Credentials } from "../backups/utils";
+import { getRunningAllocId } from "../nomad/resolve";
 import { execAsync, execAsyncRemote } from "../process/execAsync";
 import { getRestoreCommand } from "./utils";
 
@@ -21,6 +22,7 @@ export const restoreMySqlBackup = async (
 
 		const rcloneCommand = `rclone cat ${rcloneFlags.join(" ")} "${backupPath}" | gunzip`;
 
+		const allocId = await getRunningAllocId(appName);
 		const command = getRestoreCommand({
 			appName,
 			type: "mysql",
@@ -30,6 +32,7 @@ export const restoreMySqlBackup = async (
 			},
 			restoreType: "database",
 			rcloneCommand,
+			allocId,
 		});
 
 		emit("Starting restore...");

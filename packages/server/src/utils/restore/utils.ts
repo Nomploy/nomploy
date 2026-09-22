@@ -37,9 +37,14 @@ export const getComposeSearchCommand = (
 	appName: string,
 	type: "stack" | "docker-compose" | "nomad" | "database",
 	serviceName?: string,
+	// Alloc id resolved panel-side (the panel holds the Nomad token). Without it the
+	// container search runs `nomad job allocs` on the DB's node, which has no token
+	// under ACLs → 403 → container not found → restore fails. See
+	// getServiceContainerCommand.
+	allocId?: string,
 ) => {
 	if (type === "database") {
-		return getServiceContainerCommand(appName || "");
+		return getServiceContainerCommand(appName || "", allocId);
 	}
 	return getComposeContainerCommand(appName || "", serviceName || "", type);
 };
@@ -102,6 +107,9 @@ interface RestoreOptions {
 	serviceName?: string;
 	rcloneCommand: string;
 	backupFile?: string;
+	// Panel-resolved Nomad alloc id, threaded to the container search so a restore
+	// on a DB's node (no token there) can find the container by its alloc label.
+	allocId?: string;
 }
 
 export const getRestoreCommand = ({
@@ -112,11 +120,13 @@ export const getRestoreCommand = ({
 	serviceName,
 	rcloneCommand,
 	backupFile,
+	allocId,
 }: RestoreOptions) => {
 	const containerSearch = getComposeSearchCommand(
 		appName,
 		restoreType,
 		serviceName,
+		allocId,
 	);
 	const restoreCommand = generateRestoreCommand(type, credentials);
 	let cmd = `CONTAINER_ID=$(${containerSearch})`;

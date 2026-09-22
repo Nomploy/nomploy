@@ -3,6 +3,7 @@ import type { Destination } from "@nomploy/server/services/destination";
 import type { Libsql } from "@nomploy/server/services/libsql";
 import type { z } from "zod";
 import { getS3Credentials, getServiceContainerCommand } from "../backups/utils";
+import { getRunningAllocId } from "../nomad/resolve";
 import { execAsync, execAsyncRemote } from "../process/execAsync";
 
 export const restoreLibsqlBackup = async (
@@ -24,7 +25,8 @@ export const restoreLibsqlBackup = async (
 		emit("Starting restore...");
 		emit(`Backup path: ${backupPath}`);
 
-		const containerSearch = getServiceContainerCommand(appName);
+		const allocId = await getRunningAllocId(appName);
+		const containerSearch = getServiceContainerCommand(appName, allocId);
 		const restoreCommand = `docker exec -i $CONTAINER_ID sh -c "tar xzf - -C /var/lib/sqld"`;
 
 		const command = `CONTAINER_ID=$(${containerSearch}) && ${rcloneCommand} | ${restoreCommand}`;

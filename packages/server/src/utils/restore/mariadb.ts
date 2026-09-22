@@ -3,6 +3,7 @@ import type { Destination } from "@nomploy/server/services/destination";
 import type { Mariadb } from "@nomploy/server/services/mariadb";
 import type { z } from "zod";
 import { getS3Credentials } from "../backups/utils";
+import { getRunningAllocId } from "../nomad/resolve";
 import { execAsync, execAsyncRemote } from "../process/execAsync";
 import { getRestoreCommand } from "./utils";
 
@@ -21,6 +22,7 @@ export const restoreMariadbBackup = async (
 
 		const rcloneCommand = `rclone cat ${rcloneFlags.join(" ")} "${backupPath}" | gunzip`;
 
+		const allocId = await getRunningAllocId(appName);
 		const command = getRestoreCommand({
 			appName,
 			credentials: {
@@ -31,6 +33,7 @@ export const restoreMariadbBackup = async (
 			type: "mariadb",
 			rcloneCommand,
 			restoreType: "database",
+			allocId,
 		});
 
 		emit("Starting restore...");

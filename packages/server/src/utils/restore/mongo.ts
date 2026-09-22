@@ -3,6 +3,7 @@ import type { Destination } from "@nomploy/server/services/destination";
 import type { Mongo } from "@nomploy/server/services/mongo";
 import type { z } from "zod";
 import { getS3Credentials } from "../backups/utils";
+import { getRunningAllocId } from "../nomad/resolve";
 import { execAsync, execAsyncRemote } from "../process/execAsync";
 import { getRestoreCommand } from "./utils";
 
@@ -20,6 +21,7 @@ export const restoreMongoBackup = async (
 		const backupPath = `${bucketPath}/${backupInput.backupFile}`;
 		const rcloneCommand = `rclone copy ${rcloneFlags.join(" ")} "${backupPath}"`;
 
+		const allocId = await getRunningAllocId(appName);
 		const command = getRestoreCommand({
 			appName,
 			type: "mongo",
@@ -31,6 +33,7 @@ export const restoreMongoBackup = async (
 			restoreType: "database",
 			rcloneCommand,
 			backupFile: backupInput.backupFile,
+			allocId,
 		});
 
 		emit("Starting restore...");
