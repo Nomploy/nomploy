@@ -167,6 +167,21 @@ if ! command -v nomad >/dev/null 2>&1 || ! command -v consul >/dev/null 2>&1 || 
   esac
 fi
 
+# rclone: managed-database backups run on the node the DB is pinned to and pipe
+# the dump to rclone → S3, so every node needs it (not just the control plane).
+# Use the OFFICIAL installer (latest) — distro packages are often too old and
+# lack proper Cloudflare R2 support (e.g. Debian's rclone 1.60 returns
+# "NotImplemented 501" on the streaming rcat upload R2 needs). Non-fatal, with an
+# apt/yum fallback (backups are opt-in).
+echo "==> Installing rclone"
+if ! command -v rclone >/dev/null 2>&1; then
+  curl -fsSL https://rclone.org/install.sh | $SUDO bash || \
+  case "$OS_TYPE" in
+    ubuntu|debian|raspbian|pop|linuxmint|zorin) $SUDO apt-get install -y rclone || true ;;
+    centos|rhel|rocky|almalinux|fedora|amzn|ol) $SUDO yum -y install rclone || true ;;
+  esac
+fi
+
 # CNI plugins
 if [ ! -f /opt/cni/bin/bridge ]; then
   $SUDO mkdir -p /opt/cni/bin
