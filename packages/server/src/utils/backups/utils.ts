@@ -306,25 +306,20 @@ export const getBackupCommand = (
 	fi
 
 	echo "[$(date)] Container Up: $CONTAINER_ID" >> ${logPath};
+	echo "[$(date)] Dumping and uploading to S3..." >> ${logPath};
 
-	# Run the backup command and capture the exit status
-	BACKUP_OUTPUT=$(${backupCommand} 2>&1 >/dev/null) || {
-		echo "[$(date)] ❌ Error: Backup failed" >> ${logPath};
-		echo "Error: $BACKUP_OUTPUT" >> ${logPath};
+	# Dump straight to S3 in ONE pipeline. Previously the full dump ran TWICE (once
+	# to "check", once to upload) — double the DB load and time, and the two dumps
+	# could even differ. With \`set -o pipefail\` a failure in EITHER stage (dump or
+	# rclone) fails the pipeline; capture both stages' stderr for the error, discard
+	# the data on stdout.
+	OUTPUT=$({ ${backupCommand} | ${rcloneCommand}; } 2>&1 >/dev/null) || {
+		echo "[$(date)] ❌ Error: Backup/upload failed" >> ${logPath};
+		echo "Error: $OUTPUT" >> ${logPath};
 		exit 1;
 	}
 
-	echo "[$(date)] ✅ backup completed successfully" >> ${logPath};
-	echo "[$(date)] Starting upload to S3..." >> ${logPath};
-
-	# Run the upload command and capture the exit status
-	UPLOAD_OUTPUT=$(${backupCommand} | ${rcloneCommand} 2>&1 >/dev/null) || {
-		echo "[$(date)] ❌ Error: Upload to S3 failed" >> ${logPath};
-		echo "Error: $UPLOAD_OUTPUT" >> ${logPath};
-		exit 1;
-	}
-
-	echo "[$(date)] ✅ Upload to S3 completed successfully" >> ${logPath};
+	echo "[$(date)] ✅ Backup uploaded to S3 successfully" >> ${logPath};
 	echo "Backup done ✅" >> ${logPath};
 	`;
 };

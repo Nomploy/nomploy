@@ -1,4 +1,5 @@
 import { standardSchemaResolver as zodResolver } from "@hookform/resolvers/standard-schema";
+import { formatDistanceToNow } from "date-fns";
 import { DatabaseBackup, Loader2, Play, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -41,6 +42,7 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
 import { api } from "@/utils/api";
 
 const schema = z.object({
@@ -61,6 +63,11 @@ type Schema = z.infer<typeof schema>;
 export const ShowWebServerBackups = () => {
 	const [open, setOpen] = useState(false);
 	const { data: backups, refetch } = api.backup.listWebServerBackups.useQuery();
+	const wsBackupIds = (backups ?? []).map((b) => b.backupId);
+	const { data: lastRuns } = api.backup.lastRuns.useQuery(
+		{ backupIds: wsBackupIds },
+		{ enabled: wsBackupIds.length > 0, refetchInterval: 30000 },
+	);
 	const { data: destinations } = api.destination.all.useQuery();
 	const create = api.backup.create.useMutation();
 	const update = api.backup.update.useMutation();
@@ -276,6 +283,35 @@ export const ShowWebServerBackups = () => {
 									{b.prefix ? ` · ${b.prefix}` : ""}
 									{b.keepLatestCount ? ` · keep ${b.keepLatestCount}` : ""}
 								</div>
+								{(() => {
+									const run = lastRuns?.[b.backupId];
+									return (
+										<div className="mt-1 flex items-center gap-1.5 text-xs">
+											<span
+												className={cn(
+													"size-1.5 rounded-full",
+													run?.status === "done"
+														? "bg-green-500"
+														: run?.status === "error"
+															? "bg-red-500"
+															: run
+																? "bg-yellow-500"
+																: "bg-muted-foreground/40",
+												)}
+											/>
+											<span
+												className={cn(
+													"text-muted-foreground",
+													run?.status === "error" && "text-red-500",
+												)}
+											>
+												{run
+													? `${run.status === "done" ? "OK" : run.status === "error" ? "Failed" : run.status} · ${formatDistanceToNow(new Date(run.ranAt), { addSuffix: true })}`
+													: "Never run"}
+											</span>
+										</div>
+									);
+								})()}
 							</div>
 							<div className="flex items-center gap-2">
 								<Switch

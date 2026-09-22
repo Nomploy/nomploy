@@ -96,6 +96,34 @@ export const findDeploymentById = async (deploymentId: string) => {
 	return deployment;
 };
 
+/**
+ * Latest backup run per backupId — powers the "last run" health badge on the
+ * backups UI. Returns {backupId: {status, ranAt}} for the newest deployment of
+ * each requested backup (backup runs are recorded as deployments). Backups that
+ * have never run are simply absent from the map.
+ */
+export const findLatestBackupRuns = async (
+	backupIds: string[],
+): Promise<Record<string, { status: string; ranAt: string }>> => {
+	if (backupIds.length === 0) return {};
+	const rows = await db.query.deployments.findMany({
+		where: inArray(deployments.backupId, backupIds),
+		columns: { backupId: true, status: true, createdAt: true },
+		// createdAt is an ISO-8601 text column, so lexical desc == chronological desc.
+		orderBy: desc(deployments.createdAt),
+	});
+	const latest: Record<string, { status: string; ranAt: string }> = {};
+	for (const r of rows) {
+		if (r.backupId && !latest[r.backupId]) {
+			latest[r.backupId] = {
+				status: r.status ?? "running",
+				ranAt: r.createdAt,
+			};
+		}
+	}
+	return latest;
+};
+
 export const findDeploymentByApplicationId = async (applicationId: string) => {
 	const deployment = await db.query.deployments.findFirst({
 		where: eq(deployments.applicationId, applicationId),

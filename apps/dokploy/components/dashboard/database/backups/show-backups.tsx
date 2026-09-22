@@ -1,3 +1,4 @@
+import { formatDistanceToNow } from "date-fns";
 import {
 	ClipboardList,
 	Database,
@@ -42,6 +43,32 @@ interface Props {
 	databaseType?: Exclude<ServiceType, "application" | "redis"> | "web-server";
 	backupType?: "database" | "compose";
 }
+
+// At-a-glance health of a backup's most recent run (done/error/never), so a
+// silently-failing backup is visible without opening the deployment history.
+const LastRunBadge = ({ run }: { run?: { status: string; ranAt: string } }) => {
+	if (!run)
+		return (
+			<span className="text-muted-foreground text-sm mt-0.5">Never run</span>
+		);
+	const ok = run.status === "done";
+	const failed = run.status === "error";
+	return (
+		<span className="flex items-center gap-1.5 mt-0.5">
+			<span
+				className={cn(
+					"size-1.5 rounded-full",
+					ok ? "bg-green-500" : failed ? "bg-red-500" : "bg-yellow-500",
+				)}
+			/>
+			<span className={cn("text-sm font-medium", failed && "text-red-500")}>
+				{ok ? "OK" : failed ? "Failed" : run.status}
+				{" · "}
+				{formatDistanceToNow(new Date(run.ranAt), { addSuffix: true })}
+			</span>
+		</span>
+	);
+};
 export const ShowBackups = ({
 	id,
 	databaseType,
@@ -98,6 +125,13 @@ export const ShowBackups = ({
 
 	const { mutateAsync: deleteBackup, isPending: isRemoving } =
 		api.backup.remove.useMutation();
+
+	// Latest run per backup, for the "Last run" health badge.
+	const backupIds = (postgres?.backups ?? []).map((b) => b.backupId);
+	const { data: lastRuns } = api.backup.lastRuns.useQuery(
+		{ backupIds },
+		{ enabled: backupIds.length > 0, refetchInterval: 30000 },
+	);
 
 	return (
 		<Card className="bg-background">
@@ -277,6 +311,15 @@ export const ShowBackups = ({
 																<p className="font-medium text-sm mt-0.5">
 																	{backup.keepLatestCount || "All"}
 																</p>
+															</div>
+
+															<div className="min-w-[180px]">
+																<span className="text-sm font-medium text-muted-foreground">
+																	Last run
+																</span>
+																<LastRunBadge
+																	run={lastRuns?.[backup.backupId]}
+																/>
 															</div>
 														</div>
 													</div>

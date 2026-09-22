@@ -28,6 +28,7 @@ import {
 	scheduleBackup,
 	updateBackupById,
 } from "@nomploy/server";
+import { findLatestBackupRuns } from "@nomploy/server/services/deployment";
 import { findDestinationById } from "@nomploy/server/services/destination";
 import { checkServicePermissionAndAccess } from "@nomploy/server/services/permission";
 import { runComposeBackup } from "@nomploy/server/utils/backups/compose";
@@ -157,6 +158,10 @@ export const backupRouter = createTRPCRouter({
 	listWebServerBackups: withPermission("backup", "read").query(async () => {
 		return findWebServerBackups();
 	}),
+	// Latest run (status + time) per backup, for the "last run" health badge.
+	lastRuns: protectedProcedure
+		.input(z.object({ backupIds: z.array(z.string()) }))
+		.query(async ({ input }) => findLatestBackupRuns(input.backupIds)),
 	one: protectedProcedure
 		.input(apiFindOneBackup)
 		.query(async ({ input, ctx }) => {
