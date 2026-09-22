@@ -584,6 +584,7 @@ export const ShowCluster = () => {
 									<TableHead>Role</TableHead>
 									<TableHead>Source</TableHead>
 									<TableHead>Overlay IP</TableHead>
+									<TableHead>Private IP</TableHead>
 									<TableHead>Status</TableHead>
 									<TableHead className="text-right">Actions</TableHead>
 								</TableRow>
@@ -592,7 +593,7 @@ export const ShowCluster = () => {
 								{membersLoading ? (
 									<TableRow>
 										<TableCell
-											colSpan={6}
+											colSpan={7}
 											className="text-center text-muted-foreground text-sm"
 										>
 											<span className="inline-flex items-center gap-2">
@@ -604,7 +605,7 @@ export const ShowCluster = () => {
 								) : membersError ? (
 									<TableRow>
 										<TableCell
-											colSpan={6}
+											colSpan={7}
 											className="text-center text-destructive text-sm"
 										>
 											Couldn't load cluster members:{" "}
@@ -647,6 +648,9 @@ export const ShowCluster = () => {
 												</TableCell>
 												<TableCell className="font-mono text-xs">
 													{m.wgIp}
+												</TableCell>
+												<TableCell className="font-mono text-xs text-muted-foreground">
+													{m.privateIp ?? "—"}
 												</TableCell>
 												<TableCell>
 													<div className="flex flex-wrap items-center gap-1.5">
@@ -744,7 +748,7 @@ export const ShowCluster = () => {
 								) : (
 									<TableRow>
 										<TableCell
-											colSpan={6}
+											colSpan={7}
 											className="text-center text-muted-foreground text-sm"
 										>
 											No cluster members yet.

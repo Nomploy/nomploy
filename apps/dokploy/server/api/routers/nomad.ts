@@ -2369,6 +2369,9 @@ fi`;
 			role: "server" | "worker",
 			wgIp: string,
 			serverId: string | null,
+			// The node's WireGuard endpoint from cluster.json ("<privateIp>:51820");
+			// its host part is the node's provider-private IP (Hetzner 10.14.x).
+			endpoint?: string,
 		) => {
 			const prov = serverId ? provByServer.get(serverId) : undefined;
 			const source: "control-plane" | "autoscaled" | "provisioned" | "manual" =
@@ -2384,6 +2387,8 @@ fi`;
 				name,
 				role,
 				wgIp,
+				// Provider-private IP (host part of the WG endpoint); null if unknown.
+				privateIp: endpoint ? (endpoint.split(":")[0] ?? null) : null,
 				serverId,
 				status: statusByIp.get(wgIp) ?? "unknown",
 				leader: role === "server" && wgIp === leaderIp,
@@ -2398,10 +2403,17 @@ fi`;
 			};
 		};
 		return [
-			row("control-plane", "server", cluster.hubWgIp, null),
-			...(cluster.servers || []).map((s) =>
-				row(s.name, "server", s.wgIp, s.serverId),
+			row(
+				"control-plane",
+				"server",
+				cluster.hubWgIp,
+				null,
+				cluster.hubEndpoint,
 			),
+			...(cluster.servers || []).map((s) =>
+				row(s.name, "server", s.wgIp, s.serverId, s.endpoint),
+			),
+			// Worker peers are learned passively (no endpoint recorded) → no private IP.
 			...cluster.peers.map((p) => row(p.name, "worker", p.wgIp, p.serverId)),
 		];
 	}),
