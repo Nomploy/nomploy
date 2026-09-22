@@ -123,13 +123,21 @@ export const getLibsqlBackupCommand = (database: string) => {
 	return `docker exec -i $CONTAINER_ID sh -c "tar cf - -C /var/lib/sqld ${database} | gzip"`;
 };
 
-export const getServiceContainerCommand = (appName: string) => {
-	// Databases run as Nomad jobs (job id = appName). Their container carries the
-	// Nomad allocation id as a label; resolve the job's running allocation and
-	// find that container. Runs where the DB is pinned (the control plane or the
-	// server), and both have the nomad CLI + docker socket.
-	const allocId = `$(nomad job allocs -t '{{range .}}{{if eq .ClientStatus "running"}}{{.ID}}{{end}}{{end}}' ${appName} 2>/dev/null | head -c 36)`;
-	return `docker ps -q --filter "status=running" --filter "label=com.hashicorp.nomad.alloc_id=${allocId}" | head -n 1`;
+export const getServiceContainerCommand = (
+	appName: string,
+	allocId?: string,
+) => {
+	// Databases run as Nomad jobs (job id = appName); their container carries the
+	// Nomad allocation id as a label. Prefer an alloc id resolved PANEL-SIDE (the
+	// panel holds the Nomad token): a remote node's shell has no token, so
+	// `nomad job allocs` there returns 403 under ACLs and the container is never
+	// found — the DB backup then fails for any DB pinned off the control plane.
+	// Fall back to the in-shell lookup only when no alloc id was resolved (e.g. on
+	// the control plane, where the token is in the env).
+	const id = allocId
+		? allocId
+		: `$(nomad job allocs -t '{{range .}}{{if eq .ClientStatus "running"}}{{.ID}}{{end}}{{end}}' ${appName} 2>/dev/null | head -c 36)`;
+	return `docker ps -q --filter "status=running" --filter "label=com.hashicorp.nomad.alloc_id=${id}" | head -n 1`;
 };
 
 export const getComposeContainerCommand = (
@@ -148,7 +156,10 @@ export const getComposeContainerCommand = (
 	return `docker ps -q --filter "status=running" --filter "label=com.docker.compose.project=${appName}" --filter "label=com.docker.compose.service=${serviceName}" | head -n 1`;
 };
 
-const getContainerSearchCommand = (backup: BackupSchedule) => {
+const getContainerSearchCommand = (
+	backup: BackupSchedule,
+	allocId?: string,
+) => {
 	const {
 		backupType,
 		postgres,
@@ -167,7 +178,7 @@ const getContainerSearchCommand = (backup: BackupSchedule) => {
 			mariadb?.appName ||
 			mongo?.appName ||
 			libsql?.appName;
-		return getServiceContainerCommand(appName || "");
+		return getServiceContainerCommand(appName || "", allocId);
 	}
 	if (backupType === "compose") {
 		const { appName, composeType } = compose || {};
@@ -264,8 +275,13 @@ export const getBackupCommand = (
 	backup: BackupSchedule,
 	rcloneCommand: string,
 	logPath: string,
+	// Alloc id resolved panel-side (the panel holds the Nomad token). Threaded to
+	// the container search so a backup running on a remote node — which has no
+	// token — can still find the DB container by its alloc-id label. See
+	// getServiceContainerCommand.
+	allocId?: string,
 ) => {
-	const containerSearch = getContainerSearchCommand(backup);
+	const containerSearch = getContainerSearchCommand(backup, allocId);
 	const backupCommand = generateBackupCommand(backup);
 
 	logger.info(

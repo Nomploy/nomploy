@@ -6,6 +6,7 @@ import {
 import { findEnvironmentById } from "@nomploy/server/services/environment";
 import type { Libsql } from "@nomploy/server/services/libsql";
 import { findProjectById } from "@nomploy/server/services/project";
+import { getRunningAllocId } from "../nomad/resolve";
 import { sendDatabaseBackupNotifications } from "../notifications/database-backup";
 import { execAsync, execAsyncRemote } from "../process/execAsync";
 import {
@@ -38,10 +39,12 @@ export const runLibsqlBackup = async (
 
 		const rcloneCommand = `rclone rcat ${rcloneFlags.join(" ")} "${rcloneDestination}"`;
 
+		const allocId = await getRunningAllocId(appName);
 		const backupCommand = getBackupCommand(
 			backup,
 			rcloneCommand,
 			deployment.logPath,
+			allocId,
 		);
 		if (libsql.serverId) {
 			await execAsyncRemote(libsql.serverId, backupCommand);

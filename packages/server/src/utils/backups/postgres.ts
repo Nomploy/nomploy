@@ -6,6 +6,7 @@ import {
 import { findEnvironmentById } from "@nomploy/server/services/environment";
 import type { Postgres } from "@nomploy/server/services/postgres";
 import { findProjectById } from "@nomploy/server/services/project";
+import { getRunningAllocId } from "../nomad/resolve";
 import { sendDatabaseBackupNotifications } from "../notifications/database-backup";
 import { execAsync, execAsyncRemote } from "../process/execAsync";
 import {
@@ -38,10 +39,15 @@ export const runPostgresBackup = async (
 
 		const rcloneCommand = `rclone rcat ${rcloneFlags.join(" ")} "${rcloneDestination}"`;
 
+		// Resolve the running alloc id here (the panel holds the Nomad token) so the
+		// backup — which runs on the DB's node, where there's no token — can locate
+		// the container by its alloc-id label. See getServiceContainerCommand.
+		const allocId = await getRunningAllocId(appName);
 		const backupCommand = getBackupCommand(
 			backup,
 			rcloneCommand,
 			deployment.logPath,
+			allocId,
 		);
 		if (postgres.serverId) {
 			await execAsyncRemote(postgres.serverId, backupCommand);

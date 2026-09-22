@@ -6,6 +6,7 @@ import {
 import { findEnvironmentById } from "@nomploy/server/services/environment";
 import type { Mongo } from "@nomploy/server/services/mongo";
 import { findProjectById } from "@nomploy/server/services/project";
+import { getRunningAllocId } from "../nomad/resolve";
 import { sendDatabaseBackupNotifications } from "../notifications/database-backup";
 import { execAsync, execAsyncRemote } from "../process/execAsync";
 import {
@@ -33,10 +34,12 @@ export const runMongoBackup = async (mongo: Mongo, backup: BackupSchedule) => {
 		const rcloneDestination = `:s3:${destination.bucket}/${bucketDestination}`;
 		const rcloneCommand = `rclone rcat ${rcloneFlags.join(" ")} "${rcloneDestination}"`;
 
+		const allocId = await getRunningAllocId(appName);
 		const backupCommand = getBackupCommand(
 			backup,
 			rcloneCommand,
 			deployment.logPath,
+			allocId,
 		);
 
 		if (mongo.serverId) {
