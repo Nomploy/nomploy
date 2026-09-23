@@ -218,6 +218,27 @@ export const evaluateCluster = async (cfg: {
 		memReserved <= cfg.memScaleDownThreshold &&
 		blockedEvals === 0;
 
+	// Would removing one node strand running work? Reservation % alone is not enough
+	// to justify a scale-down: a small job on a big node reads well below the
+	// down-threshold, but it can only run in THIS pool, so removing its node evicts
+	// it → the alloc re-blocks → we scale straight back up. That flap is what killed
+	// the first mem node in testing. Guard: only scale down if the capacity that
+	// remains after dropping one (average) node still holds the current running
+	// reservation without re-breaching the up-threshold. A truly idle pool (no
+	// running reservation) can always shrink to min. Approximation: average per-node
+	// capacity — exact for a homogeneous auto pool (the norm), conservative enough to
+	// stop the flap on the single-node case (remaining capacity → 0).
+	const readyCount = ready.length;
+	const postCpuCap = readyCount > 0 ? cpuTotal - cpuTotal / readyCount : 0;
+	const postMemCap = readyCount > 0 ? memTotal - memTotal / readyCount : 0;
+	const hasRunningLoad = cpuUsed > 0 || memUsed > 0;
+	const removalWouldStrand =
+		hasRunningLoad &&
+		(postCpuCap <= 0 ||
+			postMemCap <= 0 ||
+			cpuUsed > (postCpuCap * cfg.scaleUpThreshold) / 100 ||
+			memUsed > (postMemCap * cfg.memScaleUpThreshold) / 100);
+
 	// 1) Converge the actual worker count to the current target first. This is where
 	//    a manually- or schedule-set desiredNodes takes effect. Manual nodes count
 	//    toward workerCount but are never removed (autoRemovable gates scale-down).
@@ -262,6 +283,14 @@ export const evaluateCluster = async (cfg: {
 		};
 	}
 	if (slack && current > cfg.minNodes && autoRemovable > 0) {
+		if (removalWouldStrand) {
+			return {
+				action: "none",
+				reason: `slack but holding — running allocs need this pool's capacity (cpu ${cpuUsed}/${Math.round(postCpuCap)} mem ${memUsed}/${Math.round(postMemCap)} MB left after removal)`,
+				desired: current,
+				...base,
+			};
+		}
 		return {
 			action: "down",
 			reason: `slack — cpu ${cpuReserved}% ≤ ${cfg.scaleDownThreshold}% & mem ${memReserved}% ≤ ${cfg.memScaleDownThreshold}%`,
