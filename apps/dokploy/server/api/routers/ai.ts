@@ -338,8 +338,13 @@ ${input.logs}`,
 
 			const projectName = slugify(`${project.name} ${input.id}`);
 
+			// The AI suggestion's `configFiles` ({filePath, content}) is a different
+			// concept from the compose column of the same name ({mountPath, varKey},
+			// managed via setComposeConfigFiles) — drop it from the create spread so
+			// the two don't collide. It was an ignored excess property before anyway.
+			const { configFiles: _aiConfigFiles, ...composeInput } = input;
 			const compose = await createComposeByTemplate({
-				...input,
+				...composeInput,
 				composeFile: input.dockerCompose,
 				env: input.envVariables,
 				serverId: input.serverId,

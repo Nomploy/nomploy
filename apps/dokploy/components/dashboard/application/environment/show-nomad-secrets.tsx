@@ -34,19 +34,30 @@ const serializeSecrets = (items: Record<string, string>): string =>
 		.map(([k, v]) => `${k}=${v}`)
 		.join("\n");
 
+// Works for an application OR a compose (compose-wide secrets). Exactly one id
+// is passed; the matching Nomad-Variable API is used.
 interface Props {
-	applicationId: string;
+	applicationId?: string;
+	composeId?: string;
 }
 
-export const ShowNomadSecrets = ({ applicationId }: Props) => {
+export const ShowNomadSecrets = ({ applicationId, composeId }: Props) => {
+	const isCompose = !!composeId;
 	const { data: permissions } = api.user.getPermissions.useQuery();
 	const canWrite = permissions?.envVars.write ?? false;
 
-	const { data, refetch } = api.nomad.getAppSecrets.useQuery(
-		{ applicationId },
+	const appQ = api.nomad.getAppSecrets.useQuery(
+		{ applicationId: applicationId ?? "" },
 		{ enabled: !!applicationId },
 	);
-	const { mutateAsync, isPending } = api.nomad.setAppSecrets.useMutation();
+	const composeQ = api.nomad.getComposeSecrets.useQuery(
+		{ composeId: composeId ?? "" },
+		{ enabled: !!composeId },
+	);
+	const { data, refetch } = isCompose ? composeQ : appQ;
+	const appMut = api.nomad.setAppSecrets.useMutation();
+	const composeMut = api.nomad.setComposeSecrets.useMutation();
+	const isPending = isCompose ? composeMut.isPending : appMut.isPending;
 
 	const form = useForm<Schema>({
 		defaultValues: { secrets: "" },
@@ -65,13 +76,21 @@ export const ShowNomadSecrets = ({ applicationId }: Props) => {
 		const items = parseSecrets(formData.secrets);
 		const wasEnabled = data?.enabled ?? false;
 		try {
-			const res = await mutateAsync({ applicationId, items });
+			const res = isCompose
+				? await composeMut.mutateAsync({
+						composeId: composeId as string,
+						items,
+					})
+				: await appMut.mutateAsync({
+						applicationId: applicationId as string,
+						items,
+					});
 			await refetch();
 			// The template that reads the variable is only added to the job on
 			// deploy. Once present, Nomad rolls the task on a secret change on its
 			// own — so only the FIRST enable needs a redeploy.
 			if (res.enabled && !wasEnabled) {
-				toast.success("Secrets saved — redeploy the app to activate them");
+				toast.success("Secrets saved — redeploy to activate them");
 			} else if (!res.enabled) {
 				toast.success("Secrets cleared");
 			} else {
@@ -110,8 +129,8 @@ export const ShowNomadSecrets = ({ applicationId }: Props) => {
 					/>
 					{data && !data.enabled && Object.keys(data.items).length === 0 && (
 						<AlertBlock type="info">
-							The first time you add secrets you must redeploy the app to
-							activate them. After that, changes roll the task automatically.
+							The first time you add secrets you must redeploy to activate them.
+							After that, changes roll the task automatically.
 						</AlertBlock>
 					)}
 					{canWrite && (

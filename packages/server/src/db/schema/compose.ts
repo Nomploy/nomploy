@@ -85,6 +85,17 @@ export const compose = pgTable("compose", {
 	allowCanaryWithVolume: boolean("allowCanaryWithVolume")
 		.notNull()
 		.default(false),
+	// Compose-wide Nomad-Variable secrets + config files, mirroring the application
+	// fields. When enabled, every service in the compose gets the secrets env
+	// template + config-file mounts, all read from the shared job variable
+	// nomad/jobs/<appName>. Content lives in the variable (never the job HCL);
+	// configFiles holds only the mount metadata. See getComposeSecrets /
+	// getComposeConfigFiles and the injection in generateNomadJob (compose path).
+	nomadSecretsEnabled: boolean("nomadSecretsEnabled").notNull().default(false),
+	configFiles: jsonb("configFiles")
+		.$type<{ mountPath: string; varKey: string }[]>()
+		.notNull()
+		.default([]),
 	// Group-level autoscaling for SHARED mode: scales the single group (all services
 	// together) as a unit. Best for a single-service compose or an all-stateless app —
 	// scaling replicates every task in the group. In independent mode, use per-service
@@ -332,7 +343,9 @@ export const apiUpdateCompose = createSchema
 		composeFile: z.string().optional(),
 		command: z.string().optional(),
 	})
-	.omit({ serverId: true });
+	// configFiles is managed only via setComposeConfigFiles (content lives in a
+	// Nomad Variable), not the generic update. Mirrors apiUpdateApplication.
+	.omit({ serverId: true, configFiles: true });
 
 export const apiSaveEnvironmentVariablesCompose = createSchema
 	.pick({

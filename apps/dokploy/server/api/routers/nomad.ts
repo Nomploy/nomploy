@@ -16,6 +16,10 @@ import {
 	findApplicationById,
 	updateApplication,
 } from "@nomploy/server/services/application";
+import {
+	findComposeById,
+	updateCompose,
+} from "@nomploy/server/services/compose";
 import { checkServicePermissionAndAccess } from "@nomploy/server/services/permission";
 import { getProvisioner } from "@nomploy/server/setup/autoscale";
 import {
@@ -1643,6 +1647,152 @@ fi`;
 				resourceType: "application",
 				resourceId: application.applicationId,
 				resourceName: application.appName,
+			});
+			return { enabled: configFiles.length > 0, count: configFiles.length };
+		}),
+
+	// ── Compose secrets + config files (compose-wide) ──────────────────────────
+	// Same Nomad-Variable model as the app handlers, but applied to a WHOLE
+	// compose: the secrets/config files are injected into EVERY service (all read
+	// the shared job variable nomad/jobs/<compose.appName>). See the injection in
+	// generateNomadJob's compose path.
+	getComposeSecrets: protectedProcedure
+		.input(z.object({ composeId: z.string() }))
+		.query(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.composeId, {
+				envVars: ["read"],
+			});
+			const compose = await findComposeById(input.composeId);
+			const cfg = await resolveNomad(ctx, compose.serverId ?? undefined);
+			const res = await nomadClient(cfg).request(
+				withNs(`/var/nomad/jobs/${compose.appName}`, cfg.namespace),
+			);
+			if (res.status === 404) {
+				return {
+					items: {} as Record<string, string>,
+					enabled: compose.nomadSecretsEnabled,
+				};
+			}
+			if (!res.ok) {
+				throw new TRPCError({
+					code: "INTERNAL_SERVER_ERROR",
+					message: `Nomad variable read failed: ${res.status} ${res.statusText}`,
+				});
+			}
+			const v = (await res.json()) as { Items?: Record<string, string> };
+			const items = Object.fromEntries(
+				Object.entries(v.Items ?? {}).filter(
+					([k]) => !k.startsWith(CONFIG_FILE_PREFIX),
+				),
+			);
+			return { items, enabled: compose.nomadSecretsEnabled };
+		}),
+
+	setComposeSecrets: protectedProcedure
+		.input(
+			z.object({
+				composeId: z.string(),
+				items: z.record(z.string(), z.string()),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.composeId, {
+				envVars: ["write"],
+			});
+			const compose = await findComposeById(input.composeId);
+			const cfg = await resolveNomad(ctx, compose.serverId ?? undefined);
+			const client = nomadClient(cfg);
+			const path = `/var/nomad/jobs/${compose.appName}`;
+			const keys = Object.keys(input.items);
+			const existing = await readVariableItems(client, path, cfg.namespace);
+			const preserved = Object.fromEntries(
+				Object.entries(existing).filter(([k]) =>
+					k.startsWith(CONFIG_FILE_PREFIX),
+				),
+			);
+			const merged = { ...preserved, ...input.items };
+			await writeOrDeleteVariable(
+				client,
+				path,
+				`nomad/jobs/${compose.appName}`,
+				merged,
+				cfg.namespace,
+			);
+			await updateCompose(input.composeId, {
+				nomadSecretsEnabled: keys.length > 0,
+			});
+			await audit(ctx, {
+				action: "update",
+				resourceType: "compose",
+				resourceId: compose.composeId,
+				resourceName: compose.appName,
+			});
+			return { enabled: keys.length > 0, count: keys.length };
+		}),
+
+	getComposeConfigFiles: protectedProcedure
+		.input(z.object({ composeId: z.string() }))
+		.query(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.composeId, {
+				envVars: ["read"],
+			});
+			const compose = await findComposeById(input.composeId);
+			const cfg = await resolveNomad(ctx, compose.serverId ?? undefined);
+			const items = await readVariableItems(
+				nomadClient(cfg),
+				`/var/nomad/jobs/${compose.appName}`,
+				cfg.namespace,
+			);
+			const files = (compose.configFiles ?? []).map((f) => ({
+				mountPath: f.mountPath,
+				content: items[f.varKey] ?? "",
+			}));
+			return { files, enabled: (compose.configFiles ?? []).length > 0 };
+		}),
+
+	setComposeConfigFiles: protectedProcedure
+		.input(
+			z.object({
+				composeId: z.string(),
+				files: z.array(
+					z.object({ mountPath: z.string(), content: z.string() }),
+				),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.composeId, {
+				envVars: ["write"],
+			});
+			const compose = await findComposeById(input.composeId);
+			const cfg = await resolveNomad(ctx, compose.serverId ?? undefined);
+			const client = nomadClient(cfg);
+			const path = `/var/nomad/jobs/${compose.appName}`;
+			const existing = await readVariableItems(client, path, cfg.namespace);
+			const merged: Record<string, string> = Object.fromEntries(
+				Object.entries(existing).filter(
+					([k]) => !k.startsWith(CONFIG_FILE_PREFIX),
+				),
+			);
+			const configFiles: { mountPath: string; varKey: string }[] = [];
+			input.files.forEach((f) => {
+				if (!f.mountPath.trim()) return;
+				const varKey = `${CONFIG_FILE_PREFIX}${configFiles.length}`;
+				merged[varKey] = f.content;
+				configFiles.push({ mountPath: f.mountPath.trim(), varKey });
+			});
+			await writeOrDeleteVariable(
+				client,
+				path,
+				`nomad/jobs/${compose.appName}`,
+				merged,
+				cfg.namespace,
+			);
+			await updateCompose(input.composeId, { configFiles });
+			await audit(ctx, {
+				action: "update",
+				resourceType: "compose",
+				resourceId: compose.composeId,
+				resourceName: compose.appName,
 			});
 			return { enabled: configFiles.length > 0, count: configFiles.length };
 		}),

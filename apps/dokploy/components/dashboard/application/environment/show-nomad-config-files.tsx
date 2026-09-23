@@ -9,8 +9,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/utils/api";
 
+// Works for an application OR a compose (compose-wide config files). Exactly one
+// id is passed; the matching Nomad-Variable API is used.
 interface Props {
-	applicationId: string;
+	applicationId?: string;
+	composeId?: string;
 }
 
 type FileEntry = { mountPath: string; content: string };
@@ -29,15 +32,23 @@ const sameFiles = (a: FileEntry[], b: FileEntry[]): boolean =>
  * existing file rolls the task on its own; the FIRST file added needs a redeploy
  * to attach the template.
  */
-export const ShowNomadConfigFiles = ({ applicationId }: Props) => {
+export const ShowNomadConfigFiles = ({ applicationId, composeId }: Props) => {
+	const isCompose = !!composeId;
 	const { data: permissions } = api.user.getPermissions.useQuery();
 	const canWrite = permissions?.envVars.write ?? false;
 
-	const { data, refetch } = api.nomad.getAppConfigFiles.useQuery(
-		{ applicationId },
+	const appQ = api.nomad.getAppConfigFiles.useQuery(
+		{ applicationId: applicationId ?? "" },
 		{ enabled: !!applicationId },
 	);
-	const { mutateAsync, isPending } = api.nomad.setAppConfigFiles.useMutation();
+	const composeQ = api.nomad.getComposeConfigFiles.useQuery(
+		{ composeId: composeId ?? "" },
+		{ enabled: !!composeId },
+	);
+	const { data, refetch } = isCompose ? composeQ : appQ;
+	const appMut = api.nomad.setAppConfigFiles.useMutation();
+	const composeMut = api.nomad.setComposeConfigFiles.useMutation();
+	const isPending = isCompose ? composeMut.isPending : appMut.isPending;
 
 	const [files, setFiles] = useState<FileEntry[]>([]);
 	const loaded = data?.files ?? [];
@@ -60,10 +71,18 @@ export const ShowNomadConfigFiles = ({ applicationId }: Props) => {
 		const cleaned = files.filter((f) => f.mountPath.trim());
 		const wasEnabled = (loaded.length ?? 0) > 0;
 		try {
-			const res = await mutateAsync({ applicationId, files: cleaned });
+			const res = isCompose
+				? await composeMut.mutateAsync({
+						composeId: composeId as string,
+						files: cleaned,
+					})
+				: await appMut.mutateAsync({
+						applicationId: applicationId as string,
+						files: cleaned,
+					});
 			await refetch();
 			if (res.enabled && !wasEnabled) {
-				toast.success("Config files saved — redeploy the app to mount them");
+				toast.success("Config files saved — redeploy to mount them");
 			} else if (!res.enabled) {
 				toast.success("Config files cleared");
 			} else {

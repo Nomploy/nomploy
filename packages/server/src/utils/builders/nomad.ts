@@ -275,6 +275,15 @@ export const getBuildNomadCommand = async (
 		const envVars = resolveNomadEnvVars(compose);
 		// Parse compose file into Nomad services
 		const services = parseComposeToNomadServices(composeFile, envVars);
+		// Compose-wide Nomad-Variable secrets + config files → every service's task
+		// (all read from the shared job variable nomad/jobs/<appName>). Opt-in via the
+		// compose Environment tab; content lives in the variable, not the job HCL.
+		if (compose.nomadSecretsEnabled) {
+			for (const s of services) s.secrets = true;
+		}
+		if (compose.configFiles && compose.configFiles.length > 0) {
+			for (const s of services) s.configFiles = compose.configFiles;
+		}
 		// Merge per-service scaling set from the panel UI over the compose-file values
 		// (UI wins), so users can set replicas/autoscaling without editing the YAML.
 		applyServiceScalingOverrides(services, compose.serviceScaling);
