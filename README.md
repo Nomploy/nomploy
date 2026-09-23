@@ -17,31 +17,51 @@ whole is licensed under the **GNU AGPL-3.0**; the upstream enterprise
   already know are translated to Nomad HCL (ports, env, health checks, resources,
   replicas and autoscaling via `x-nomad-scaling`).
 - **Three ways to deploy** — translated Docker Compose, a **native Nomad HCL job
-  file** deployed verbatim, or a **Nomad Pack** from the community or a custom
-  registry.
+  file** deployed verbatim, or a **Nomad Pack** from a custom registry or the
+  **hosted pack registry at [`packs.nomploy.com`](https://packs.nomploy.com)**.
 - **Highly-available clusters** — grow from one node to an HA Nomad + Consul
   control plane from the **Cluster** tab: add/remove servers and workers over an
-  encrypted WireGuard mesh, drain nodes for maintenance, and watch cluster DNS
-  health.
-- **Autoscaling** — horizontal autoscaling on CPU/memory targets for both
+  encrypted WireGuard mesh, drain nodes for maintenance, upgrade Nomad (including
+  the control plane) from the UI, see each node's private IP, and watch cluster
+  DNS health.
+- **Cluster autoscaling with node-pool groups** — ASG-style **autoscaling
+  groups**, each backed by its own **Nomad node pool** and launch template (cloud
+  provider, server type, region, image, SSH key, min/max, CPU/memory reservation
+  thresholds and cooldown). Each group scales **independently** on its pool's
+  pressure; target a group from a job's `node_pool`. Supports reactive scaling, a
+  manual **desired count** and **scheduled** actions (cron), and it provisions,
+  joins, drains and destroys cloud VMs automatically — without removing a node
+  whose pool still has running work.
+- **Cloud providers** — register a cloud credential once (e.g. Hetzner) in
+  **Settings → Cloud** and reference it from any autoscaling group or the
+  one-click **Add node** action; tokens never live on individual groups.
+- **App & service autoscaling** — horizontal autoscaling on CPU/memory targets for
   applications and compose services.
+- **Runtime secrets & config files** — per application or compose, store secret
+  environment variables and whole config files in **Nomad Variables**; they are
+  injected as env or mounted as files at runtime and **never appear in the job
+  spec**.
 - **Bring-your-own registry** — register any OCI registry (your own zot/`registry:2`,
   GHCR, ECR, …) in **Settings → Registry**; credentials are distributed to every
   node via Consul KV + consul-template, so private images pull cluster-wide with
   no credentials in job specs.
 - **GPU workloads** — request NVIDIA GPUs for a job via Nomad device plugins.
 - **Nomad dashboard** — view jobs, allocations, nodes, logs and cluster
-  resources; scale or stop jobs from the UI. Pick which server's Nomad cluster to
-  view with a per-server selector.
+  resources; scale or stop jobs and **exec into an allocation's task** from the
+  UI. Pick which server's Nomad cluster to view with a per-server selector.
 - **One-click Nomad bootstrap** — install Docker + Consul + Nomad + CNI on a
   managed server over SSH, straight from the UI.
 - **Applications & databases** — Node.js, PHP, Python, Go, Ruby, …; MySQL,
-  PostgreSQL, MongoDB, MariaDB, libSQL and Redis.
+  PostgreSQL, MongoDB, MariaDB, libSQL and Redis, persisted on real Nomad-managed
+  Docker volumes.
 - **Ingress via Traefik + Consul Catalog** — services register in Consul with
   Traefik tags and are routed automatically, with Let's Encrypt TLS.
-- **Docker Compose**, **templates**, **backups** (S3), **multi-server**,
-  **real-time monitoring**, **notifications** (Slack/Discord/Telegram/email),
-  and a **tRPC API**.
+- **Backups & restore** — scheduled backups of managed databases (PostgreSQL,
+  MySQL, MariaDB, MongoDB, libSQL) and the panel's own database to any
+  **S3-compatible** store (AWS S3, **Cloudflare R2**, …), with per-backup last-run
+  health and one-command restore.
+- **Docker Compose**, **templates**, **multi-server**, **real-time monitoring**,
+  **notifications** (Slack/Discord/Telegram/email), and a **tRPC API**.
 - **Self-hosted** — runs on your own VPS.
 
 ## 🚀 Getting Started
@@ -70,8 +90,10 @@ Full guides live in [`docs/`](docs/README.md):
 - [Getting Started](docs/getting-started.md) — install, first login, first deploy.
 - [Architecture](docs/architecture.md) — Nomad, Consul, Traefik and the WireGuard overlay.
 - [Cluster management](docs/cluster.md) — high availability: add/remove nodes, drain, DNS health.
-- [Deploying](docs/deploying.md) — Compose, native Nomad HCL, and Nomad Pack.
-- [Autoscaling](docs/autoscaling.md) — scale apps and services on CPU/memory.
+- [Deploying](docs/deploying.md) — Compose, native Nomad HCL, and Nomad Pack
+  (custom registries or the hosted registry at `packs.nomploy.com`).
+- [Autoscaling](docs/autoscaling.md) — scale apps and services on CPU/memory, and
+  the cluster itself with node-pool autoscaling groups.
 - [Container registry](docs/registry.md) — bring-your-own registry + cluster-wide auth.
 - [GPU workloads](docs/gpu.md) — requesting NVIDIA GPUs.
 
@@ -81,7 +103,10 @@ Full guides live in [`docs/`](docs/README.md):
 |---|---|---|
 | Orchestrator | Docker Swarm | HashiCorp Nomad |
 | Service discovery / ingress | Traefik (Docker provider) | Traefik + Consul Catalog |
-| Deploy artifact | Swarm stack / compose | Nomad HCL job (from compose) |
+| Deploy artifact | Swarm stack / compose | Nomad HCL job (from compose), native HCL, or Nomad Pack |
+| Cluster / node autoscaling | — | ASG-style autoscaling groups on Nomad node pools |
+| Secrets & config files | Plaintext env in the stack | Nomad Variables, kept out of the job spec |
+| Pack registry | — | Hosted at `packs.nomploy.com`, plus any custom registry |
 | Enterprise modules (SSO, audit, custom roles, white-label) | Source-available add-on | Removed; free-tier equivalents |
 
 ### Swarm → Nomad migration status
