@@ -236,7 +236,12 @@ export const deployCompose = async ({
 			type: "compose" as const,
 		};
 		let command = "set -e;";
-		if (compose.sourceType === "github") {
+		if (compose.composeType === "nomad-pack") {
+			// A Nomad Pack fetches its source from the pack registry at deploy time
+			// (nomad-pack run) — there's no git repo to clone. Skipping this avoids a
+			// "Github Provider not found" failure, since a pack compose's sourceType
+			// defaults to "github" with no provider configured.
+		} else if (compose.sourceType === "github") {
 			command += await cloneGithubRepository(entity);
 		} else if (compose.sourceType === "gitlab") {
 			command += await cloneGitlabRepository(entity);
@@ -256,7 +261,7 @@ export const deployCompose = async ({
 		} else {
 			await execAsync(commandWithLog);
 		}
-		if (compose.sourceType !== "raw") {
+		if (compose.sourceType !== "raw" && compose.composeType !== "nomad-pack") {
 			command = "set -e;";
 			command += await generateApplyPatchesCommand({
 				id: compose.composeId,
@@ -338,7 +343,7 @@ export const deployCompose = async ({
 		});
 		throw error;
 	} finally {
-		if (compose.sourceType !== "raw") {
+		if (compose.sourceType !== "raw" && compose.composeType !== "nomad-pack") {
 			const commitInfo = await getGitCommitInfo({
 				...compose,
 				type: "compose",
@@ -383,7 +388,7 @@ export const rebuildCompose = async ({
 			await execAsync(commandWithLog);
 		}
 
-		if (compose.sourceType !== "raw") {
+		if (compose.sourceType !== "raw" && compose.composeType !== "nomad-pack") {
 			command = "set -e;";
 			command += await generateApplyPatchesCommand({
 				id: compose.composeId,
