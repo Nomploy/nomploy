@@ -54,7 +54,22 @@ export const volumeBackupsRouter = createTRPCRouter({
 			return await db.query.volumeBackups.findMany({
 				where: eq(volumeBackups[`${input.volumeBackupType}Id`], input.id),
 				with: {
-					application: true,
+					// Column-trimmed: full application load exceeds Postgres's 100-arg
+					// json_build_array limit. [[nomploy-json-build-array-100-arg-limit]]
+					application: {
+						columns: {
+							applicationId: true,
+							name: true,
+							appName: true,
+							description: true,
+							applicationStatus: true,
+							sourceType: true,
+							buildType: true,
+							serverId: true,
+							environmentId: true,
+							createdAt: true,
+						},
+					},
 					postgres: true,
 					mysql: true,
 					mariadb: true,

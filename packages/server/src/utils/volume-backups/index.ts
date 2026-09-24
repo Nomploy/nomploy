@@ -13,7 +13,10 @@ export const initVolumeBackupsCronJobs = async () => {
 		const volumeBackupsResult = await db.query.volumeBackups.findMany({
 			where: eq(volumeBackups.enabled, true),
 			with: {
-				application: true,
+				// Column-trimmed to avoid the >100-arg json_build_array crash on a full
+				// application load; this init loop only uses the row id anyway.
+				// [[nomploy-json-build-array-100-arg-limit]]
+				application: { columns: { appName: true, serverId: true } },
 				compose: true,
 			},
 		});

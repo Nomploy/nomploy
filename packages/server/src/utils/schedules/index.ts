@@ -9,7 +9,10 @@ export const initSchedules = async () => {
 			where: eq(schedules.enabled, true),
 			with: {
 				server: true,
-				application: true,
+				// Column-trimmed: a full application relation load serializes >100
+				// columns into json_build_array and Postgres rejects it (>100 args).
+				// scheduleJob only needs appName + serverId. [[nomploy-json-build-array-100-arg-limit]]
+				application: { columns: { appName: true, serverId: true } },
 				compose: true,
 				organization: true,
 			},

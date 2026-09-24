@@ -80,7 +80,21 @@ export const findDomainById = async (domainId: string) => {
 	const domain = await db.query.domains.findFirst({
 		where: eq(domains.domainId, domainId),
 		with: {
-			application: true,
+			// Column-trimmed to stay under Postgres's 100-arg json_build_array limit;
+			// domain consumers use findApplicationById for the full app.
+			// [[nomploy-json-build-array-100-arg-limit]]
+			application: {
+				columns: {
+					applicationId: true,
+					name: true,
+					appName: true,
+					description: true,
+					applicationStatus: true,
+					serverId: true,
+					environmentId: true,
+					createdAt: true,
+				},
+			},
 		},
 	});
 	if (!domain) {
@@ -96,7 +110,20 @@ export const findDomainsByApplicationId = async (applicationId: string) => {
 	const domainsArray = await db.query.domains.findMany({
 		where: eq(domains.applicationId, applicationId),
 		with: {
-			application: true,
+			// Column-trimmed to stay under Postgres's 100-arg json_build_array limit.
+			// [[nomploy-json-build-array-100-arg-limit]]
+			application: {
+				columns: {
+					applicationId: true,
+					name: true,
+					appName: true,
+					description: true,
+					applicationStatus: true,
+					serverId: true,
+					environmentId: true,
+					createdAt: true,
+				},
+			},
 		},
 	});
 

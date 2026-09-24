@@ -83,7 +83,24 @@ export const findDeploymentById = async (deploymentId: string) => {
 	const deployment = await db.query.deployments.findFirst({
 		where: eq(deployments.deploymentId, deploymentId),
 		with: {
-			application: true,
+			// Column-trimmed: a full application relation load blows past Postgres's
+			// 100-arg json_build_array limit. Callers (deployment router, rollbacks)
+			// use deployment fields / findApplicationById, not this relation's extras.
+			// [[nomploy-json-build-array-100-arg-limit]]
+			application: {
+				columns: {
+					applicationId: true,
+					name: true,
+					appName: true,
+					description: true,
+					applicationStatus: true,
+					sourceType: true,
+					buildType: true,
+					serverId: true,
+					environmentId: true,
+					createdAt: true,
+				},
+			},
 			schedule: true,
 		},
 	});
