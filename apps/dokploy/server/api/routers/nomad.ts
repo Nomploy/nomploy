@@ -243,6 +243,31 @@ const resolvePackJobIds = async (
 	}
 };
 
+// Reverse of resolvePackJobIds: jobId → the pack deployment_name (== the compose
+// appName) for every Nomad Pack job. A pack names its Nomad job after the pack,
+// not the appName, so telemetry (labelled by that job id) must be attributed back
+// to the service through this map. [[nomploy-nomad-packs]]
+const resolvePackJobMap = async (
+	cfg: NomadConfig,
+): Promise<Map<string, string>> => {
+	const map = new Map<string, string>();
+	try {
+		const res = await nomadClient(cfg).request(
+			withNs("/jobs?meta=true", cfg.namespace),
+		);
+		if (!res.ok) return map;
+		const jobs = (await res.json()) as Array<{
+			ID: string;
+			Meta?: Record<string, string> | null;
+		}>;
+		for (const j of jobs) {
+			const dn = (j.Meta || {})["pack.deployment_name"];
+			if (dn) map.set(j.ID, dn);
+		}
+	} catch {}
+	return map;
+};
+
 // ── Consul (service catalog + health) ──────────────────────────────────────
 // Read-only. The control-plane Consul holds the whole cluster's catalog, so with
 // no serverId we read it directly; for a remote standalone cluster we reuse that
@@ -583,6 +608,9 @@ export const nomadRouter = createTRPCRouter({
 			/nomad_client_allocs_memory_usage\{([^}]*)\}\s+([0-9.e+-]+)/g;
 		const label = (labels: string, key: string) =>
 			labels.match(new RegExp(`${key}="([^"]*)"`))?.[1] ?? "";
+		// Nomad Pack jobs are labelled by the pack's job id, not the appName; map
+		// them back so a pack service's usage lands under its appName.
+		const packMap = await resolvePackJobMap(cfg);
 		// job (= appName) → { cpu%, memBytes }
 		const byJob: Record<string, { cpu: number; mem: number }> = {};
 		const scrape = async (addr: string) => {
@@ -597,15 +625,17 @@ export const nomadRouter = createTRPCRouter({
 				if (!res.ok) return;
 				const text = await res.text();
 				for (const m of text.matchAll(cpuLine)) {
-					const job = label(m[1] ?? "", "job");
-					if (!job) continue;
+					const jobLabel = label(m[1] ?? "", "job");
+					if (!jobLabel) continue;
+					const job = packMap.get(jobLabel) ?? jobLabel;
 					const cur = byJob[job] ?? { cpu: 0, mem: 0 };
 					cur.cpu += Number(m[2]) || 0;
 					byJob[job] = cur;
 				}
 				for (const m of text.matchAll(memLine)) {
-					const job = label(m[1] ?? "", "job");
-					if (!job) continue;
+					const jobLabel = label(m[1] ?? "", "job");
+					if (!jobLabel) continue;
+					const job = packMap.get(jobLabel) ?? jobLabel;
 					const cur = byJob[job] ?? { cpu: 0, mem: 0 };
 					cur.mem += Number(m[2]) || 0;
 					byJob[job] = cur;
@@ -728,6 +758,9 @@ export const nomadRouter = createTRPCRouter({
 
 			const label = (labels: string, key: string) =>
 				labels.match(new RegExp(`${key}="([^"]*)"`))?.[1] ?? "";
+			// Nomad Pack jobs are labelled by the pack's job id, not the appName; map
+			// them back so a pack service's usage lands under its appName.
+			const packMap = await resolvePackJobMap(cfg);
 			// job (= appName) → raw sums (cpu MHz, mem bytes) across every alloc/task.
 			const raw: Record<
 				string,
@@ -770,8 +803,9 @@ export const nomadRouter = createTRPCRouter({
 					const text = await res.text();
 					for (const [re, field] of fields) {
 						for (const m of text.matchAll(re)) {
-							const job = label(m[1] ?? "", "job");
-							if (!job) continue;
+							const jobLabel = label(m[1] ?? "", "job");
+							if (!jobLabel) continue;
+							const job = packMap.get(jobLabel) ?? jobLabel;
 							const cur = raw[job] ?? {
 								cpuUsed: 0,
 								cpuAlloc: 0,

@@ -50,6 +50,22 @@ export const sampleServiceMetrics = async (): Promise<number> => {
 	}
 	addrs.add(NOMAD_ADDRESS.replace(/^https?:\/\//, "").replace(/\/$/, ""));
 
+	// A Nomad Pack names its job after the pack (e.g. "zot"), not the compose's
+	// appName, so telemetry's job label won't match. Map pack jobs back to their
+	// appName via meta.pack.deployment_name so a pack service's samples land under
+	// its appName. [[nomploy-nomad-packs]]
+	const packToAppName = new Map<string, string>();
+	try {
+		const jobs = (await nomad("/jobs?meta=true")) as {
+			ID: string;
+			Meta?: Record<string, string> | null;
+		}[];
+		for (const j of jobs) {
+			const dn = (j.Meta || {})["pack.deployment_name"];
+			if (dn) packToAppName.set(j.ID, dn);
+		}
+	} catch {}
+
 	const raw: Record<
 		string,
 		{ cpuUsed: number; cpuAlloc: number; memUsed: number; memAlloc: number }
@@ -68,8 +84,9 @@ export const sampleServiceMetrics = async (): Promise<number> => {
 				const text = await res.text();
 				for (const [re, field] of FIELDS) {
 					for (const m of text.matchAll(re)) {
-						const job = label(m[1] ?? "", "job");
-						if (!job) continue;
+						const jobLabel = label(m[1] ?? "", "job");
+						if (!jobLabel) continue;
+						const job = packToAppName.get(jobLabel) ?? jobLabel;
 						const cur = raw[job] ?? {
 							cpuUsed: 0,
 							cpuAlloc: 0,
