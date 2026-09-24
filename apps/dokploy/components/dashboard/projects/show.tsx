@@ -57,6 +57,7 @@ import { api } from "@/utils/api";
 import { useDebounce } from "@/utils/hooks/use-debounce";
 import { HandleProject } from "./handle-project";
 import { ProjectEnvironment } from "./project-environment";
+import { ScalingSuggestions } from "./scaling-suggestions";
 
 /**
  * Tiny inline-SVG trend line built from the polled metric snapshots (no TSDB).
@@ -374,6 +375,7 @@ export const ShowProjects = () => {
 											</span>
 										</div>
 									)}
+									<ScalingSuggestions />
 									<div className="w-full grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 3xl:grid-cols-5 flex-wrap gap-5">
 										{filteredProjects?.map((project) => {
 											const emptyServices = project?.environments

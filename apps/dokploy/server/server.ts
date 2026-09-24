@@ -107,6 +107,16 @@ void (async () => {
 						"@nomploy/server/setup/autoscale/schedule"
 					);
 					await initAutoscalingSchedules();
+					// Metrics sampler (rolling per-service usage-vs-reserved history) +
+					// daily utilization/scaling suggestions digest.
+					const { startMetricsSampler } = await import(
+						"@nomploy/server/setup/metrics/sampler"
+					);
+					startMetricsSampler(300);
+					const { startScalingDigestLoop } = await import(
+						"@nomploy/server/setup/metrics/digest"
+					);
+					startScalingDigestLoop();
 					// Cluster health monitor (node down / raft leader → cluster alerts).
 					const { startClusterHealthLoop } = await import(
 						"@nomploy/server/setup/monitoring/cluster-health"

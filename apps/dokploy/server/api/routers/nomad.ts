@@ -22,6 +22,7 @@ import {
 	updateCompose,
 } from "@nomploy/server/services/compose";
 import { checkServicePermissionAndAccess } from "@nomploy/server/services/permission";
+import { getScalingSuggestions } from "@nomploy/server/services/scaling-suggestions";
 import { getProvisioner } from "@nomploy/server/setup/autoscale";
 import {
 	evaluateCluster,
@@ -839,6 +840,13 @@ export const nomadRouter = createTRPCRouter({
 
 			return { ts: Date.now(), totals, services };
 		}),
+
+	// Utilization/scaling suggestions from the sampled metric history (over-
+	// provisioned / running hot / idle). Powers the in-panel Suggestions list; the
+	// same analysis drives the daily digest notification.
+	getScalingSuggestions: protectedProcedure.query(async ({ ctx }) => {
+		return getScalingSuggestions(ctx.session.activeOrganizationId);
+	}),
 
 	// Browse the packs available in a Nomad Pack registry so the user can pick one
 	// instead of typing a name. Adds the registry to the local cache (idempotent) and
