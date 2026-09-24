@@ -64,6 +64,9 @@ const dockerImageDefaultPlaceholder: Record<DbType, string> = {
 	mariadb: "mariadb:11",
 	mysql: "mysql:8",
 	postgres: "postgres:18",
+	// pgvector is plain Postgres + the vector extension, so it reuses the whole
+	// Postgres backend (connection, backups, restore) — only the image differs.
+	pgvector: "pgvector/pgvector:pg17",
 	redis: "redis:7",
 };
 
@@ -76,6 +79,7 @@ const databasesUserDefaultPlaceholder: Record<
 	mongo: "mongo",
 	mysql: "mysql",
 	postgres: "postgres",
+	pgvector: "postgres",
 };
 
 const baseDatabaseSchema = z.object({
@@ -158,6 +162,15 @@ const mySchema = z
 			.merge(baseDatabaseSchema),
 		z
 			.object({
+				// PostgreSQL + pgvector — a UI preset that creates a normal Postgres
+				// service (via api.postgres.create) with the pgvector image.
+				type: z.literal("pgvector"),
+				databaseName: z.string().default("postgres"),
+				databaseUser: z.string().default("postgres"),
+			})
+			.merge(baseDatabaseSchema),
+		z
+			.object({
 				type: z.literal("redis"),
 			})
 			.merge(baseDatabaseSchema),
@@ -186,6 +199,10 @@ const databasesMap = {
 	postgres: {
 		icon: <PostgresqlIcon />,
 		label: "PostgreSQL",
+	},
+	pgvector: {
+		icon: <PostgresqlIcon />,
+		label: "PostgreSQL + pgvector",
 	},
 	mongo: {
 		icon: <MongodbIcon />,
@@ -263,6 +280,7 @@ export const AddDatabase = ({ environmentId, projectName }: Props) => {
 		mongo: mongoMutation,
 		mysql: mysqlMutation,
 		postgres: postgresMutation,
+		pgvector: postgresMutation,
 		redis: redisMutation,
 	};
 
@@ -320,7 +338,8 @@ export const AddDatabase = ({ environmentId, projectName }: Props) => {
 				serverId: data.serverId === "nomploy" ? null : data.serverId,
 				databaseRootPassword: data.databaseRootPassword || "",
 			});
-		} else if (data.type === "postgres") {
+		} else if (data.type === "postgres" || data.type === "pgvector") {
+			// pgvector is Postgres with the vector extension image — same backend.
 			promise = postgresMutation.mutateAsync({
 				...commonParams,
 				databasePassword: data.databasePassword,
@@ -568,7 +587,8 @@ export const AddDatabase = ({ environmentId, projectName }: Props) => {
 								/>
 								{(type === "mariadb" ||
 									type === "mysql" ||
-									type === "postgres") && (
+									type === "postgres" ||
+									type === "pgvector") && (
 									<FormField
 										control={form.control}
 										name="databaseName"
@@ -677,7 +697,8 @@ export const AddDatabase = ({ environmentId, projectName }: Props) => {
 									type === "mariadb" ||
 									type === "mongo" ||
 									type === "mysql" ||
-									type === "postgres") && (
+									type === "postgres" ||
+									type === "pgvector") && (
 									<FormField
 										control={form.control}
 										name="databaseUser"
