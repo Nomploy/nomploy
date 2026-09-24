@@ -1,5 +1,6 @@
 import { AlertTriangle, Lightbulb, Moon, TrendingDown } from "lucide-react";
 import Link from "next/link";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/utils/api";
 
@@ -51,11 +52,22 @@ export const ScalingSuggestions = () => {
 							className="flex items-start gap-2 rounded-lg border p-2.5 text-sm transition-colors hover:bg-border"
 						>
 							<Icon className={`mt-0.5 size-4 shrink-0 ${className}`} />
-							<span className="flex flex-col">
+							<span className="flex min-w-0 flex-col gap-0.5">
+								<span className="flex flex-wrap items-center gap-1.5">
+									<span className="font-medium">{s.serviceName}</span>
+									<Badge
+										variant="secondary"
+										className="px-1.5 py-0 text-[10px]"
+									>
+										{s.serviceType}
+									</Badge>
+									<span className="text-xs text-muted-foreground">
+										in {s.projectName}
+									</span>
+								</span>
 								<span>{s.message}</span>
-								<span className="text-xs text-muted-foreground">
-									{s.projectName} · CPU {s.cpuPct}% · mem {s.memPct}% of
-									reserved
+								<span className="truncate text-xs text-muted-foreground">
+									{s.appName} · {s.samples} samples
 								</span>
 							</span>
 						</Link>

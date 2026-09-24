@@ -13,6 +13,8 @@ export interface ScalingSuggestion {
 	projectName: string;
 	environmentId: string;
 	kind: SuggestionKind;
+	/** Human label identifying the service: "name (type) · project". */
+	title: string;
 	message: string;
 	cpuPct: number;
 	memPct: number;
@@ -142,28 +144,29 @@ export const getScalingSuggestions = async (
 			projectId: m.projectId,
 			projectName: m.projectName,
 			environmentId: m.environmentId,
+			title: `${m.name} (${m.type}) · ${m.projectName}`,
 			cpuPct,
 			memPct,
 			samples: g.n,
 		};
-		const win = `over ${WINDOW_HOURS}h`;
+		const usage = `CPU ${cpuPct}%, mem ${memPct}% of reserved over ${WINDOW_HOURS}h`;
 		if (cpuPct <= 5 && memPct <= 5) {
 			out.push({
 				...base,
 				kind: "idle",
-				message: `${m.name} looks idle (CPU ${cpuPct}%, mem ${memPct}% of reserved ${win}) — consider stopping it.`,
+				message: `Idle — ${usage}. Consider stopping it.`,
 			});
 		} else if (cpuPct >= 85 || memPct >= 85) {
 			out.push({
 				...base,
 				kind: "under_provisioned",
-				message: `${m.name} is running hot (CPU ${cpuPct}%, mem ${memPct}% of reserved ${win}) — raise its reserved resources or enable autoscaling.`,
+				message: `Running hot — ${usage}. Raise reserved resources or enable autoscaling.`,
 			});
 		} else if (cpuPct < 15 && memPct < 40) {
 			out.push({
 				...base,
 				kind: "over_provisioned",
-				message: `${m.name} is over-provisioned (CPU ${cpuPct}%, mem ${memPct}% of reserved ${win}) — consider lowering its reserved CPU/memory.`,
+				message: `Over-provisioned — ${usage}. Consider lowering reserved CPU/memory.`,
 			});
 		}
 	}

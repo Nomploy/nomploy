@@ -21,7 +21,7 @@ export const sendDailyScalingDigest = async () => {
 			if (suggestions.length === 0) continue;
 			const detail = suggestions
 				.slice(0, 15)
-				.map((s) => `• ${s.message}`)
+				.map((s) => `• ${s.title} — ${s.message}`)
 				.join("\n");
 			await sendClusterAlertNotifications(org, {
 				EventType: "warning",
