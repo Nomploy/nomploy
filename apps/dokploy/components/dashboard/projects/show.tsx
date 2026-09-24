@@ -58,6 +58,58 @@ import { useDebounce } from "@/utils/hooks/use-debounce";
 import { HandleProject } from "./handle-project";
 import { ProjectEnvironment } from "./project-environment";
 
+/**
+ * Tiny inline-SVG trend line built from the polled metric snapshots (no TSDB).
+ * Flat/blank until at least two points have been collected.
+ */
+const Sparkline = ({
+	data,
+	color,
+	width = 56,
+	height = 16,
+}: {
+	data: number[];
+	color: string;
+	width?: number;
+	height?: number;
+}) => {
+	if (data.length < 2) return null;
+	const max = Math.max(...data);
+	const min = Math.min(...data);
+	const range = max - min || 1;
+	const step = width / (data.length - 1);
+	const pts = data.map((v, i) => {
+		const x = i * step;
+		const y = height - ((v - min) / range) * (height - 2) - 1;
+		return `${x.toFixed(1)},${y.toFixed(1)}`;
+	});
+	const line = `M ${pts.join(" L ")}`;
+	return (
+		<svg
+			width={width}
+			height={height}
+			viewBox={`0 0 ${width} ${height}`}
+			className="shrink-0"
+			aria-hidden="true"
+		>
+			<path
+				d={`${line} L ${width},${height} L 0,${height} Z`}
+				fill={color}
+				fillOpacity={0.12}
+				stroke="none"
+			/>
+			<path
+				d={line}
+				fill="none"
+				stroke={color}
+				strokeWidth={1.25}
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			/>
+		</svg>
+	);
+};
+
 export const ShowProjects = () => {
 	const utils = api.useUtils();
 	const router = useRouter();
@@ -78,6 +130,25 @@ export const ShowProjects = () => {
 			new Map((projectMetrics?.projects ?? []).map((p) => [p.projectId, p])),
 		[projectMetrics],
 	);
+	// Rolling per-project history (client-side, from each poll) for the sparklines.
+	const [metricsHistory, setMetricsHistory] = useState<
+		Record<string, { cpu: number[]; mem: number[] }>
+	>({});
+	// biome-ignore lint/correctness/useExhaustiveDependencies: append once per poll (ts)
+	useEffect(() => {
+		if (!projectMetrics) return;
+		setMetricsHistory((prev) => {
+			const next = { ...prev };
+			for (const p of projectMetrics.projects) {
+				const h = next[p.projectId] ?? { cpu: [], mem: [] };
+				next[p.projectId] = {
+					cpu: [...h.cpu, p.cpuPercent].slice(-24),
+					mem: [...h.mem, p.memoryMb].slice(-24),
+				};
+			}
+			return next;
+		});
+	}, [projectMetrics?.ts]);
 
 	const [searchQuery, setSearchQuery] = useState(
 		router.isReady && typeof router.query.q === "string" ? router.query.q : "",
@@ -336,6 +407,7 @@ export const ShowProjects = () => {
 											// Live resource usage for this project (summed across its
 											// services), from Nomad telemetry — shown only when there is data.
 											const pm = metricsByProject.get(project.projectId);
+											const hist = metricsHistory[project.projectId];
 											const hasMetrics =
 												!!pm && (pm.cpuPercent > 0 || pm.memoryMb > 0);
 
@@ -524,6 +596,12 @@ export const ShowProjects = () => {
 																				>
 																					<Cpu className="size-3.5" />
 																					{pm?.cpuPercent}%
+																					{hist && (
+																						<Sparkline
+																							data={hist.cpu}
+																							color="hsl(var(--chart-1))"
+																						/>
+																					)}
 																				</span>
 																				<span
 																					className="flex items-center gap-1"
@@ -533,6 +611,12 @@ export const ShowProjects = () => {
 																					{pm && pm.memoryMb >= 1024
 																						? `${(pm.memoryMb / 1024).toFixed(1)} GB`
 																						: `${pm?.memoryMb ?? 0} MB`}
+																					{hist && (
+																						<Sparkline
+																							data={hist.mem}
+																							color="hsl(var(--chart-2))"
+																						/>
+																					)}
 																				</span>
 																			</>
 																		)}

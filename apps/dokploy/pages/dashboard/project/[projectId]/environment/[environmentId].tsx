@@ -39,6 +39,10 @@ import { DuplicateProject } from "@/components/dashboard/project/duplicate-proje
 import { EnvironmentVariables } from "@/components/dashboard/project/environment-variables";
 import { ProjectEnvironment } from "@/components/dashboard/projects/project-environment";
 import {
+	EnvResourceUsage,
+	MiniUsage,
+} from "@/components/dashboard/projects/usage-vs-reserved";
+import {
 	LibsqlIcon,
 	MariadbIcon,
 	MongodbIcon,
@@ -387,6 +391,22 @@ const EnvironmentPage = (
 		environmentId,
 	});
 	const { data: allProjects } = api.project.all.useQuery();
+	// Live used-vs-reserved CPU/memory for this environment (per service + total),
+	// from Nomad telemetry. Polled; returns empty when Nomad isn't reachable.
+	const { data: envMetrics } = api.nomad.getEnvironmentMetrics.useQuery(
+		{ environmentId },
+		{ refetchInterval: 10000 },
+	);
+	const usageByService = useMemo(
+		() =>
+			new Map(
+				(envMetrics?.services ?? []).map((s) => [
+					`${s.type}:${s.id}`,
+					s.metrics,
+				]),
+			),
+		[envMetrics],
+	);
 
 	const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
 	const [selectedTargetProject, setSelectedTargetProject] =
@@ -1629,6 +1649,7 @@ const EnvironmentPage = (
 										</div>
 									) : (
 										<div className="flex w-full flex-col gap-4">
+											<EnvResourceUsage totals={envMetrics?.totals} />
 											<div className="gap-5 pb-10 grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3">
 												{filteredServices?.map((service) => (
 													<ContextMenu key={service.id}>
@@ -1719,7 +1740,12 @@ const EnvironmentPage = (
 																			</div>
 																		</CardTitle>
 																	</CardHeader>
-																	<CardFooter className="mt-auto">
+																	<CardFooter className="mt-auto flex-col items-stretch">
+																		<MiniUsage
+																			metrics={usageByService.get(
+																				`${service.type}:${service.id}`,
+																			)}
+																		/>
 																		<div className="space-y-1 text-sm w-full">
 																			{service.serverName && (
 																				<div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">

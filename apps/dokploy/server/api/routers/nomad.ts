@@ -8,6 +8,7 @@ import {
 	cloudProvider,
 	clusterAutoscaler,
 	clusterAutoscalerEvents,
+	environments,
 	networkPolicies,
 	projects,
 	server as serverTable,
@@ -668,6 +669,176 @@ export const nomadRouter = createTRPCRouter({
 			})),
 		};
 	}),
+
+	// Live USED-vs-RESERVED CPU/memory for one environment: per service + the
+	// environment total. From Nomad telemetry (all-zero stats API notwithstanding):
+	// used = cpu_total_ticks (MHz) / memory_usage (bytes); reserved = cpu_allocated
+	// (MHz) / memory_allocated (bytes). Keyed by {type,id} so the env page's cards
+	// match without needing appName client-side. Snapshot only — the client polls.
+	getEnvironmentMetrics: withPermission("server", "read")
+		.input(z.object({ environmentId: z.string() }))
+		.query(async ({ input, ctx }) => {
+			type M = {
+				cpuUsedMhz: number;
+				cpuAllocMhz: number;
+				memUsedMb: number;
+				memAllocMb: number;
+			};
+			const zero = (): M => ({
+				cpuUsedMhz: 0,
+				cpuAllocMhz: 0,
+				memUsedMb: 0,
+				memAllocMb: 0,
+			});
+			const empty = {
+				ts: Date.now(),
+				totals: zero(),
+				services: [] as { type: string; id: string; metrics: M }[],
+			};
+			let cfg: Awaited<ReturnType<typeof resolveNomad>>;
+			try {
+				cfg = await resolveNomad(ctx, undefined);
+			} catch {
+				return empty;
+			}
+			const client = nomadClient(cfg);
+			// biome-ignore lint/suspicious/noExplicitAny: Nomad node list shape
+			let nodes: any[] = [];
+			try {
+				nodes = (await client.get(withNs("/nodes", cfg.namespace))) as any[];
+			} catch {
+				return empty;
+			}
+			const ready = (nodes ?? []).filter((n) => n.Status === "ready");
+			const addrs = new Set<string>();
+			await Promise.all(
+				ready.map(async (n) => {
+					try {
+						const r = await client.request(
+							withNs(`/node/${n.ID}`, cfg.namespace),
+						);
+						if (!r.ok) return;
+						const node = (await r.json()) as { HTTPAddr?: string };
+						if (node.HTTPAddr) addrs.add(node.HTTPAddr);
+					} catch {}
+				}),
+			);
+			addrs.add(cfg.address.replace(/^https?:\/\//, "").replace(/\/$/, ""));
+
+			const label = (labels: string, key: string) =>
+				labels.match(new RegExp(`${key}="([^"]*)"`))?.[1] ?? "";
+			// job (= appName) → raw sums (cpu MHz, mem bytes) across every alloc/task.
+			const raw: Record<
+				string,
+				{ cpuUsed: number; cpuAlloc: number; memUsed: number; memAlloc: number }
+			> = {};
+			const fields: [
+				RegExp,
+				"cpuUsed" | "cpuAlloc" | "memUsed" | "memAlloc",
+			][] = [
+				[
+					/nomad_client_allocs_cpu_total_ticks\{([^}]*)\}\s+([0-9.eE+-]+)/g,
+					"cpuUsed",
+				],
+				[
+					/nomad_client_allocs_cpu_allocated\{([^}]*)\}\s+([0-9.eE+-]+)/g,
+					"cpuAlloc",
+				],
+				[
+					/nomad_client_allocs_memory_usage\{([^}]*)\}\s+([0-9.eE+-]+)/g,
+					"memUsed",
+				],
+				[
+					/nomad_client_allocs_memory_allocated\{([^}]*)\}\s+([0-9.eE+-]+)/g,
+					"memAlloc",
+				],
+			];
+			const scrape = async (addr: string) => {
+				try {
+					const ctl = new AbortController();
+					const t = setTimeout(() => ctl.abort(), 4000);
+					const res = await fetch(
+						`http://${addr}/v1/metrics?format=prometheus`,
+						{
+							headers: cfg.token ? { "X-Nomad-Token": cfg.token } : {},
+							signal: ctl.signal,
+						},
+					);
+					clearTimeout(t);
+					if (!res.ok) return;
+					const text = await res.text();
+					for (const [re, field] of fields) {
+						for (const m of text.matchAll(re)) {
+							const job = label(m[1] ?? "", "job");
+							if (!job) continue;
+							const cur = raw[job] ?? {
+								cpuUsed: 0,
+								cpuAlloc: 0,
+								memUsed: 0,
+								memAlloc: 0,
+							};
+							cur[field] += Number(m[2]) || 0;
+							raw[job] = cur;
+						}
+					}
+				} catch {}
+			};
+			await Promise.all([...addrs].map(scrape));
+
+			// Map each service's Nomad job (appName) → the {type,id} the card uses.
+			// Only id + appName per service to keep the json_build_array arg count
+			// tiny [[nomploy-json-build-array-100-arg-limit]].
+			const env = await db.query.environments.findFirst({
+				where: eq(environments.environmentId, input.environmentId),
+				columns: { environmentId: true },
+				with: {
+					applications: { columns: { applicationId: true, appName: true } },
+					compose: { columns: { composeId: true, appName: true } },
+					postgres: { columns: { postgresId: true, appName: true } },
+					mysql: { columns: { mysqlId: true, appName: true } },
+					mariadb: { columns: { mariadbId: true, appName: true } },
+					mongo: { columns: { mongoId: true, appName: true } },
+					redis: { columns: { redisId: true, appName: true } },
+					libsql: { columns: { libsqlId: true, appName: true } },
+				},
+			});
+
+			const toMb = (b: number) => Math.round(b / (1024 * 1024));
+			const metricsFor = (appName: string): M => {
+				const r = raw[appName];
+				if (!r) return zero();
+				return {
+					cpuUsedMhz: Math.round(r.cpuUsed),
+					cpuAllocMhz: Math.round(r.cpuAlloc),
+					memUsedMb: toMb(r.memUsed),
+					memAllocMb: toMb(r.memAlloc),
+				};
+			};
+			const services: { type: string; id: string; metrics: M }[] = [];
+			const totals = zero();
+			const add = (type: string, id: string, appName: string) => {
+				const m = metricsFor(appName);
+				services.push({ type, id, metrics: m });
+				totals.cpuUsedMhz += m.cpuUsedMhz;
+				totals.cpuAllocMhz += m.cpuAllocMhz;
+				totals.memUsedMb += m.memUsedMb;
+				totals.memAllocMb += m.memAllocMb;
+			};
+			for (const a of env?.applications ?? [])
+				add("application", a.applicationId, a.appName);
+			for (const c of env?.compose ?? [])
+				add("compose", c.composeId, c.appName);
+			for (const p of env?.postgres ?? [])
+				add("postgres", p.postgresId, p.appName);
+			for (const m of env?.mysql ?? []) add("mysql", m.mysqlId, m.appName);
+			for (const m of env?.mariadb ?? [])
+				add("mariadb", m.mariadbId, m.appName);
+			for (const m of env?.mongo ?? []) add("mongo", m.mongoId, m.appName);
+			for (const r of env?.redis ?? []) add("redis", r.redisId, r.appName);
+			for (const l of env?.libsql ?? []) add("libsql", l.libsqlId, l.appName);
+
+			return { ts: Date.now(), totals, services };
+		}),
 
 	// Browse the packs available in a Nomad Pack registry so the user can pick one
 	// instead of typing a name. Adds the registry to the local cache (idempotent) and
