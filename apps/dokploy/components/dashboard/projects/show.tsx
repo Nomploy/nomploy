@@ -2,8 +2,10 @@ import {
 	AlertTriangle,
 	ArrowUpDown,
 	BookIcon,
+	Cpu,
 	FolderInput,
 	Loader2,
+	MemoryStick,
 	MoreHorizontalIcon,
 	Search,
 	TrashIcon,
@@ -65,6 +67,17 @@ export const ShowProjects = () => {
 	const { data: permissions } = api.user.getPermissions.useQuery();
 	const { mutateAsync } = api.project.remove.useMutation();
 	const { data: availableTags } = api.tag.all.useQuery();
+	// Live CPU%/memory per project from Nomad telemetry — polled, current snapshot.
+	// Returns nothing/zeros when Nomad isn't reachable, so cards just omit the stats.
+	const { data: projectMetrics } = api.nomad.getProjectsMetrics.useQuery(
+		undefined,
+		{ refetchInterval: 10000 },
+	);
+	const metricsByProject = useMemo(
+		() =>
+			new Map((projectMetrics?.projects ?? []).map((p) => [p.projectId, p])),
+		[projectMetrics],
+	);
 
 	const [searchQuery, setSearchQuery] = useState(
 		router.isReady && typeof router.query.q === "string" ? router.query.q : "",
@@ -320,6 +333,12 @@ export const ShowProjects = () => {
 												)
 												.reduce((acc, curr) => acc + curr, 0);
 
+											// Live resource usage for this project (summed across its
+											// services), from Nomad telemetry — shown only when there is data.
+											const pm = metricsByProject.get(project.projectId);
+											const hasMetrics =
+												!!pm && (pm.cpuPercent > 0 || pm.memoryMb > 0);
+
 											// Find default environment from accessible environments, or fall back to first accessible environment
 											const accessibleEnvironment =
 												project?.environments.find((env) => env.isDefault) ||
@@ -492,16 +511,38 @@ export const ShowProjects = () => {
 																</CardTitle>
 															</CardHeader>
 															<CardFooter className="pt-4 mt-auto">
-																<div className="space-y-1 text-xs flex flex-row justify-between max-sm:flex-wrap w-full gap-2 sm:gap-4">
+																<div className="space-y-1 text-xs flex flex-row items-center justify-between max-sm:flex-wrap w-full gap-2 sm:gap-4">
 																	<DateTooltip date={project.createdAt}>
 																		Created
 																	</DateTooltip>
-																	<span>
-																		{totalServices}{" "}
-																		{totalServices === 1
-																			? "service"
-																			: "services"}
-																	</span>
+																	<div className="flex flex-row items-center gap-3 text-muted-foreground">
+																		{hasMetrics && (
+																			<>
+																				<span
+																					className="flex items-center gap-1"
+																					title="CPU usage across this project's services (live)"
+																				>
+																					<Cpu className="size-3.5" />
+																					{pm?.cpuPercent}%
+																				</span>
+																				<span
+																					className="flex items-center gap-1"
+																					title="Memory used across this project's services (live)"
+																				>
+																					<MemoryStick className="size-3.5" />
+																					{pm && pm.memoryMb >= 1024
+																						? `${(pm.memoryMb / 1024).toFixed(1)} GB`
+																						: `${pm?.memoryMb ?? 0} MB`}
+																				</span>
+																			</>
+																		)}
+																		<span>
+																			{totalServices}{" "}
+																			{totalServices === 1
+																				? "service"
+																				: "services"}
+																		</span>
+																	</div>
 																</div>
 															</CardFooter>
 														</Card>

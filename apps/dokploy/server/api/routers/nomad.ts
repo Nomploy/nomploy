@@ -534,6 +534,141 @@ export const nomadRouter = createTRPCRouter({
 			};
 		}),
 
+	// Live CPU%/memory per PROJECT for the projects page. One telemetry scrape of
+	// every ready node (publish_allocation_metrics), then each service's Nomad job
+	// (= its appName) is summed into its project. Per-alloc STATS are all-zero on
+	// this cgroup-v2 host but telemetry is real [[nomploy-per-alloc-stats-gap]].
+	// Current snapshot only — the client polls. Returns {} silently if Nomad isn't
+	// reachable so the projects page never errors.
+	getProjectsMetrics: protectedProcedure.query(async ({ ctx }) => {
+		const orgId = ctx.session.activeOrganizationId;
+		const empty = { ts: Date.now(), projects: [] as never[] };
+		let cfg: Awaited<ReturnType<typeof resolveNomad>>;
+		try {
+			cfg = await resolveNomad(ctx, undefined);
+		} catch {
+			return empty;
+		}
+		const client = nomadClient(cfg);
+		// Metrics are per-agent (no central TSDB): scrape every ready node once and
+		// sum a job's per-alloc CPU%/mem across nodes.
+		// biome-ignore lint/suspicious/noExplicitAny: Nomad node list shape
+		let nodes: any[] = [];
+		try {
+			nodes = (await client.get(withNs("/nodes", cfg.namespace))) as any[];
+		} catch {
+			return empty;
+		}
+		const ready = (nodes ?? []).filter((n) => n.Status === "ready");
+		const addrs = new Set<string>();
+		await Promise.all(
+			ready.map(async (n) => {
+				try {
+					const r = await client.request(
+						withNs(`/node/${n.ID}`, cfg.namespace),
+					);
+					if (!r.ok) return;
+					const node = (await r.json()) as { HTTPAddr?: string };
+					if (node.HTTPAddr) addrs.add(node.HTTPAddr);
+				} catch {}
+			}),
+		);
+		addrs.add(cfg.address.replace(/^https?:\/\//, "").replace(/\/$/, ""));
+
+		const cpuLine =
+			/nomad_client_allocs_cpu_total_percent\{([^}]*)\}\s+([0-9.e+-]+)/g;
+		const memLine =
+			/nomad_client_allocs_memory_usage\{([^}]*)\}\s+([0-9.e+-]+)/g;
+		const label = (labels: string, key: string) =>
+			labels.match(new RegExp(`${key}="([^"]*)"`))?.[1] ?? "";
+		// job (= appName) → { cpu%, memBytes }
+		const byJob: Record<string, { cpu: number; mem: number }> = {};
+		const scrape = async (addr: string) => {
+			try {
+				const ctl = new AbortController();
+				const t = setTimeout(() => ctl.abort(), 4000);
+				const res = await fetch(`http://${addr}/v1/metrics?format=prometheus`, {
+					headers: cfg.token ? { "X-Nomad-Token": cfg.token } : {},
+					signal: ctl.signal,
+				});
+				clearTimeout(t);
+				if (!res.ok) return;
+				const text = await res.text();
+				for (const m of text.matchAll(cpuLine)) {
+					const job = label(m[1] ?? "", "job");
+					if (!job) continue;
+					const cur = byJob[job] ?? { cpu: 0, mem: 0 };
+					cur.cpu += Number(m[2]) || 0;
+					byJob[job] = cur;
+				}
+				for (const m of text.matchAll(memLine)) {
+					const job = label(m[1] ?? "", "job");
+					if (!job) continue;
+					const cur = byJob[job] ?? { cpu: 0, mem: 0 };
+					cur.mem += Number(m[2]) || 0;
+					byJob[job] = cur;
+				}
+			} catch {}
+		};
+		await Promise.all([...addrs].map(scrape));
+
+		// Map each service's Nomad job (appName) → its project, then sum. Only appName
+		// is selected per service to keep the json_build_array arg count tiny
+		// [[nomploy-json-build-array-100-arg-limit]].
+		const nameCol = { columns: { appName: true } } as const;
+		const rows = await db.query.projects.findMany({
+			where: eq(projects.organizationId, orgId),
+			columns: { projectId: true },
+			with: {
+				environments: {
+					columns: { environmentId: true },
+					with: {
+						applications: nameCol,
+						compose: nameCol,
+						postgres: nameCol,
+						mysql: nameCol,
+						mariadb: nameCol,
+						mongo: nameCol,
+						redis: nameCol,
+						libsql: nameCol,
+					},
+				},
+			},
+		});
+		const out: Record<string, { cpu: number; mem: number }> = {};
+		for (const p of rows) {
+			const agg = out[p.projectId] ?? { cpu: 0, mem: 0 };
+			out[p.projectId] = agg;
+			for (const env of p.environments) {
+				const svc = [
+					...env.applications,
+					...env.compose,
+					...env.postgres,
+					...env.mysql,
+					...env.mariadb,
+					...env.mongo,
+					...env.redis,
+					...env.libsql,
+				];
+				for (const s of svc) {
+					const m = byJob[s.appName];
+					if (m) {
+						agg.cpu += m.cpu;
+						agg.mem += m.mem;
+					}
+				}
+			}
+		}
+		return {
+			ts: Date.now(),
+			projects: Object.entries(out).map(([projectId, v]) => ({
+				projectId,
+				cpuPercent: Math.round(v.cpu * 10) / 10,
+				memoryMb: Math.round(v.mem / (1024 * 1024)),
+			})),
+		};
+	}),
+
 	// Browse the packs available in a Nomad Pack registry so the user can pick one
 	// instead of typing a name. Adds the registry to the local cache (idempotent) and
 	// enumerates the cached pack directories. Defaults to the community registry; pass
