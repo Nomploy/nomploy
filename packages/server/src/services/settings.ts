@@ -594,6 +594,7 @@ export const writeTraefikSetup = async (input: TraefikOptions) => {
 		env,
 		additionalPorts: input.additionalPorts,
 		serverId: input.serverId,
+		skipPull: input.skipPull,
 	});
 	await reconnectServicesToTraefik(input.serverId);
 };
@@ -644,7 +645,14 @@ export const reconfigureTraefikForDns = async (serverId?: string) => {
 		}
 		writeFileSync(ymlPath, stringify(cfg));
 	}
-	await writeTraefikSetup({ serverId });
+	// Recreate Traefik in the BACKGROUND with a fast (no-pull) recreate. The panel
+	// is served THROUGH Traefik, so awaiting a full recreate here would drop the
+	// panel connection mid-request (looks like a crash). Firing it off lets the
+	// caller's response return over the still-up Traefik; then Traefik blips for a
+	// few seconds and the browser reconnects.
+	void writeTraefikSetup({ serverId, skipPull: true }).catch((err) =>
+		console.error("reconfigureTraefikForDns recreate:", err),
+	);
 };
 
 export const reconnectServicesToTraefik = async (serverId?: string) => {

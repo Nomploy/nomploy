@@ -30,11 +30,16 @@ export interface TraefikOptions {
 		publishedPort: number;
 		protocol?: string;
 	}[];
+	// Skip the image pull on recreate — the image is already present, so a config/
+	// env change (e.g. DNS-01 toggle) recreates fast instead of a ~20-30s pull that
+	// takes the whole ingress (incl. the panel) down for the duration.
+	skipPull?: boolean;
 }
 
 export const initializeStandaloneTraefik = async ({
 	env,
 	serverId,
+	skipPull,
 }: TraefikOptions = {}) => {
 	const { MAIN_TRAEFIK_PATH, DYNAMIC_TRAEFIK_PATH } = paths(!!serverId);
 	const imageName = `traefik:v${TRAEFIK_VERSION}`;
@@ -70,12 +75,14 @@ export const initializeStandaloneTraefik = async ({
 	};
 
 	const docker = await getRemoteDocker(serverId);
-	try {
-		await docker.pull(imageName);
-		await new Promise((resolve) => setTimeout(resolve, 3000));
-		console.log("Traefik Image Pulled ✅");
-	} catch (error) {
-		console.log("Traefik Image Not Found: Pulling ", error);
+	if (!skipPull) {
+		try {
+			await docker.pull(imageName);
+			await new Promise((resolve) => setTimeout(resolve, 3000));
+			console.log("Traefik Image Pulled ✅");
+		} catch (error) {
+			console.log("Traefik Image Not Found: Pulling ", error);
+		}
 	}
 	try {
 		const container = docker.getContainer(containerName);
