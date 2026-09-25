@@ -10,6 +10,7 @@ export * from "./cluster-autoscaler";
 export * from "./compose";
 export * from "./deployment";
 export * from "./destination";
+export * from "./dns-provider";
 export * from "./domain";
 export * from "./environment";
 export * from "./git-provider";

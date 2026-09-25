@@ -20,6 +20,7 @@ import {
 	GalleryVerticalEnd,
 	Gauge,
 	GitBranch,
+	Globe,
 	House,
 	Key,
 	KeyRound,
@@ -375,6 +376,13 @@ const MENU: Menu = {
 			title: "Cloud",
 			url: "/dashboard/settings/cloud",
 			icon: CloudCog,
+			isEnabled: ({ permissions }) => !!permissions?.server.read,
+		},
+		{
+			isSingle: true,
+			title: "DNS Providers",
+			url: "/dashboard/settings/dns-providers",
+			icon: Globe,
 			isEnabled: ({ permissions }) => !!permissions?.server.read,
 		},
 

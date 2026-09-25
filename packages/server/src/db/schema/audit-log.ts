@@ -76,6 +76,7 @@ export type AuditResourceType =
 	| "gitProvider"
 	| "destination"
 	| "cloudProvider"
+	| "dnsProvider"
 	| "notification"
 	| "settings"
 	| "session"

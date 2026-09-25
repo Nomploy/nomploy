@@ -9,6 +9,7 @@ import { cloudProviderRouter } from "./routers/cloud-provider";
 import { composeRouter } from "./routers/compose";
 import { deploymentRouter } from "./routers/deployment";
 import { destinationRouter } from "./routers/destination";
+import { dnsProviderRouter } from "./routers/dns-provider";
 import { dockerRouter } from "./routers/docker";
 import { domainRouter } from "./routers/domain";
 import { environmentRouter } from "./routers/environment";
@@ -63,6 +64,7 @@ export const appRouter = createTRPCRouter({
 	deployment: deploymentRouter,
 	destination: destinationRouter,
 	cloudProvider: cloudProviderRouter,
+	dnsProvider: dnsProviderRouter,
 	docker: dockerRouter,
 	domain: domainRouter,
 	gitea: giteaRouter,
