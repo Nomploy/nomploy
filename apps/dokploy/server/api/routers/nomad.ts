@@ -4,11 +4,14 @@ import {
 	apiSetDesiredCount,
 	apiUpsertAutoscalingGroup,
 	apiUpsertAutoscalingSchedule,
+	apiUpsertLoadBalancer,
 	autoscalingSchedule,
 	cloudProvider,
 	clusterAutoscaler,
 	clusterAutoscalerEvents,
+	dnsProvider,
 	environments,
+	loadBalancer,
 	networkPolicies,
 	projects,
 	server as serverTable,
@@ -33,6 +36,14 @@ import {
 	removeAutoscalingScheduleJob,
 	rescheduleAutoscalingAction,
 } from "@nomploy/server/setup/autoscale/schedule";
+import {
+	cfListZones,
+	clearLoadBalancerDns,
+	generateLbHostname,
+	getLoadBalancerMetrics,
+	reconcileLoadBalancerDns,
+	resolveLbNodes,
+} from "@nomploy/server/setup/loadbalancer-dns";
 import { getNomadBootstrapCommand } from "@nomploy/server/setup/nomad-bootstrap";
 import {
 	getClusterServerJoinCommand,
@@ -908,6 +919,161 @@ export const nomadRouter = createTRPCRouter({
 			const { certCount } = await syncTraefikCertsToConsulKV();
 			return { certCount };
 		},
+	),
+
+	// --- Phase 2b: DNS-managed entry to the pool ---------------------------
+	// The LB gets a generated hostname whose A records are kept equal to the
+	// healthy pool nodes' public IPs (health-prune). Users CNAME app domains to it.
+	getLoadBalancerConfig: withPermission("server", "read").query(
+		async ({ ctx }) => {
+			const org = ctx.session.activeOrganizationId;
+			const cfg = await db.query.loadBalancer.findFirst({
+				where: eq(loadBalancer.organizationId, org),
+			});
+			const providers = await db.query.dnsProvider.findMany({
+				where: eq(dnsProvider.organizationId, org),
+			});
+			return {
+				config: cfg
+					? {
+							hostname: cfg.hostname,
+							zoneName: cfg.zoneName,
+							dnsProviderId: cfg.dnsProviderId,
+							enabled: cfg.enabled,
+							ttl: cfg.ttl,
+							lastReconcileAt: cfg.lastReconcileAt,
+							lastReconcileStatus: cfg.lastReconcileStatus,
+						}
+					: null,
+				dnsProviders: providers.map((p) => ({
+					dnsProviderId: p.dnsProviderId,
+					name: p.name,
+					provider: p.provider,
+				})),
+			};
+		},
+	),
+
+	// List the zones a DNS provider's token can manage (for zone selection).
+	listLoadBalancerZones: withPermission("server", "read")
+		.input(z.object({ dnsProviderId: z.string() }))
+		.query(async ({ ctx, input }) => {
+			const provider = await db.query.dnsProvider.findFirst({
+				where: and(
+					eq(dnsProvider.dnsProviderId, input.dnsProviderId),
+					eq(dnsProvider.organizationId, ctx.session.activeOrganizationId),
+				),
+			});
+			if (!provider?.token)
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "DNS provider has no token",
+				});
+			const zones = await cfListZones(provider.token);
+			return zones.map((z) => ({ id: z.id, name: z.name }));
+		}),
+
+	// Create/update the LB DNS config. Auto-generates the hostname on first setup
+	// (lb-<random>.<zone>); zone defaults to the provider's first zone.
+	upsertLoadBalancerConfig: withPermission("server", "create")
+		.input(apiUpsertLoadBalancer)
+		.mutation(async ({ ctx, input }) => {
+			const org = ctx.session.activeOrganizationId;
+			const provider = await db.query.dnsProvider.findFirst({
+				where: and(
+					eq(dnsProvider.dnsProviderId, input.dnsProviderId),
+					eq(dnsProvider.organizationId, org),
+				),
+			});
+			if (!provider?.token)
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Select a DNS provider with a valid token first",
+				});
+			// Resolve the zone: explicit input, else the token's first zone.
+			let zoneName = input.zoneName;
+			if (!zoneName) {
+				const zones = await cfListZones(provider.token);
+				zoneName = zones[0]?.name;
+			}
+			if (!zoneName)
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "No DNS zone available for this provider",
+				});
+
+			const existing = await db.query.loadBalancer.findFirst({
+				where: eq(loadBalancer.organizationId, org),
+			});
+			if (existing) {
+				await db
+					.update(loadBalancer)
+					.set({
+						dnsProviderId: input.dnsProviderId,
+						zoneName,
+						ttl: input.ttl ?? existing.ttl,
+						// Regenerate the hostname if the zone changed.
+						hostname:
+							existing.zoneName === zoneName
+								? existing.hostname
+								: generateLbHostname(zoneName),
+					})
+					.where(eq(loadBalancer.organizationId, org));
+			} else {
+				await db.insert(loadBalancer).values({
+					organizationId: org,
+					hostname: generateLbHostname(zoneName),
+					zoneName,
+					dnsProviderId: input.dnsProviderId,
+					ttl: input.ttl ?? 60,
+					enabled: false,
+				});
+			}
+			const saved = await db.query.loadBalancer.findFirst({
+				where: eq(loadBalancer.organizationId, org),
+			});
+			return { hostname: saved?.hostname, zoneName: saved?.zoneName };
+		}),
+
+	// Toggle the health-prune DNS controller. Enable → reconcile now (create A
+	// records); disable → remove the LB's A records so stale IPs don't linger.
+	setLoadBalancerDnsEnabled: withPermission("server", "create")
+		.input(z.object({ enabled: z.boolean() }))
+		.mutation(async ({ ctx, input }) => {
+			const org = ctx.session.activeOrganizationId;
+			const cfg = await db.query.loadBalancer.findFirst({
+				where: eq(loadBalancer.organizationId, org),
+			});
+			if (!cfg)
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Configure the load balancer DNS first",
+				});
+			await db
+				.update(loadBalancer)
+				.set({ enabled: input.enabled })
+				.where(eq(loadBalancer.organizationId, org));
+			if (input.enabled) {
+				return reconcileLoadBalancerDns(org);
+			}
+			await clearLoadBalancerDns(org);
+			return { hostname: cfg.hostname, desired: [], created: [], removed: [] };
+		}),
+
+	// Manually run the health-prune reconcile.
+	reconcileLoadBalancerDns: withPermission("server", "create").mutation(
+		async ({ ctx }) =>
+			reconcileLoadBalancerDns(ctx.session.activeOrganizationId),
+	),
+
+	// Pool members with public IP + health (for the DNS/members view).
+	getLoadBalancerNodes: withPermission("server", "read").query(
+		async ({ ctx }) => resolveLbNodes(ctx.session.activeOrganizationId),
+	),
+
+	// Per-node Traefik metrics (requests, status classes, latency, rate).
+	getLoadBalancerMetrics: withPermission("server", "read").query(
+		async ({ ctx }) => getLoadBalancerMetrics(ctx.session.activeOrganizationId),
 	),
 
 	getLoadBalancerStatus: withPermission("server", "read").query(

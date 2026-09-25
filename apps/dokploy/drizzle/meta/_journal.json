@@ -1415,6 +1415,13 @@
       "when": 1790326914972,
       "tag": "0201_giant_lila_cheney",
       "breakpoints": true
+    },
+    {
+      "idx": 202,
+      "version": "7",
+      "when": 1790338985713,
+      "tag": "0202_panoramic_red_skull",
+      "breakpoints": true
     }
   ]
 }

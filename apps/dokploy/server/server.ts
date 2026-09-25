@@ -122,6 +122,12 @@ void (async () => {
 						"@nomploy/server/setup/monitoring/cluster-health"
 					);
 					startClusterHealthLoop(60);
+					// LoadBalancer DNS health-prune: keep the LB hostname's A records
+					// equal to the healthy pool nodes' public IPs (orgs that enabled it).
+					const { startLoadBalancerDnsLoop } = await import(
+						"@nomploy/server/setup/loadbalancer-dns"
+					);
+					startLoadBalancerDnsLoop(30);
 				},
 				{
 					onWait: () =>

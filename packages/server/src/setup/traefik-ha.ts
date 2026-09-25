@@ -94,6 +94,13 @@ entryPoints:
     address: ":80"
   websecure:
     address: ":443"
+  metrics:
+    address: ":8082"
+metrics:
+  prometheus:
+    entryPoint: metrics
+    addEntryPointsLabels: true
+    addServicesLabels: true
 providers:
   consulCatalog:
     endpoint:
