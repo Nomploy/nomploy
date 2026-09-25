@@ -1,7 +1,9 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "../db";
-import { dnsProvider, loadBalancer, server } from "../db/schema";
+import { cloudProvider, dnsProvider, loadBalancer, server } from "../db/schema";
 import { TRAEFIK_HA_JOB_NAME } from "./traefik-ha";
+
+const HETZNER_API = "https://api.hetzner.cloud/v1";
 
 const NOMAD_ADDRESS = process.env.NOMAD_ADDRESS || "http://127.0.0.1:4646";
 const NOMAD_TOKEN = process.env.NOMAD_TOKEN || "";
@@ -85,7 +87,10 @@ export type LbNode = {
 	node: string;
 	status: string;
 	healthy: boolean;
+	/** The server row's stored address (often a private/Hetzner-network IP). */
 	ip: string | null;
+	/** The internet-routable IP to publish in DNS (Hetzner-detected, else `ip` if public). */
+	publicIp: string | null;
 	wgIp: string | null;
 };
 
@@ -94,6 +99,80 @@ type Alloc = {
 	NodeID: string;
 	ClientStatus: string;
 	DesiredStatus: string;
+};
+
+const isPrivateIp = (ip: string): boolean =>
+	/^10\./.test(ip) ||
+	/^127\./.test(ip) ||
+	/^169\.254\./.test(ip) ||
+	/^192\.168\./.test(ip) ||
+	/^172\.(1[6-9]|2\d|3[01])\./.test(ip);
+
+// Cache the Hetzner server list briefly — resolveLbNodes runs on every UI poll.
+let hetznerIpCache: {
+	org: string;
+	ts: number;
+	byPrivate: Map<string, string>;
+	byName: Map<string, string>;
+} | null = null;
+const HETZNER_CACHE_MS = 60_000;
+
+type HetznerServer = {
+	name: string;
+	public_net?: { ipv4?: { ip?: string } | null };
+	private_net?: { ip?: string }[];
+};
+
+/**
+ * Build an index of {private IP → public IPv4} and {name → public IPv4} across the
+ * org's Hetzner accounts, so a node's private `server.ipAddress` can be resolved
+ * to the routable IP the LB must publish. Cached ~60s; empty on any failure.
+ */
+const hetznerPublicIpIndex = async (
+	organizationId: string,
+): Promise<{ byPrivate: Map<string, string>; byName: Map<string, string> }> => {
+	if (
+		hetznerIpCache &&
+		hetznerIpCache.org === organizationId &&
+		Date.now() - hetznerIpCache.ts < HETZNER_CACHE_MS
+	) {
+		return hetznerIpCache;
+	}
+	const byPrivate = new Map<string, string>();
+	const byName = new Map<string, string>();
+	try {
+		const accounts = await db.query.cloudProvider.findMany({
+			where: and(
+				eq(cloudProvider.organizationId, organizationId),
+				eq(cloudProvider.provider, "hetzner"),
+			),
+			columns: { token: true },
+		});
+		for (const acc of accounts) {
+			if (!acc.token) continue;
+			try {
+				const res = await fetch(`${HETZNER_API}/servers?per_page=50`, {
+					headers: { Authorization: `Bearer ${acc.token}` },
+				});
+				if (!res.ok) continue;
+				const data = (await res.json()) as { servers?: HetznerServer[] };
+				for (const s of data.servers ?? []) {
+					const pub = s.public_net?.ipv4?.ip;
+					if (!pub) continue;
+					if (s.name) byName.set(s.name, pub);
+					for (const pn of s.private_net ?? []) {
+						if (pn.ip) byPrivate.set(pn.ip, pub);
+					}
+				}
+			} catch {
+				// try the next account
+			}
+		}
+	} catch {
+		// no cloud providers / db issue → empty index
+	}
+	hetznerIpCache = { org: organizationId, ts: Date.now(), byPrivate, byName };
+	return { byPrivate, byName };
 };
 
 /**
@@ -142,6 +221,8 @@ export const resolveLbNodes = async (
 		}),
 	);
 
+	const hz = await hetznerPublicIpIndex(organizationId);
+
 	// De-dup by node (system job = one alloc per node, but be defensive).
 	const seen = new Set<string>();
 	const out: LbNode[] = [];
@@ -151,11 +232,21 @@ export const resolveLbNodes = async (
 		const derivedWg = wgByNode.get(a.NodeName) ?? null;
 		const s =
 			(derivedWg ? byWg.get(derivedWg) : undefined) ?? byName.get(a.NodeName);
+		const ip = s?.ipAddress ?? null;
+		// Prefer a Hetzner-detected public IP (match by private IP, then name);
+		// fall back to the stored IP only when it is itself already public.
+		const publicIp =
+			(ip ? hz.byPrivate.get(ip) : undefined) ??
+			hz.byName.get(a.NodeName) ??
+			(s?.name ? hz.byName.get(s.name) : undefined) ??
+			(ip && !isPrivateIp(ip) ? ip : null) ??
+			null;
 		out.push({
 			node: a.NodeName,
 			status: a.ClientStatus,
 			healthy: a.ClientStatus === "running",
-			ip: s?.ipAddress ?? null,
+			ip,
+			publicIp,
 			wgIp: derivedWg ?? s?.wgIp ?? null,
 		});
 	}
@@ -192,7 +283,9 @@ export const reconcileLoadBalancerDns = async (
 	const nodes = await resolveLbNodes(organizationId);
 	const desired = [
 		...new Set(
-			nodes.filter((n) => n.healthy && n.ip).map((n) => n.ip as string),
+			nodes
+				.filter((n) => n.healthy && n.publicIp)
+				.map((n) => n.publicIp as string),
 		),
 	].sort();
 
@@ -319,7 +412,7 @@ const scrapeNode = async (
 	const host = n.wgIp || n.ip;
 	const base: LbNodeMetrics = {
 		node: n.node,
-		ip: n.ip,
+		ip: n.publicIp ?? n.ip,
 		healthy: n.healthy,
 		inDns,
 		reachable: false,
@@ -402,7 +495,7 @@ export const getLoadBalancerMetrics = async (
 		}
 	}
 	return Promise.all(
-		nodes.map((n) => scrapeNode(n, !!(n.ip && inDnsIps.has(n.ip)))),
+		nodes.map((n) => scrapeNode(n, !!(n.publicIp && inDnsIps.has(n.publicIp)))),
 	);
 };
 

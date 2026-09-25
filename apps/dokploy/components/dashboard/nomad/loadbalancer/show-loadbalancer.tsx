@@ -148,29 +148,30 @@ const PoolCard = ({ canManage }: { canManage: boolean }) => {
 					</p>
 				) : (
 					<div className="flex flex-col gap-2">
-						{(nodes ?? data.members.map((m) => ({ ...m, ip: null }))).map(
-							(m) => (
-								<div
-									key={m.node}
-									className="flex items-center justify-between rounded-lg border p-2.5 text-sm"
-								>
-									<div className="flex flex-col">
-										<span className="font-medium">{m.node}</span>
-										{"ip" in m && m.ip && (
-											<span className="text-muted-foreground text-xs">
-												{m.ip}
-											</span>
-										)}
-									</div>
-									<Badge
-										variant="outline"
-										className={statusBadge(m.status === "running")}
-									>
-										{m.status}
-									</Badge>
+						{(
+							nodes ??
+							data.members.map((m) => ({ ...m, ip: null, publicIp: null }))
+						).map((m) => (
+							<div
+								key={m.node}
+								className="flex items-center justify-between rounded-lg border p-2.5 text-sm"
+							>
+								<div className="flex flex-col">
+									<span className="font-medium">{m.node}</span>
+									{"publicIp" in m && (m.publicIp || m.ip) && (
+										<span className="text-muted-foreground text-xs">
+											{m.publicIp || m.ip}
+										</span>
+									)}
 								</div>
-							),
-						)}
+								<Badge
+									variant="outline"
+									className={statusBadge(m.status === "running")}
+								>
+									{m.status}
+								</Badge>
+							</div>
+						))}
 					</div>
 				)}
 			</CardContent>
