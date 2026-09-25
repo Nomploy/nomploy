@@ -160,6 +160,8 @@ export const ShowDnsProviders = () => {
 	const { data, isPending, refetch } = api.dnsProvider.all.useQuery();
 	const { mutateAsync: remove, isPending: isRemoving } =
 		api.dnsProvider.remove.useMutation();
+	const { mutateAsync: activate } = api.dnsProvider.activate.useMutation();
+	const { mutateAsync: deactivate } = api.dnsProvider.deactivate.useMutation();
 	const { data: permissions } = api.user.getPermissions.useQuery();
 	const canManage = !!permissions?.server?.create;
 
@@ -223,9 +225,64 @@ export const ShowDnsProviders = () => {
 															no token
 														</Badge>
 													)}
+													{provider.enabled && (
+														<Badge
+															variant="outline"
+															className="border-emerald-500/40 text-emerald-500"
+														>
+															DNS-01 active
+														</Badge>
+													)}
 												</span>
 												{canManage && (
 													<div className="flex flex-row gap-1">
+														{provider.enabled ? (
+															<DialogAction
+																title="Deactivate DNS-01"
+																description="Revert Traefik to the HTTP-01 challenge. Existing certificates keep serving; only future issuance/renewal changes. Traefik restarts briefly."
+																onClick={async () => {
+																	await deactivate({
+																		dnsProviderId: provider.dnsProviderId,
+																	})
+																		.then(async () => {
+																			toast.success("DNS-01 deactivated");
+																			await refetch();
+																		})
+																		.catch((e) =>
+																			toast.error("Error", {
+																				description: e.message,
+																			}),
+																		);
+																}}
+															>
+																<Button variant="outline" size="sm">
+																	Deactivate
+																</Button>
+															</DialogAction>
+														) : (
+															<DialogAction
+																title="Activate DNS-01"
+																description="Switch Traefik to the ACME DNS-01 challenge using this provider (any Traefik can then issue certs). Existing certificates keep serving; Traefik restarts briefly to apply."
+																onClick={async () => {
+																	await activate({
+																		dnsProviderId: provider.dnsProviderId,
+																	})
+																		.then(async () => {
+																			toast.success("DNS-01 activated");
+																			await refetch();
+																		})
+																		.catch((e) =>
+																			toast.error("Error", {
+																				description: e.message,
+																			}),
+																		);
+																}}
+															>
+																<Button variant="secondary" size="sm">
+																	Activate DNS-01
+																</Button>
+															</DialogAction>
+														)}
 														<HandleDnsProvider
 															dnsProviderId={provider.dnsProviderId}
 															name={provider.name}

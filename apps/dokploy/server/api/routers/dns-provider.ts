@@ -1,4 +1,5 @@
 import { db } from "@nomploy/server/db";
+import { reconfigureTraefikForDns } from "@nomploy/server/services/settings";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -141,11 +142,71 @@ export const dnsProviderRouter = createTRPCRouter({
 			await db
 				.delete(dnsProvider)
 				.where(eq(dnsProvider.dnsProviderId, input.dnsProviderId));
+			// If the removed provider was the active one, revert Traefik to HTTP-01.
+			if (existing.enabled) await reconfigureTraefikForDns().catch(() => {});
 			await audit(ctx, {
 				action: "delete",
 				resourceType: "dnsProvider",
 				resourceId: input.dnsProviderId,
 				resourceName: existing.name,
+			});
+			return true;
+		}),
+
+	// Activate DNS-01 with this provider: mark it the (single) enabled one, then
+	// switch the live Traefik cert resolver to DNS-01 and inject the token.
+	activate: withPermission("server", "create")
+		.input(apiFindOneDnsProvider)
+		.mutation(async ({ input, ctx }) => {
+			const row = await db.query.dnsProvider.findFirst({
+				where: and(
+					eq(dnsProvider.dnsProviderId, input.dnsProviderId),
+					eq(dnsProvider.organizationId, ctx.session.activeOrganizationId),
+				),
+			});
+			if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+			// Only one active provider per org (Traefik's resolver holds one token).
+			await db
+				.update(dnsProvider)
+				.set({ enabled: false })
+				.where(
+					eq(dnsProvider.organizationId, ctx.session.activeOrganizationId),
+				);
+			await db
+				.update(dnsProvider)
+				.set({ enabled: true })
+				.where(eq(dnsProvider.dnsProviderId, input.dnsProviderId));
+			await reconfigureTraefikForDns();
+			await audit(ctx, {
+				action: "update",
+				resourceType: "dnsProvider",
+				resourceId: input.dnsProviderId,
+				resourceName: row.name,
+			});
+			return true;
+		}),
+
+	// Deactivate DNS-01: disable this provider and revert Traefik to HTTP-01.
+	deactivate: withPermission("server", "create")
+		.input(apiFindOneDnsProvider)
+		.mutation(async ({ input, ctx }) => {
+			const row = await db.query.dnsProvider.findFirst({
+				where: and(
+					eq(dnsProvider.dnsProviderId, input.dnsProviderId),
+					eq(dnsProvider.organizationId, ctx.session.activeOrganizationId),
+				),
+			});
+			if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+			await db
+				.update(dnsProvider)
+				.set({ enabled: false })
+				.where(eq(dnsProvider.dnsProviderId, input.dnsProviderId));
+			await reconfigureTraefikForDns();
+			await audit(ctx, {
+				action: "update",
+				resourceType: "dnsProvider",
+				resourceId: input.dnsProviderId,
+				resourceName: row.name,
 			});
 			return true;
 		}),

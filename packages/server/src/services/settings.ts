@@ -1,13 +1,15 @@
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	execAsync,
 	execAsyncRemote,
 } from "@nomploy/server/utils/process/execAsync";
 import { and, eq } from "drizzle-orm";
+import { parse, stringify } from "yaml";
+import { paths } from "../constants";
 
 import { db } from "../db";
-import { compose } from "../db/schema";
+import { compose, dnsProvider } from "../db/schema";
 import {
 	initializeStandaloneTraefik,
 	type TraefikOptions,
@@ -571,12 +573,67 @@ export const writeTraefikSetup = async (input: TraefikOptions) => {
 	if (resourceType !== "standalone") {
 		throw new Error("Traefik resource type not found");
 	}
+	// Keep the DNS-01 provider token in Traefik's env on EVERY recreate. This
+	// wrapper is the single recreate path (writeTraefikEnv, updateTraefikPorts and
+	// the DNS reconfigure all go through it), so a later env/port change never drops
+	// DNS-01. The token never appears in traefik.yml.
+	const env = [...(input.env ?? [])];
+	const activeDns = await db.query.dnsProvider.findFirst({
+		where: eq(dnsProvider.enabled, true),
+		columns: { provider: true, token: true },
+	});
+	if (
+		activeDns?.provider === "cloudflare" &&
+		activeDns.token &&
+		!env.some((e) => e.startsWith("CF_DNS_API_TOKEN="))
+	) {
+		env.push(`CF_DNS_API_TOKEN=${activeDns.token}`);
+		env.push(`CLOUDFLARE_DNS_API_TOKEN=${activeDns.token}`);
+	}
 	await initializeStandaloneTraefik({
-		env: input.env,
+		env,
 		additionalPorts: input.additionalPorts,
 		serverId: input.serverId,
 	});
 	await reconnectServicesToTraefik(input.serverId);
+};
+
+/**
+ * Switch the hub Traefik's ACME challenge between HTTP-01 and DNS-01 based on the
+ * enabled DNS provider, then recreate Traefik so it picks up the new resolver +
+ * provider token. Edits traefik.yml SURGICALLY (only
+ * certificatesResolvers.letsencrypt.acme) so custom entrypoints/ports/consul-token/
+ * accessLog/email stay intact. Existing certs in acme.json keep serving; only new
+ * issuance/renewal uses the new challenge. Hub only for now (serverId omitted).
+ */
+export const reconfigureTraefikForDns = async (serverId?: string) => {
+	const { MAIN_TRAEFIK_PATH } = paths(!!serverId);
+	const ymlPath = join(MAIN_TRAEFIK_PATH, "traefik.yml");
+	const active = await db.query.dnsProvider.findFirst({
+		where: eq(dnsProvider.enabled, true),
+		columns: { provider: true },
+	});
+	if (existsSync(ymlPath)) {
+		// biome-ignore lint/suspicious/noExplicitAny: traefik.yml is free-form YAML
+		const cfg = (parse(readFileSync(ymlPath, "utf8")) ?? {}) as any;
+		cfg.certificatesResolvers = cfg.certificatesResolvers ?? {};
+		cfg.certificatesResolvers.letsencrypt = cfg.certificatesResolvers
+			.letsencrypt ?? { acme: {} };
+		const acme = cfg.certificatesResolvers.letsencrypt.acme ?? {};
+		if (active?.provider === "cloudflare") {
+			delete acme.httpChallenge;
+			acme.dnsChallenge = {
+				provider: "cloudflare",
+				resolvers: ["1.1.1.1:53", "8.8.8.8:53"],
+			};
+		} else {
+			delete acme.dnsChallenge;
+			acme.httpChallenge = { entryPoint: "web" };
+		}
+		cfg.certificatesResolvers.letsencrypt.acme = acme;
+		writeFileSync(ymlPath, stringify(cfg));
+	}
+	await writeTraefikSetup({ serverId });
 };
 
 export const reconnectServicesToTraefik = async (serverId?: string) => {
