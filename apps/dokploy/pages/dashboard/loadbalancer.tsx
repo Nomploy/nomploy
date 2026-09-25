@@ -2,29 +2,28 @@ import { IS_CLOUD } from "@nomploy/server/constants";
 import { validateRequest } from "@nomploy/server/lib/auth";
 import type { GetServerSidePropsContext } from "next";
 import type { ReactElement } from "react";
-import { ShowAutoscaler } from "@/components/dashboard/nomad/autoscale/show-autoscaler";
-import { ShowAutoscalingGraphs } from "@/components/dashboard/nomad/autoscale/show-autoscaling-graphs";
+import { ShowLoadBalancer } from "@/components/dashboard/nomad/loadbalancer/show-loadbalancer";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
 
-const AutoscalingDashboard = () => {
+const LoadBalancerDashboard = () => {
 	return (
 		<div className="space-y-4">
 			<div>
-				<h1 className="text-2xl font-semibold tracking-tight">Autoscaling</h1>
+				<h1 className="text-2xl font-semibold tracking-tight">Load Balancer</h1>
 				<p className="text-sm text-muted-foreground">
-					Node-pool autoscaling groups — each with its own launch template,
-					desired count, thresholds, and scheduled actions.
+					High-availability ingress — Traefik on every node tagged for
+					load-balancing, serving routes from Consul and shared certs from
+					Consul KV.
 				</p>
 			</div>
-			<ShowAutoscalingGraphs />
-			<ShowAutoscaler />
+			<ShowLoadBalancer />
 		</div>
 	);
 };
 
-export default AutoscalingDashboard;
+export default LoadBalancerDashboard;
 
-AutoscalingDashboard.getLayout = (page: ReactElement) => {
+LoadBalancerDashboard.getLayout = (page: ReactElement) => {
 	return <DashboardLayout>{page}</DashboardLayout>;
 };
 

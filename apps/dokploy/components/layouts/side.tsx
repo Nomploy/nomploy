@@ -27,6 +27,7 @@ import {
 	Loader2,
 	LogIn,
 	type LucideIcon,
+	Network,
 	Package,
 	Palette,
 	PieChart,
@@ -219,6 +220,14 @@ const MENU: Menu = {
 			title: "Autoscaling",
 			url: "/dashboard/autoscaling",
 			icon: Gauge,
+			isEnabled: ({ permissions, isCloud }) =>
+				!!(permissions?.docker.read && !isCloud),
+		},
+		{
+			isSingle: true,
+			title: "Load Balancer",
+			url: "/dashboard/loadbalancer",
+			icon: Network,
 			isEnabled: ({ permissions, isCloud }) =>
 				!!(permissions?.docker.read && !isCloud),
 		},
