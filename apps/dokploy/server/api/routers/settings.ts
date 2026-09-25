@@ -554,6 +554,15 @@ export const settingsRouter = createTRPCRouter({
 		// not the host's possibly-newer pulled :latest image.
 		return await getUpdateData(NOMPLOY_VERSION);
 	}),
+	// Query variant of getUpdateData for the passive update banner: the UI polls
+	// this on a long interval so a new release surfaces without opening Settings.
+	// Same registry-digest check as the manual button; cloud never has an update.
+	checkUpdate: protectedProcedure.query(async () => {
+		if (IS_CLOUD) {
+			return DEFAULT_UPDATE_DATA;
+		}
+		return await getUpdateData(NOMPLOY_VERSION);
+	}),
 	updateServer: adminProcedure.mutation(async ({ ctx }) => {
 		if (IS_CLOUD) {
 			return true;
