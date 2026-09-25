@@ -601,6 +601,13 @@ export const HandleBackup = ({
 
 							<ScheduleFormField name="schedule" formControl={form.control} />
 
+							<p className="-mt-2 text-xs text-muted-foreground">
+								For node-loss protection, run frequently — your data-loss window
+								is roughly the schedule interval. Pair a short interval (e.g.
+								every 5–15 min) with a higher "Keep the latest" so enough
+								snapshots stay in R2.
+							</p>
+
 							<FormField
 								control={form.control}
 								name="prefix"

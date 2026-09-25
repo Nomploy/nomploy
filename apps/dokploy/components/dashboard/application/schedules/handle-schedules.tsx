@@ -68,11 +68,13 @@ import { getTimezoneLabel, TIMEZONES } from "./timezones";
 
 export const commonCronExpressions = [
 	{ label: "Every minute", value: "* * * * *" },
+	{ label: "Every 5 minutes", value: "*/5 * * * *" },
+	{ label: "Every 15 minutes", value: "*/15 * * * *" },
+	{ label: "Every 30 minutes", value: "*/30 * * * *" },
 	{ label: "Every hour", value: "0 * * * *" },
 	{ label: "Every day at midnight", value: "0 0 * * *" },
 	{ label: "Every Sunday at midnight", value: "0 0 * * 0" },
 	{ label: "Every month on the 1st at midnight", value: "0 0 1 * *" },
-	{ label: "Every 15 minutes", value: "*/15 * * * *" },
 	{ label: "Every weekday at midnight", value: "0 0 * * 1-5" },
 	{ label: "Custom", value: "custom" },
 ];
