@@ -9,7 +9,7 @@ import {
 	RefreshCw,
 	RotateCcw,
 } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -74,6 +74,15 @@ interface Props {
 	databaseType?: DatabaseType;
 	serverId?: string | null;
 	backupType?: "database" | "compose";
+	// One-click restore from a specific backup config: pre-fill the destination,
+	// database name, and scope the file list to that backup's prefix, and let the
+	// caller render a custom (e.g. per-row) trigger. The user then just picks a
+	// snapshot and clicks Restore.
+	defaultDestinationId?: string;
+	defaultDatabaseName?: string;
+	defaultSearch?: string;
+	defaultServiceName?: string;
+	trigger?: ReactNode;
 }
 
 const RestoreBackupSchema = z
@@ -200,27 +209,35 @@ export const RestoreBackup = ({
 	databaseType,
 	serverId,
 	backupType = "database",
+	defaultDestinationId,
+	defaultDatabaseName,
+	defaultSearch,
+	defaultServiceName,
+	trigger,
 }: Props) => {
 	const [isOpen, setIsOpen] = useState(false);
-	const [search, setSearch] = useState("");
-	const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
+	const [search, setSearch] = useState(defaultSearch ?? "");
+	const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(
+		defaultSearch ?? "",
+	);
 
 	const { data: destinations = [] } = api.destination.all.useQuery();
 
 	const form = useForm({
 		defaultValues: {
-			destinationId: "",
+			destinationId: defaultDestinationId ?? "",
 			backupFile: "",
 			databaseName:
-				databaseType === "web-server"
+				defaultDatabaseName ??
+				(databaseType === "web-server"
 					? "nomploy"
 					: databaseType === "libsql"
 						? "iku.db"
-						: "",
+						: ""),
 			databaseType:
 				backupType === "compose" ? ("postgres" as DatabaseType) : databaseType,
 			backupType: backupType,
-			metadata: {},
+			metadata: defaultServiceName ? { serviceName: defaultServiceName } : {},
 		},
 		resolver: zodResolver(RestoreBackupSchema),
 	});
@@ -311,10 +328,12 @@ export const RestoreBackup = ({
 	return (
 		<Dialog open={isOpen} onOpenChange={setIsOpen}>
 			<DialogTrigger asChild>
-				<Button variant="outline">
-					<RotateCcw className="mr-2 size-4" />
-					Restore Backup
-				</Button>
+				{trigger ?? (
+					<Button variant="outline">
+						<RotateCcw className="mr-2 size-4" />
+						Restore Backup
+					</Button>
+				)}
 			</DialogTrigger>
 			<DialogContent className="sm:max-w-lg">
 				<DialogHeader>

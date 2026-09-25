@@ -4,6 +4,7 @@ import {
 	Database,
 	DatabaseBackup,
 	Play,
+	RotateCcw,
 	Trash2,
 } from "lucide-react";
 import Link from "next/link";
@@ -376,6 +377,37 @@ export const ShowBackups = ({
 																</TooltipContent>
 															</Tooltip>
 														</TooltipProvider>
+
+														{/* One-click restore from THIS backup: destination, database
+														    name and the file list are pre-scoped to this config's
+														    prefix — pick a snapshot and Restore. */}
+														<RestoreBackup
+															id={id}
+															databaseType={
+																backup.backupType === "compose"
+																	? (backup.databaseType as typeof databaseType)
+																	: databaseType
+															}
+															backupType={backup.backupType}
+															serverId={serverId || undefined}
+															defaultDestinationId={backup.destinationId}
+															defaultDatabaseName={backup.database}
+															defaultSearch={backup.prefix}
+															defaultServiceName={
+																backup.serviceName ?? undefined
+															}
+															trigger={
+																<Button
+																	type="button"
+																	variant="ghost"
+																	size="icon"
+																	className="size-8"
+																	title="Restore from this backup"
+																>
+																	<RotateCcw className="size-4" />
+																</Button>
+															}
+														/>
 
 														<HandleBackup
 															backupType={backup.backupType}
