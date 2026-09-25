@@ -4,6 +4,7 @@ import type { GetServerSidePropsContext } from "next";
 import type { ReactElement } from "react";
 import { ShowAutoscaler } from "@/components/dashboard/nomad/autoscale/show-autoscaler";
 import { ShowAutoscalingGraphs } from "@/components/dashboard/nomad/autoscale/show-autoscaling-graphs";
+import { ShowLoadBalancer } from "@/components/dashboard/nomad/loadbalancer/show-loadbalancer";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
 
 const AutoscalingDashboard = () => {
@@ -17,6 +18,7 @@ const AutoscalingDashboard = () => {
 				</p>
 			</div>
 			<ShowAutoscalingGraphs />
+			<ShowLoadBalancer />
 			<ShowAutoscaler />
 		</div>
 	);

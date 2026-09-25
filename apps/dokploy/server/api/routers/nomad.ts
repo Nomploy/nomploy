@@ -54,6 +54,11 @@ import {
 	writeCluster,
 } from "@nomploy/server/setup/nomad-mesh";
 import {
+	deployTraefikHaSystemJob,
+	stopTraefikHaSystemJob,
+	TRAEFIK_HA_JOB_NAME,
+} from "@nomploy/server/setup/traefik-ha";
+import {
 	execAsync,
 	execAsyncRemote,
 } from "@nomploy/server/utils/process/execAsync";
@@ -881,6 +886,46 @@ export const nomadRouter = createTRPCRouter({
 	getScalingSuggestions: protectedProcedure.query(async ({ ctx }) => {
 		return getScalingSuggestions(ctx.session.activeOrganizationId);
 	}),
+
+	// HA "LoadBalancer": a Traefik system job on every node tagged nomploy_lb=true
+	// (the hub is excluded — it runs the standalone Traefik). Members serve routes
+	// from the local Consul catalog + shared certs from Consul KV.
+	deployLoadBalancer: withPermission("server", "create").mutation(async () => {
+		await deployTraefikHaSystemJob();
+		return true;
+	}),
+
+	stopLoadBalancer: withPermission("server", "delete").mutation(async () => {
+		await stopTraefikHaSystemJob();
+		return true;
+	}),
+
+	getLoadBalancerStatus: withPermission("server", "read").query(
+		async ({ ctx }) => {
+			const cfg = await resolveNomad(ctx, undefined);
+			const client = nomadClient(cfg);
+			try {
+				const res = await client.request(
+					withNs(`/job/${TRAEFIK_HA_JOB_NAME}/allocations`, cfg.namespace),
+				);
+				if (!res.ok) return { deployed: false, members: [] };
+				// biome-ignore lint/suspicious/noExplicitAny: Nomad alloc stub shape
+				const allocs = (await res.json()) as any[];
+				// A redeployed system job leaves old complete/lost allocs behind; only
+				// the ones Nomad still wants running (DesiredStatus="run") are members.
+				const live = allocs.filter((a) => a.DesiredStatus === "run");
+				return {
+					deployed: live.length > 0,
+					members: live.map((a) => ({
+						node: a.NodeName as string,
+						status: a.ClientStatus as string,
+					})),
+				};
+			} catch {
+				return { deployed: false, members: [] };
+			}
+		},
+	),
 
 	// Browse the packs available in a Nomad Pack registry so the user can pick one
 	// instead of typing a name. Adds the registry to the local cache (idempotent) and
