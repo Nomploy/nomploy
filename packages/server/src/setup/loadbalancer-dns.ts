@@ -89,12 +89,23 @@ export type LbNode = {
 	wgIp: string | null;
 };
 
-type Alloc = { NodeName: string; ClientStatus: string; DesiredStatus: string };
+type Alloc = {
+	NodeName: string;
+	NodeID: string;
+	ClientStatus: string;
+	DesiredStatus: string;
+};
 
 /**
  * Resolve the pool's current members: the running system-job allocs mapped to
  * their server rows (public + wg IPs). A node is healthy when Nomad still wants
  * its alloc running and the client reports it running — the DNS failover signal.
+ *
+ * Nomad's NodeName is the host's own hostname and need not equal the panel's
+ * `server.name` (which the user picks), so we match primarily by **wg IP** —
+ * derived from the node's HTTPAddr (Nomad binds its API on the wg overlay) and
+ * matched against `server.wgIp`. That also gives metrics a scrape host even when
+ * the server row can't be matched at all. Name match is the fallback.
  */
 export const resolveLbNodes = async (
 	organizationId: string,
@@ -109,17 +120,46 @@ export const resolveLbNodes = async (
 	const servers = await db.query.server.findMany({
 		where: eq(server.organizationId, organizationId),
 	});
+	const normIp = (ip: string) => ip.split("/")[0];
 	const byName = new Map(servers.map((s) => [s.name, s]));
-	return live.map((a) => {
-		const s = byName.get(a.NodeName);
-		return {
+	const byWg = new Map(
+		servers.filter((s) => s.wgIp).map((s) => [normIp(s.wgIp as string), s]),
+	);
+
+	// Derive each node's wg IP from its Nomad HTTPAddr (host part).
+	const wgByNode = new Map<string, string>();
+	await Promise.all(
+		[...new Set(live.map((a) => a.NodeID))].map(async (id) => {
+			try {
+				const n = await nomad<{ Name?: string; HTTPAddr?: string }>(
+					`/node/${id}`,
+				);
+				const host = n.HTTPAddr?.split(":")[0];
+				if (n.Name && host) wgByNode.set(n.Name, host);
+			} catch {
+				// leave unmapped; falls back to server row / name
+			}
+		}),
+	);
+
+	// De-dup by node (system job = one alloc per node, but be defensive).
+	const seen = new Set<string>();
+	const out: LbNode[] = [];
+	for (const a of live) {
+		if (seen.has(a.NodeName)) continue;
+		seen.add(a.NodeName);
+		const derivedWg = wgByNode.get(a.NodeName) ?? null;
+		const s =
+			(derivedWg ? byWg.get(derivedWg) : undefined) ?? byName.get(a.NodeName);
+		out.push({
 			node: a.NodeName,
 			status: a.ClientStatus,
 			healthy: a.ClientStatus === "running",
 			ip: s?.ipAddress ?? null,
-			wgIp: s?.wgIp ?? null,
-		};
-	});
+			wgIp: derivedWg ?? s?.wgIp ?? null,
+		});
+	}
+	return out;
 };
 
 // ---------------------------------------------------------------------------
