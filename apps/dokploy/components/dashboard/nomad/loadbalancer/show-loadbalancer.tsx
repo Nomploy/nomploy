@@ -27,6 +27,7 @@ export const ShowLoadBalancer = () => {
 	);
 	const deploy = api.nomad.deployLoadBalancer.useMutation();
 	const stop = api.nomad.stopLoadBalancer.useMutation();
+	const syncCerts = api.nomad.syncLoadBalancerCerts.useMutation();
 	const { data: permissions } = api.user.getPermissions.useQuery();
 	const canManage = !!permissions?.server?.create;
 
@@ -52,8 +53,10 @@ export const ShowLoadBalancer = () => {
 							onClick={async () => {
 								await deploy
 									.mutateAsync()
-									.then(async () => {
-										toast.success("Load balancer deployed");
+									.then(async (r) => {
+										toast.success("Load balancer deployed", {
+											description: `${r.certCount} cert(s) synced to the shared store`,
+										});
 										await refetch();
 									})
 									.catch((e) =>
@@ -63,6 +66,29 @@ export const ShowLoadBalancer = () => {
 						>
 							{data?.deployed ? "Redeploy" : "Deploy"}
 						</Button>
+						{data?.deployed && (
+							<Button
+								size="sm"
+								variant="outline"
+								isLoading={syncCerts.isPending}
+								onClick={async () => {
+									await syncCerts
+										.mutateAsync()
+										.then((r) =>
+											toast.success("Certs synced", {
+												description: `${r.certCount} cert(s) refreshed in the shared store`,
+											}),
+										)
+										.catch((e) =>
+											toast.error("Cert sync failed", {
+												description: e.message,
+											}),
+										);
+								}}
+							>
+								Sync certs
+							</Button>
+						)}
 						{data?.deployed && (
 							<DialogAction
 								title="Stop load balancer"

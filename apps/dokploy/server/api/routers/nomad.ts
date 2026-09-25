@@ -56,6 +56,7 @@ import {
 import {
 	deployTraefikHaSystemJob,
 	stopTraefikHaSystemJob,
+	syncTraefikCertsToConsulKV,
 	TRAEFIK_HA_JOB_NAME,
 } from "@nomploy/server/setup/traefik-ha";
 import {
@@ -891,14 +892,23 @@ export const nomadRouter = createTRPCRouter({
 	// (the hub is excluded — it runs the standalone Traefik). Members serve routes
 	// from the local Consul catalog + shared certs from Consul KV.
 	deployLoadBalancer: withPermission("server", "create").mutation(async () => {
-		await deployTraefikHaSystemJob();
-		return true;
+		const { certCount } = await deployTraefikHaSystemJob();
+		return { certCount };
 	}),
 
 	stopLoadBalancer: withPermission("server", "delete").mutation(async () => {
 		await stopTraefikHaSystemJob();
 		return true;
 	}),
+
+	// Re-seed the shared cert store (Consul KV) from the hub's acme.json — run
+	// after cert renewals so the pool picks up fresh certs (file provider reloads).
+	syncLoadBalancerCerts: withPermission("server", "create").mutation(
+		async () => {
+			const { certCount } = await syncTraefikCertsToConsulKV();
+			return { certCount };
+		},
+	),
 
 	getLoadBalancerStatus: withPermission("server", "read").query(
 		async ({ ctx }) => {
