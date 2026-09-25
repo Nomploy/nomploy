@@ -599,12 +599,18 @@ export const writeTraefikSetup = async (input: TraefikOptions) => {
 };
 
 /**
- * Switch the hub Traefik's ACME challenge between HTTP-01 and DNS-01 based on the
- * enabled DNS provider, then recreate Traefik so it picks up the new resolver +
- * provider token. Edits traefik.yml SURGICALLY (only
- * certificatesResolvers.letsencrypt.acme) so custom entrypoints/ports/consul-token/
- * accessLog/email stay intact. Existing certs in acme.json keep serving; only new
- * issuance/renewal uses the new challenge. Hub only for now (serverId omitted).
+ * Make ACME DNS-01 available as an ADDITIONAL cert resolver ("letsencrypt-dns")
+ * without touching the default "letsencrypt" (HTTP-01) resolver — so existing
+ * domains keep issuing via HTTP-01 (which works for ANY domain pointing at the
+ * server), and DNS-01 is used only by domains that opt into it (wildcards, or the
+ * future HA "LoadBalancer" where the HTTP-01 challenge can't reliably reach the
+ * issuing instance). DNS-01 only works for zones in the provider's account, so
+ * making it the global default would break domains hosted elsewhere.
+ *
+ * Edits traefik.yml SURGICALLY (only certificatesResolvers) so custom
+ * entrypoints/ports/consul-token/accessLog/email stay intact, and shares the
+ * existing acme.json storage (Traefik keys certs per resolver). Then recreates
+ * Traefik (writeTraefikSetup injects the provider token env). Hub only for now.
  */
 export const reconfigureTraefikForDns = async (serverId?: string) => {
 	const { MAIN_TRAEFIK_PATH } = paths(!!serverId);
@@ -617,20 +623,25 @@ export const reconfigureTraefikForDns = async (serverId?: string) => {
 		// biome-ignore lint/suspicious/noExplicitAny: traefik.yml is free-form YAML
 		const cfg = (parse(readFileSync(ymlPath, "utf8")) ?? {}) as any;
 		cfg.certificatesResolvers = cfg.certificatesResolvers ?? {};
-		cfg.certificatesResolvers.letsencrypt = cfg.certificatesResolvers
-			.letsencrypt ?? { acme: {} };
-		const acme = cfg.certificatesResolvers.letsencrypt.acme ?? {};
+		// NOTE: never modify the default "letsencrypt" (HTTP-01) resolver here.
 		if (active?.provider === "cloudflare") {
-			delete acme.httpChallenge;
-			acme.dnsChallenge = {
-				provider: "cloudflare",
-				resolvers: ["1.1.1.1:53", "8.8.8.8:53"],
+			const email =
+				cfg.certificatesResolvers.letsencrypt?.acme?.email ??
+				"office@localhost";
+			cfg.certificatesResolvers["letsencrypt-dns"] = {
+				acme: {
+					email,
+					// Same store as HTTP-01; Traefik keys certs per resolver name.
+					storage: "/etc/traefik/acme.json",
+					dnsChallenge: {
+						provider: "cloudflare",
+						resolvers: ["1.1.1.1:53", "8.8.8.8:53"],
+					},
+				},
 			};
 		} else {
-			delete acme.dnsChallenge;
-			acme.httpChallenge = { entryPoint: "web" };
+			delete cfg.certificatesResolvers["letsencrypt-dns"];
 		}
-		cfg.certificatesResolvers.letsencrypt.acme = acme;
 		writeFileSync(ymlPath, stringify(cfg));
 	}
 	await writeTraefikSetup({ serverId });

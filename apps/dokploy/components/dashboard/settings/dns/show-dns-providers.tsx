@@ -230,7 +230,7 @@ export const ShowDnsProviders = () => {
 															variant="outline"
 															className="border-emerald-500/40 text-emerald-500"
 														>
-															DNS-01 active
+															DNS-01 available
 														</Badge>
 													)}
 												</span>
@@ -239,7 +239,7 @@ export const ShowDnsProviders = () => {
 														{provider.enabled ? (
 															<DialogAction
 																title="Deactivate DNS-01"
-																description="Revert Traefik to the HTTP-01 challenge. Existing certificates keep serving; only future issuance/renewal changes. Traefik restarts briefly."
+																description="Removes the DNS-01 resolver. The default HTTP-01 resolver (used by existing domains) is unaffected. Traefik restarts briefly."
 																onClick={async () => {
 																	await deactivate({
 																		dnsProviderId: provider.dnsProviderId,
@@ -262,7 +262,7 @@ export const ShowDnsProviders = () => {
 														) : (
 															<DialogAction
 																title="Activate DNS-01"
-																description="Switch Traefik to the ACME DNS-01 challenge using this provider (any Traefik can then issue certs). Existing certificates keep serving; Traefik restarts briefly to apply."
+																description="Adds a DNS-01 resolver (letsencrypt-dns) using this provider — for wildcard certs and future HA ingress. The default HTTP-01 resolver stays the default, so existing domains are unaffected. Traefik restarts briefly to apply."
 																onClick={async () => {
 																	await activate({
 																		dnsProviderId: provider.dnsProviderId,
