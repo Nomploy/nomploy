@@ -220,6 +220,24 @@ export const ShowBackups = ({
 										const serverId =
 											"serverId" in postgres ? postgres.serverId : undefined;
 
+										// Backups are stored at `<s3AppName>/<prefix>/<file>` (compose
+										// uses `<appName>_<serviceName>`), so seed the restore search
+										// straight into that folder to land on the snapshots.
+										const dbAppName =
+											postgres && "appName" in postgres
+												? postgres.appName
+												: undefined;
+										const s3AppName =
+											backup.backupType === "compose" && backup.serviceName
+												? `${dbAppName}_${backup.serviceName}`
+												: dbAppName;
+										const normPrefix = (backup.prefix ?? "")
+											.trim()
+											.replace(/^\/+|\/+$/g, "");
+										const restoreSearch = s3AppName
+											? `${s3AppName}/${normPrefix ? `${normPrefix}/` : ""}`
+											: backup.prefix;
+
 										return (
 											<div key={backup.backupId}>
 												<div className="flex w-full flex-col md:flex-row md:items-start justify-between gap-4 border rounded-lg p-4 hover:bg-muted/50 transition-colors">
@@ -392,7 +410,7 @@ export const ShowBackups = ({
 															serverId={serverId || undefined}
 															defaultDestinationId={backup.destinationId}
 															defaultDatabaseName={backup.database}
-															defaultSearch={backup.prefix}
+															defaultSearch={restoreSearch}
 															defaultServiceName={
 																backup.serviceName ?? undefined
 															}
