@@ -67,6 +67,7 @@ import {
 } from "@nomploy/server/setup/nomad-mesh";
 import {
 	deployTraefikHaSystemJob,
+	getPoolCertMeta,
 	stopTraefikHaSystemJob,
 	syncTraefikCertsToConsulKV,
 	TRAEFIK_HA_JOB_NAME,
@@ -929,6 +930,11 @@ export const nomadRouter = createTRPCRouter({
 			const { certCount } = await syncTraefikCertsToConsulKV();
 			return { certCount };
 		},
+	),
+
+	// The certs the pool serves + their expiry (from the hub's acme.json).
+	getLoadBalancerCerts: withPermission("server", "read").query(async () =>
+		getPoolCertMeta(),
 	),
 
 	// --- Phase 2b: DNS-managed entry to the pool ---------------------------

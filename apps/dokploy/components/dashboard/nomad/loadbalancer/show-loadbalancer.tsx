@@ -63,9 +63,19 @@ const PoolCard = ({ canManage }: { canManage: boolean }) => {
 	const { data: nodes } = api.nomad.getLoadBalancerNodes.useQuery(undefined, {
 		refetchInterval: 10000,
 	});
+	const { data: certs } = api.nomad.getLoadBalancerCerts.useQuery(undefined, {
+		refetchInterval: 60000,
+	});
 	const deploy = api.nomad.deployLoadBalancer.useMutation();
 	const stop = api.nomad.stopLoadBalancer.useMutation();
 	const syncCerts = api.nomad.syncLoadBalancerCerts.useMutation();
+
+	const certBadge = (d: number) =>
+		d < 14
+			? "border-destructive/40 text-destructive"
+			: d < 30
+				? "border-amber-500/40 text-amber-600 dark:text-amber-400"
+				: "border-emerald-500/40 text-emerald-500";
 
 	return (
 		<Card className="bg-background">
@@ -187,6 +197,28 @@ const PoolCard = ({ canManage }: { canManage: boolean }) => {
 								</Badge>
 							</div>
 						))}
+
+						{(certs ?? []).length > 0 && (
+							<div className="mt-2 flex flex-col gap-1.5">
+								<span className="text-muted-foreground text-xs">
+									Certificates ({certs?.length}) — auto-renewed on the hub,
+									resynced to the pool every 6h
+								</span>
+								{(certs ?? []).map((c) => (
+									<div
+										key={c.domain}
+										className="flex items-center justify-between rounded-md border px-2.5 py-1.5 text-sm"
+									>
+										<span className="truncate font-mono text-xs">
+											{c.domain}
+										</span>
+										<Badge variant="outline" className={certBadge(c.daysLeft)}>
+											{c.daysLeft}d left
+										</Badge>
+									</div>
+								))}
+							</div>
+						)}
 					</div>
 				)}
 			</CardContent>

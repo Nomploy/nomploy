@@ -7,7 +7,7 @@ import {
 	loadBalancer,
 	server,
 } from "../db/schema";
-import { TRAEFIK_HA_JOB_NAME } from "./traefik-ha";
+import { syncTraefikCertsToConsulKV, TRAEFIK_HA_JOB_NAME } from "./traefik-ha";
 
 const HETZNER_API = "https://api.hetzner.cloud/v1";
 
@@ -665,6 +665,29 @@ export const getLoadBalancerMetricsHistory = async (
 			req5xxPerSec: v.r5,
 			latencyMs: v.latWeight > 0 ? v.latWeighted / v.latWeight : 0,
 		}));
+};
+
+/**
+ * Periodically re-seed the pool's shared certs from the hub's acme.json into
+ * Consul KV, so renewed certs propagate to the pool without a manual "Sync
+ * certs" click. No-op unless the pool is deployed.
+ */
+export const startLoadBalancerCertSyncLoop = (
+	intervalHours = 6,
+): NodeJS.Timeout => {
+	const tick = async () => {
+		try {
+			const allocs = await nomad<Alloc[]>(
+				`/job/${TRAEFIK_HA_JOB_NAME}/allocations`,
+			).catch(() => [] as Alloc[]);
+			if (!allocs.some((a) => a.DesiredStatus === "run")) return;
+			await syncTraefikCertsToConsulKV();
+		} catch (e) {
+			console.error("loadbalancer-certs: resync error:", e);
+		}
+	};
+	// Deploy already syncs; first auto-resync happens after the interval.
+	return setInterval(tick, intervalHours * 3600 * 1000);
 };
 
 export const startLoadBalancerMetricsSampler = (

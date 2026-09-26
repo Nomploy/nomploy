@@ -124,11 +124,16 @@ void (async () => {
 					startClusterHealthLoop(60);
 					// LoadBalancer DNS health-prune: keep the LB hostname's A records
 					// equal to the healthy pool nodes' public IPs (orgs that enabled it).
-					const { startLoadBalancerDnsLoop, startLoadBalancerMetricsSampler } =
-						await import("@nomploy/server/setup/loadbalancer-dns");
+					const {
+						startLoadBalancerDnsLoop,
+						startLoadBalancerMetricsSampler,
+						startLoadBalancerCertSyncLoop,
+					} = await import("@nomploy/server/setup/loadbalancer-dns");
 					startLoadBalancerDnsLoop(30);
 					// Sample the pool's Traefik metrics into a rolling series for graphs.
 					startLoadBalancerMetricsSampler(60);
+					// Re-seed renewed certs from the hub into the pool's shared KV store.
+					startLoadBalancerCertSyncLoop(6);
 				},
 				{
 					onWait: () =>

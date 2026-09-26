@@ -1,3 +1,4 @@
+import { X509Certificate } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { paths } from "../constants";
@@ -207,6 +208,50 @@ const readAcmeCertificates = (): { cert: string; key: string }[] => {
 		console.error("traefik-ha: failed to read acme.json for cert sync:", e);
 	}
 	return out;
+};
+
+export type PoolCert = {
+	domain: string;
+	notAfter: string;
+	daysLeft: number;
+};
+
+/** Read the served certs' domain + expiry from the hub's acme.json (X.509). */
+export const getPoolCertMeta = (): PoolCert[] => {
+	const out: PoolCert[] = [];
+	try {
+		const acmePath = path.join(paths().MAIN_TRAEFIK_PATH, "acme.json");
+		if (!existsSync(acmePath)) return out;
+		const acme = JSON.parse(readFileSync(acmePath, "utf8")) as Record<
+			string,
+			{
+				Certificates?: {
+					certificate?: string;
+					domain?: { main?: string };
+				}[];
+			}
+		>;
+		for (const resolver of Object.values(acme)) {
+			for (const c of resolver?.Certificates ?? []) {
+				if (!c?.certificate) continue;
+				try {
+					const pem = Buffer.from(c.certificate, "base64").toString("utf8");
+					const x = new X509Certificate(pem);
+					const notAfter = new Date(x.validTo);
+					out.push({
+						domain: c.domain?.main ?? x.subject.replace(/^CN=/, ""),
+						notAfter: notAfter.toISOString(),
+						daysLeft: Math.floor((notAfter.getTime() - Date.now()) / 86400_000),
+					});
+				} catch {
+					// skip unparseable cert
+				}
+			}
+		}
+	} catch (e) {
+		console.error("traefik-ha: failed to read acme.json for cert meta:", e);
+	}
+	return out.sort((a, b) => a.daysLeft - b.daysLeft);
 };
 
 /**
