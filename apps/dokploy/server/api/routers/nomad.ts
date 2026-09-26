@@ -945,12 +945,18 @@ export const nomadRouter = createTRPCRouter({
 		listPoolCandidates(),
 	),
 
-	// Add/remove a node from the pool by toggling its nomploy_lb tag.
+	// Add/remove a node from the pool. Disable is a graceful drain: the node is
+	// pulled from DNS immediately (reconcile), Traefik keeps serving, and the DNS
+	// loop stops it once the TTL has safely elapsed.
 	setPoolMembership: withPermission("server", "create")
 		.input(z.object({ nodeId: z.string(), enabled: z.boolean() }))
-		.mutation(async ({ input }) => {
-			await setNodePoolMembership(input.nodeId, input.enabled);
-			return true;
+		.mutation(async ({ ctx, input }) => {
+			const result = await setNodePoolMembership(input.nodeId, input.enabled);
+			// Reflect the change in DNS now instead of waiting for the 30s loop.
+			await reconcileLoadBalancerDns(ctx.session.activeOrganizationId).catch(
+				() => {},
+			);
+			return result;
 		}),
 
 	// --- Phase 2b: DNS-managed entry to the pool ---------------------------

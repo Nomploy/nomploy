@@ -92,14 +92,23 @@ const cfZoneId = async (token: string, zoneName: string): Promise<string> => {
 
 export type LbNode = {
 	node: string;
+	nodeId: string;
 	status: string;
 	healthy: boolean;
+	/** True while the node is being gracefully removed: kept running + serving, but
+	 * pulled from DNS, until the TTL elapses and Traefik is stopped. */
+	draining: boolean;
 	/** The server row's stored address (often a private/Hetzner-network IP). */
 	ip: string | null;
 	/** The internet-routable IP to publish in DNS (Hetzner-detected, else `ip` if public). */
 	publicIp: string | null;
 	wgIp: string | null;
 };
+
+// Node meta keys for graceful drain (Traefik stays up, node leaves DNS first).
+const META_LB = "nomploy_lb";
+const META_DRAIN = "nomploy_lb_drain";
+const META_DRAIN_AT = "nomploy_lb_drain_at";
 
 type Alloc = {
 	NodeName: string;
@@ -212,16 +221,22 @@ export const resolveLbNodes = async (
 		servers.filter((s) => s.wgIp).map((s) => [normIp(s.wgIp as string), s]),
 	);
 
-	// Derive each node's wg IP from its Nomad HTTPAddr (host part).
+	// Derive each node's wg IP (from its Nomad HTTPAddr) + drain marker (from meta).
 	const wgByNode = new Map<string, string>();
+	const drainByNode = new Map<string, boolean>();
 	await Promise.all(
 		[...new Set(live.map((a) => a.NodeID))].map(async (id) => {
 			try {
-				const n = await nomad<{ Name?: string; HTTPAddr?: string }>(
-					`/node/${id}`,
-				);
+				const n = await nomad<{
+					Name?: string;
+					HTTPAddr?: string;
+					Meta?: Record<string, string>;
+				}>(`/node/${id}`);
 				const host = n.HTTPAddr?.split(":")[0];
-				if (n.Name && host) wgByNode.set(n.Name, host);
+				if (n.Name) {
+					if (host) wgByNode.set(n.Name, host);
+					drainByNode.set(n.Name, n.Meta?.[META_DRAIN] === "true");
+				}
 			} catch {
 				// leave unmapped; falls back to server row / name
 			}
@@ -250,8 +265,10 @@ export const resolveLbNodes = async (
 			null;
 		out.push({
 			node: a.NodeName,
+			nodeId: a.NodeID,
 			status: a.ClientStatus,
 			healthy: a.ClientStatus === "running",
+			draining: drainByNode.get(a.NodeName) ?? false,
 			ip,
 			publicIp,
 			wgIp: derivedWg ?? s?.wgIp ?? null,
@@ -291,7 +308,7 @@ export const reconcileLoadBalancerDns = async (
 	const desired = [
 		...new Set(
 			nodes
-				.filter((n) => n.healthy && n.publicIp)
+				.filter((n) => n.healthy && !n.draining && n.publicIp)
 				.map((n) => n.publicIp as string),
 		),
 	].sort();
@@ -536,10 +553,11 @@ export type PoolCandidate = {
 	status: string;
 	isHub: boolean;
 	lbEnabled: boolean;
+	draining: boolean;
 };
 
 /** List cluster nodes with their pool eligibility — whether they carry the
- * `nomploy_lb` tag and whether they're the excluded hub (control plane). */
+ * `nomploy_lb` tag, are mid-drain, and whether they're the excluded hub. */
 export const listPoolCandidates = async (): Promise<PoolCandidate[]> => {
 	const nodes = await nomad<{ ID: string; Name: string; Status: string }[]>(
 		"/nodes",
@@ -554,7 +572,8 @@ export const listPoolCandidates = async (): Promise<PoolCandidate[]> => {
 				name: n.Name,
 				status: n.Status,
 				isHub: !!meta.nomploy_control_plane,
-				lbEnabled: meta.nomploy_lb === "true",
+				lbEnabled: meta[META_LB] === "true",
+				draining: meta[META_DRAIN] === "true",
 			});
 		} catch {
 			// skip unreadable node
@@ -563,26 +582,97 @@ export const listPoolCandidates = async (): Promise<PoolCandidate[]> => {
 	return out.sort((a, b) => a.name.localeCompare(b.name));
 };
 
-/** Add or remove a node from the ingress pool by setting its `nomploy_lb` meta.
- * The hub can never be enabled (it runs the standalone Traefik). The system job
- * re-evaluates placement on the node update, so no redeploy is needed. */
+/**
+ * Apply dynamic node meta (no restart) via the Nomad CLI, surfacing the real
+ * command output on failure so the UI shows why. NOMAD_TOKEN is in the panel env.
+ */
+const nodeMetaApply = async (
+	nodeId: string,
+	kv: Record<string, string>,
+): Promise<void> => {
+	if (!/^[0-9a-fA-F-]{36}$/.test(nodeId)) throw new Error("Invalid node id");
+	const pairs = Object.entries(kv)
+		.map(([k, v]) => `${k}=${v}`)
+		.join(" ");
+	try {
+		await execAsync(`nomad node meta apply -node-id=${nodeId} ${pairs}`);
+	} catch (e) {
+		const out =
+			// biome-ignore lint/suspicious/noExplicitAny: ExecError shape
+			(e as any)?.stdout || (e as any)?.stderr || (e as Error).message;
+		throw new Error(
+			`node meta apply failed: ${String(out).trim().slice(0, 300)}`,
+		);
+	}
+};
+
+const isHubNode = async (nodeId: string): Promise<boolean> => {
+	const d = await nomad<{ Meta?: Record<string, string> }>(`/node/${nodeId}`);
+	return !!d.Meta?.nomploy_control_plane;
+};
+
+/**
+ * Add or remove a node from the ingress pool.
+ *
+ * Enable: tag `nomploy_lb=true` (+ clear any drain) — the system job places
+ * Traefik and the health-prune loop adds it to DNS once healthy.
+ *
+ * Disable: **graceful drain** — mark the node draining (Traefik keeps serving)
+ * and pull it from DNS now; the DNS loop finalizes the drain by stopping Traefik
+ * once the record's TTL has safely elapsed (see {@link finalizeDrains}).
+ */
 export const setNodePoolMembership = async (
 	nodeId: string,
 	enabled: boolean,
-): Promise<void> => {
-	if (!/^[0-9a-fA-F-]{36}$/.test(nodeId)) {
-		throw new Error("Invalid node id");
-	}
+): Promise<{ phase: "enabled" | "draining" }> => {
 	if (enabled) {
-		const d = await nomad<{ Meta?: Record<string, string> }>(`/node/${nodeId}`);
-		if (d.Meta?.nomploy_control_plane) {
+		if (await isHubNode(nodeId)) {
 			throw new Error("The hub is excluded from the pool and cannot be tagged");
 		}
+		await nodeMetaApply(nodeId, {
+			[META_LB]: "true",
+			[META_DRAIN]: "false",
+			[META_DRAIN_AT]: "0",
+		});
+		return { phase: "enabled" };
 	}
-	// Dynamic node meta (no restart). NOMAD_TOKEN comes from the panel's env.
-	await execAsync(
-		`nomad node meta apply -node-id=${nodeId} nomploy_lb=${enabled ? "true" : "false"} 2>&1`,
-	);
+	// Start the drain: out of DNS first, Traefik stays up.
+	await nodeMetaApply(nodeId, {
+		[META_DRAIN]: "true",
+		[META_DRAIN_AT]: String(Date.now()),
+	});
+	return { phase: "draining" };
+};
+
+/**
+ * Finish any drains whose TTL window has elapsed: the node is out of DNS and
+ * enough time has passed for caches to expire, so stop Traefik there
+ * (`nomploy_lb=false`) and clear the drain markers. Idempotent; safe to call from
+ * the loop and survives restarts (state lives in node meta). Uses a small safety
+ * margin on top of the record TTL.
+ */
+export const finalizeDrains = async (organizationId: string): Promise<void> => {
+	const lb = await db.query.loadBalancer.findFirst({
+		where: eq(loadBalancer.organizationId, organizationId),
+	});
+	const ttl = lb?.ttl ?? 60;
+	const safeMs = (ttl + 15) * 1000;
+	const nodes = await listPoolCandidates();
+	for (const n of nodes) {
+		if (!n.draining || !n.lbEnabled) continue;
+		try {
+			const d = await nomad<{ Meta?: Record<string, string> }>(`/node/${n.id}`);
+			const at = Number(d.Meta?.[META_DRAIN_AT] ?? 0);
+			if (at > 0 && Date.now() - at < safeMs) continue; // TTL not safe yet
+			await nodeMetaApply(n.id, {
+				[META_LB]: "false",
+				[META_DRAIN]: "false",
+				[META_DRAIN_AT]: "0",
+			});
+		} catch (e) {
+			console.error(`loadbalancer: finalize drain failed for ${n.name}:`, e);
+		}
+	}
 };
 
 // ---------------------------------------------------------------------------
@@ -782,6 +872,21 @@ export const startLoadBalancerDnsLoop = (
 				} catch (e) {
 					console.error(
 						`loadbalancer-dns: reconcile failed for org ${lb.organizationId}:`,
+						e,
+					);
+				}
+			}
+			// Complete graceful drains (stop Traefik once out of DNS + TTL elapsed).
+			// Runs for every org with nodes, even when DNS management is off.
+			const orgs = await db
+				.selectDistinct({ organizationId: server.organizationId })
+				.from(server);
+			for (const { organizationId } of orgs) {
+				try {
+					await finalizeDrains(organizationId);
+				} catch (e) {
+					console.error(
+						`loadbalancer-dns: finalize drains failed for org ${organizationId}:`,
 						e,
 					);
 				}

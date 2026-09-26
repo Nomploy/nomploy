@@ -279,15 +279,18 @@ const CertificatesCard = ({ canManage }: { canManage: boolean }) => {
 const PoolMembershipCard = ({ canManage }: { canManage: boolean }) => {
 	const { data: candidates, refetch } = api.nomad.listPoolCandidates.useQuery(
 		undefined,
-		{
-			refetchInterval: 15000,
-		},
+		// Poll faster while a drain is in flight so the state settles visibly.
+		{ refetchInterval: 8000 },
 	);
 	const setMembership = api.nomad.setPoolMembership.useMutation();
-	// Optimistic overrides per node id — Nomad's node-meta read lags the write, so
-	// an immediate refetch can still report the old value and snap the switch back.
+	// Optimistic desired-membership per node id — Nomad's node-meta read lags the
+	// write, so an immediate refetch can still report the old value.
 	const [pending, setPending] = useState<Record<string, boolean>>({});
 	const [busy, setBusy] = useState<Record<string, boolean>>({});
+
+	// Effective desired state: a draining node's target is "off".
+	const desired = (c: { id: string; lbEnabled: boolean; draining: boolean }) =>
+		pending[c.id] ?? (c.lbEnabled && !c.draining);
 
 	// Drop an override once the server data catches up to it.
 	useEffect(() => {
@@ -295,7 +298,8 @@ const PoolMembershipCard = ({ canManage }: { canManage: boolean }) => {
 		setPending((prev) => {
 			const next = { ...prev };
 			for (const c of candidates) {
-				if (c.id in next && next[c.id] === c.lbEnabled) delete next[c.id];
+				const eff = c.lbEnabled && !c.draining;
+				if (c.id in next && next[c.id] === eff) delete next[c.id];
 			}
 			return next;
 		});
@@ -338,41 +342,49 @@ const PoolMembershipCard = ({ canManage }: { canManage: boolean }) => {
 										hub
 									</Badge>
 								) : (
-									<Switch
-										checked={pending[n.id] ?? n.lbEnabled}
-										disabled={!canManage || busy[n.id]}
-										onCheckedChange={async (enabled) => {
-											setPending((p) => ({ ...p, [n.id]: enabled }));
-											setBusy((b) => ({ ...b, [n.id]: true }));
-											try {
-												await setMembership.mutateAsync({
-													nodeId: n.id,
-													enabled,
-												});
-												toast.success(
-													enabled
-														? `${n.name} added to the pool`
-														: `${n.name} removed from the pool`,
-												);
-												// Give Nomad a moment to propagate the meta change, then refetch.
-												await new Promise((r) => setTimeout(r, 1500));
-												await refetch();
-											} catch (e) {
-												setPending((p) => {
-													const { [n.id]: _, ...rest } = p;
-													return rest;
-												});
-												toast.error("Update failed", {
-													description: (e as Error).message,
-												});
-											} finally {
-												setBusy((b) => {
-													const { [n.id]: _, ...rest } = b;
-													return rest;
-												});
-											}
-										}}
-									/>
+									<div className="flex items-center gap-2">
+										{(busy[n.id] || n.draining) && (
+											<span className="flex items-center gap-1 text-amber-600 text-xs dark:text-amber-400">
+												<Loader2 className="size-3.5 animate-spin" />
+												{n.draining ? "draining…" : "applying…"}
+											</span>
+										)}
+										<Switch
+											checked={desired(n)}
+											disabled={!canManage || busy[n.id] || n.draining}
+											onCheckedChange={async (enabled) => {
+												setPending((p) => ({ ...p, [n.id]: enabled }));
+												setBusy((b) => ({ ...b, [n.id]: true }));
+												try {
+													const r = await setMembership.mutateAsync({
+														nodeId: n.id,
+														enabled,
+													});
+													toast.success(
+														enabled
+															? `${n.name} added to the pool`
+															: `${n.name} draining — removed from DNS, Traefik stops after the TTL`,
+													);
+													void r;
+													await new Promise((res) => setTimeout(res, 1500));
+													await refetch();
+												} catch (e) {
+													setPending((p) => {
+														const { [n.id]: _, ...rest } = p;
+														return rest;
+													});
+													toast.error("Update failed", {
+														description: (e as Error).message,
+													});
+												} finally {
+													setBusy((b) => {
+														const { [n.id]: _, ...rest } = b;
+														return rest;
+													});
+												}
+											}}
+										/>
+									</div>
 								)}
 							</div>
 						))}
