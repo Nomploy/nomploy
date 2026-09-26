@@ -42,8 +42,10 @@ import {
 	generateLbHostname,
 	getLoadBalancerMetrics,
 	getLoadBalancerMetricsHistory,
+	listPoolCandidates,
 	reconcileLoadBalancerDns,
 	resolveLbNodes,
+	setNodePoolMembership,
 } from "@nomploy/server/setup/loadbalancer-dns";
 import { getNomadBootstrapCommand } from "@nomploy/server/setup/nomad-bootstrap";
 import {
@@ -936,6 +938,20 @@ export const nomadRouter = createTRPCRouter({
 	getLoadBalancerCerts: withPermission("server", "read").query(async () =>
 		getPoolCertMeta(),
 	),
+
+	// Cluster nodes with pool eligibility (tagged / hub-excluded) for the
+	// node-tagging UI.
+	listPoolCandidates: withPermission("server", "read").query(async () =>
+		listPoolCandidates(),
+	),
+
+	// Add/remove a node from the pool by toggling its nomploy_lb tag.
+	setPoolMembership: withPermission("server", "create")
+		.input(z.object({ nodeId: z.string(), enabled: z.boolean() }))
+		.mutation(async ({ input }) => {
+			await setNodePoolMembership(input.nodeId, input.enabled);
+			return true;
+		}),
 
 	// --- Phase 2b: DNS-managed entry to the pool ---------------------------
 	// The LB gets a generated hostname whose A records are kept equal to the

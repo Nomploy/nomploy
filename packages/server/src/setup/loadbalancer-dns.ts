@@ -7,6 +7,7 @@ import {
 	loadBalancer,
 	server,
 } from "../db/schema";
+import { execAsync } from "../utils/process/execAsync";
 import { syncTraefikCertsToConsulKV, TRAEFIK_HA_JOB_NAME } from "./traefik-ha";
 
 const HETZNER_API = "https://api.hetzner.cloud/v1";
@@ -522,6 +523,65 @@ export const getLoadBalancerMetrics = async (
 	}
 	return Promise.all(
 		nodes.map((n) => scrapeNode(n, !!(n.publicIp && inDnsIps.has(n.publicIp)))),
+	);
+};
+
+// ---------------------------------------------------------------------------
+// Pool membership (node tagging)
+// ---------------------------------------------------------------------------
+
+export type PoolCandidate = {
+	id: string;
+	name: string;
+	status: string;
+	isHub: boolean;
+	lbEnabled: boolean;
+};
+
+/** List cluster nodes with their pool eligibility — whether they carry the
+ * `nomploy_lb` tag and whether they're the excluded hub (control plane). */
+export const listPoolCandidates = async (): Promise<PoolCandidate[]> => {
+	const nodes = await nomad<{ ID: string; Name: string; Status: string }[]>(
+		"/nodes",
+	).catch(() => [] as { ID: string; Name: string; Status: string }[]);
+	const out: PoolCandidate[] = [];
+	for (const n of nodes) {
+		try {
+			const d = await nomad<{ Meta?: Record<string, string> }>(`/node/${n.ID}`);
+			const meta = d.Meta ?? {};
+			out.push({
+				id: n.ID,
+				name: n.Name,
+				status: n.Status,
+				isHub: !!meta.nomploy_control_plane,
+				lbEnabled: meta.nomploy_lb === "true",
+			});
+		} catch {
+			// skip unreadable node
+		}
+	}
+	return out.sort((a, b) => a.name.localeCompare(b.name));
+};
+
+/** Add or remove a node from the ingress pool by setting its `nomploy_lb` meta.
+ * The hub can never be enabled (it runs the standalone Traefik). The system job
+ * re-evaluates placement on the node update, so no redeploy is needed. */
+export const setNodePoolMembership = async (
+	nodeId: string,
+	enabled: boolean,
+): Promise<void> => {
+	if (!/^[0-9a-fA-F-]{36}$/.test(nodeId)) {
+		throw new Error("Invalid node id");
+	}
+	if (enabled) {
+		const d = await nomad<{ Meta?: Record<string, string> }>(`/node/${nodeId}`);
+		if (d.Meta?.nomploy_control_plane) {
+			throw new Error("The hub is excluded from the pool and cannot be tagged");
+		}
+	}
+	// Dynamic node meta (no restart). NOMAD_TOKEN comes from the panel's env.
+	await execAsync(
+		`nomad node meta apply -node-id=${nodeId} nomploy_lb=${enabled ? "true" : "false"} 2>&1`,
 	);
 };
 

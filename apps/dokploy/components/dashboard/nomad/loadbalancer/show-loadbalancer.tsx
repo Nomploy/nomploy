@@ -226,6 +226,84 @@ const PoolCard = ({ canManage }: { canManage: boolean }) => {
 	);
 };
 
+/** Add/remove cluster nodes from the ingress pool by toggling their tag. */
+const PoolMembershipCard = ({ canManage }: { canManage: boolean }) => {
+	const { data: candidates, refetch } = api.nomad.listPoolCandidates.useQuery(
+		undefined,
+		{
+			refetchInterval: 15000,
+		},
+	);
+	const setMembership = api.nomad.setPoolMembership.useMutation();
+
+	return (
+		<Card className="bg-background">
+			<CardHeader>
+				<CardTitle className="flex flex-row gap-2 text-xl">
+					<Network className="size-5 self-center text-muted-foreground" />
+					Pool membership
+				</CardTitle>
+				<CardDescription>
+					Choose which nodes run the ingress pool. Toggling a node sets its{" "}
+					<code>nomploy_lb</code> tag; the hub is excluded (it runs the
+					standalone Traefik).
+				</CardDescription>
+			</CardHeader>
+			<CardContent>
+				{(candidates ?? []).length === 0 ? (
+					<p className="text-muted-foreground text-sm">
+						No cluster nodes found.
+					</p>
+				) : (
+					<div className="flex flex-col gap-2">
+						{(candidates ?? []).map((n) => (
+							<div
+								key={n.id}
+								className="flex items-center justify-between rounded-lg border p-2.5 text-sm"
+							>
+								<div className="flex flex-col">
+									<span className="font-medium">{n.name}</span>
+									<span className="text-muted-foreground text-xs">
+										{n.status}
+										{n.isHub ? " · control plane (excluded)" : ""}
+									</span>
+								</div>
+								{n.isHub ? (
+									<Badge variant="outline" className="text-muted-foreground">
+										hub
+									</Badge>
+								) : (
+									<Switch
+										checked={n.lbEnabled}
+										disabled={!canManage || setMembership.isPending}
+										onCheckedChange={async (enabled) => {
+											await setMembership
+												.mutateAsync({ nodeId: n.id, enabled })
+												.then(async () => {
+													toast.success(
+														enabled
+															? `${n.name} added to the pool`
+															: `${n.name} removed from the pool`,
+													);
+													await refetch();
+												})
+												.catch((e) =>
+													toast.error("Update failed", {
+														description: e.message,
+													}),
+												);
+										}}
+									/>
+								)}
+							</div>
+						))}
+					</div>
+				)}
+			</CardContent>
+		</Card>
+	);
+};
+
 const CopyButton = ({ value }: { value: string }) => {
 	const [copied, setCopied] = useState(false);
 	return (
@@ -1184,6 +1262,7 @@ export const ShowLoadBalancer = () => {
 			</TabsList>
 			<TabsContent value="overview" className="mt-4 flex flex-col gap-4">
 				<PoolCard canManage={canManage} />
+				<PoolMembershipCard canManage={canManage} />
 				<DnsCard canManage={canManage} />
 			</TabsContent>
 			<TabsContent value="metrics" className="mt-4 flex flex-col gap-4">
