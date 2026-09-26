@@ -15,6 +15,7 @@ the topic you need.
 | **[Cluster management](cluster.md)** | Grow to a highly-available multi-node cluster: add/remove servers and workers, drain nodes, DNS health. |
 | **[Deploying](deploying.md)** | Compose → Nomad HCL, native Nomad job files, and Nomad Pack. |
 | **[Autoscaling](autoscaling.md)** | Horizontal autoscaling for applications and compose services. |
+| **[Load Balancer](load-balancer.md)** | HA Traefik pool, DNS health-prune, shared certs, metrics & logs tabs. |
 | **[Container registry](registry.md)** | Run your own OCI registry + Add Registry; credentials distributed cluster-wide. |
 | **[GPU workloads](gpu.md)** | Requesting NVIDIA GPUs for a job. |
 

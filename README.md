@@ -52,10 +52,24 @@ whole is licensed under the **GNU AGPL-3.0**; the upstream enterprise
 - **One-click Nomad bootstrap** — install Docker + Consul + Nomad + CNI on a
   managed server over SSH, straight from the UI.
 - **Applications & databases** — Node.js, PHP, Python, Go, Ruby, …; MySQL,
-  PostgreSQL, MongoDB, MariaDB, libSQL and Redis, persisted on real Nomad-managed
-  Docker volumes.
+  PostgreSQL (incl. **pgvector**), MongoDB, MariaDB, libSQL and Redis, persisted on
+  real Nomad-managed Docker volumes.
 - **Ingress via Traefik + Consul Catalog** — services register in Consul with
   Traefik tags and are routed automatically, with Let's Encrypt TLS.
+- **High-availability ingress ("Load Balancer")** — run an **active/active Traefik
+  pool** on every node tagged `nomploy_lb` (the hub is excluded) from the **Load
+  Balancer** tab. The pool serves every route from the Consul catalog and shares
+  TLS certs through Consul KV (auto-resynced from the hub as they renew). It gets a
+  **generated DNS hostname** whose A records are health-pruned to the healthy
+  nodes' public IPs (Cloudflare, AWS-ALB style — CNAME your app domains to it), and
+  the tab has **time-range throughput/latency graphs** (2xx/4xx/5xx, Prometheus),
+  **consolidated searchable logs tagged by instance**, and per-cert expiry.
+- **DNS providers (Cloudflare)** — register a DNS credential in **Settings → DNS
+  Providers**; used for ACME **DNS-01** (as an additional resolver, HTTP-01 stays
+  the default) and to manage the Load Balancer's records.
+- **Live metrics & scaling suggestions** — telemetry-based CPU/memory per project,
+  environment and service, shown as **used-vs-reserved** with sparklines, plus
+  utilization/right-sizing **suggestions** and an optional **daily digest**.
 - **Backups & restore** — scheduled backups of managed databases (PostgreSQL,
   MySQL, MariaDB, MongoDB, libSQL) and the panel's own database to any
   **S3-compatible** store (AWS S3, **Cloudflare R2**, …), with per-backup last-run
@@ -94,6 +108,8 @@ Full guides live in [`docs/`](docs/README.md):
   (custom registries or the hosted registry at `packs.nomploy.com`).
 - [Autoscaling](docs/autoscaling.md) — scale apps and services on CPU/memory, and
   the cluster itself with node-pool autoscaling groups.
+- [Load Balancer](docs/load-balancer.md) — HA Traefik pool, DNS health-prune,
+  shared certs, and the metrics/logs tabs.
 - [Container registry](docs/registry.md) — bring-your-own registry + cluster-wide auth.
 - [GPU workloads](docs/gpu.md) — requesting NVIDIA GPUs.
 
@@ -105,6 +121,7 @@ Full guides live in [`docs/`](docs/README.md):
 | Service discovery / ingress | Traefik (Docker provider) | Traefik + Consul Catalog |
 | Deploy artifact | Swarm stack / compose | Nomad HCL job (from compose), native HCL, or Nomad Pack |
 | Cluster / node autoscaling | — | ASG-style autoscaling groups on Nomad node pools |
+| Ingress HA | Single Traefik | Active/active Traefik pool + DNS health-prune, shared certs via Consul KV |
 | Secrets & config files | Plaintext env in the stack | Nomad Variables, kept out of the job spec |
 | Pack registry | — | Hosted at `packs.nomploy.com`, plus any custom registry |
 | Enterprise modules (SSO, audit, custom roles, white-label) | Source-available add-on | Removed; free-tier equivalents |
