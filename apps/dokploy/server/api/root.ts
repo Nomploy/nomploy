@@ -1,6 +1,7 @@
 import { createTRPCRouter } from "../api/trpc";
 import { adminRouter } from "./routers/admin";
 import { aiRouter } from "./routers/ai";
+import { alertRouter } from "./routers/alert";
 import { applicationRouter } from "./routers/application";
 import { backupRouter } from "./routers/backup";
 import { bitbucketRouter } from "./routers/bitbucket";
@@ -65,6 +66,7 @@ export const appRouter = createTRPCRouter({
 	destination: destinationRouter,
 	cloudProvider: cloudProviderRouter,
 	dnsProvider: dnsProviderRouter,
+	alert: alertRouter,
 	docker: dockerRouter,
 	domain: domainRouter,
 	gitea: giteaRouter,

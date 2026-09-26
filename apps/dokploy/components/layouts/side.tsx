@@ -233,6 +233,14 @@ const MENU: Menu = {
 		},
 		{
 			isSingle: true,
+			title: "Monitoring",
+			url: "/dashboard/monitoring",
+			icon: Bell,
+			isEnabled: ({ permissions, isCloud }) =>
+				!!(permissions?.monitoring.read && !isCloud),
+		},
+		{
+			isSingle: true,
 			title: "Requests",
 			url: "/dashboard/requests",
 			icon: Forward,

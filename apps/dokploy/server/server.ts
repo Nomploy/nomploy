@@ -134,6 +134,11 @@ void (async () => {
 					startLoadBalancerMetricsSampler(60);
 					// Re-seed renewed certs from the hub into the pool's shared KV store.
 					startLoadBalancerCertSyncLoop(6);
+					// Evaluate user-defined metric alert rules and notify on transitions.
+					const { startAlertLoop } = await import(
+						"@nomploy/server/services/alerts"
+					);
+					startAlertLoop(60);
 				},
 				{
 					onWait: () =>
