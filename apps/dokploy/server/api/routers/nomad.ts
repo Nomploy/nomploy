@@ -1085,6 +1085,42 @@ export const nomadRouter = createTRPCRouter({
 		async ({ ctx }) => getLoadBalancerMetrics(ctx.session.activeOrganizationId),
 	),
 
+	// Tail a pool node's Traefik logs (access log + errors, from the alloc's
+	// stdout/stderr via the Nomad fs API). `node` is the Nomad NodeName.
+	getLoadBalancerLogs: withPermission("server", "read")
+		.input(
+			z.object({
+				node: z.string(),
+				logType: z.enum(["stdout", "stderr"]).default("stdout"),
+			}),
+		)
+		.query(async ({ ctx, input }) => {
+			const cfg = await resolveNomad(ctx, undefined);
+			const client = nomadClient(cfg);
+			try {
+				const res = await client.request(
+					withNs(`/job/${TRAEFIK_HA_JOB_NAME}/allocations`, cfg.namespace),
+				);
+				if (!res.ok) return "";
+				// biome-ignore lint/suspicious/noExplicitAny: Nomad alloc stub shape
+				const allocs = (await res.json()) as any[];
+				const alloc = allocs.find(
+					(a) =>
+						a.NodeName === input.node &&
+						a.DesiredStatus === "run" &&
+						a.ClientStatus === "running",
+				);
+				if (!alloc) return "";
+				const logRes = await client.request(
+					`/client/fs/logs/${alloc.ID}?task=traefik&type=${input.logType}&plain=true&origin=end&offset=60000`,
+				);
+				if (!logRes.ok) return "";
+				return logRes.text();
+			} catch {
+				return "";
+			}
+		}),
+
 	getLoadBalancerStatus: withPermission("server", "read").query(
 		async ({ ctx }) => {
 			const cfg = await resolveNomad(ctx, undefined);

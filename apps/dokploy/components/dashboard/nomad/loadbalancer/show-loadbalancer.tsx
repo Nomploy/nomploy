@@ -6,6 +6,7 @@ import {
 	Loader2,
 	Network,
 	RefreshCw,
+	ScrollText,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -666,6 +667,81 @@ const Stat = ({
 	</div>
 );
 
+/** Tail a pool node's Traefik logs (access log + errors). */
+const LogsCard = () => {
+	const { data: nodes } = api.nomad.getLoadBalancerNodes.useQuery();
+	const [node, setNode] = useState<string>("");
+	const [logType, setLogType] = useState<"stdout" | "stderr">("stdout");
+
+	// Default to the first node once loaded.
+	useEffect(() => {
+		const first = nodes?.[0];
+		if (!node && first) setNode(first.node);
+	}, [nodes, node]);
+
+	const { data: logs, isFetching } = api.nomad.getLoadBalancerLogs.useQuery(
+		{ node, logType },
+		{ enabled: !!node, refetchInterval: 5000 },
+	);
+
+	return (
+		<Card className="bg-background">
+			<CardHeader className="flex flex-row items-start justify-between gap-4">
+				<div className="flex flex-col gap-0.5">
+					<CardTitle className="flex flex-row gap-2 text-xl">
+						<ScrollText className="size-5 self-center text-muted-foreground" />
+						Logs
+					</CardTitle>
+					<CardDescription>
+						Live Traefik logs per pool node — access log (JSON) on stdout,
+						errors on stderr. Refreshes every 5s.
+					</CardDescription>
+				</div>
+				<div className="flex flex-row gap-2">
+					<Select value={node} onValueChange={setNode}>
+						<SelectTrigger className="w-40">
+							<SelectValue placeholder="Node" />
+						</SelectTrigger>
+						<SelectContent>
+							{(nodes ?? []).map((n) => (
+								<SelectItem key={n.node} value={n.node}>
+									{n.node}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+					<Select
+						value={logType}
+						onValueChange={(v) => setLogType(v as "stdout" | "stderr")}
+					>
+						<SelectTrigger className="w-32">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="stdout">Access</SelectItem>
+							<SelectItem value="stderr">Errors</SelectItem>
+						</SelectContent>
+					</Select>
+				</div>
+			</CardHeader>
+			<CardContent>
+				{!node ? (
+					<p className="text-muted-foreground text-sm">
+						No pool nodes running.
+					</p>
+				) : (
+					<pre className="max-h-96 overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
+						{logs?.trim() ||
+							(isFetching
+								? "Loading…"
+								: "No log output yet. (If the pool predates the access-log config, redeploy it.)")}
+					</pre>
+				)}
+			</CardContent>
+		</Card>
+	);
+};
+
 export const ShowLoadBalancer = () => {
 	const { data: permissions } = api.user.getPermissions.useQuery();
 	const canManage = !!permissions?.server?.create;
@@ -674,6 +750,7 @@ export const ShowLoadBalancer = () => {
 			<PoolCard canManage={canManage} />
 			<DnsCard canManage={canManage} />
 			<MetricsCard />
+			<LogsCard />
 		</div>
 	);
 };

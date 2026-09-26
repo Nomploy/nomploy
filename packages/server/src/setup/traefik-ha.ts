@@ -127,6 +127,10 @@ certificatesResolvers:
 api:
   insecure: true
   dashboard: true
+accessLog:
+  format: json
+log:
+  level: INFO
 EOH
       }
 
