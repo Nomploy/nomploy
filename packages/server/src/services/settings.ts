@@ -176,9 +176,7 @@ const getRemoteManifestDigest = async (
  * Picks the highest semver v-tag (GitHub's tag order isn't guaranteed). Null on
  * any failure — callers fall back to the digest label.
  */
-const getLatestReleaseTag = async (
-	repository: string,
-): Promise<string | null> => {
+const getReleaseTagsDesc = async (repository: string): Promise<string[]> => {
 	try {
 		const res = await fetch(
 			`https://api.github.com/repos/${repository}/tags?per_page=30`,
@@ -189,15 +187,15 @@ const getLatestReleaseTag = async (
 				},
 			},
 		);
-		if (!res.ok) return null;
+		if (!res.ok) return [];
 		const tags = (await res.json()) as { name: string }[];
-		const semver = tags
+		return tags
 			.map((t) => t.name)
 			.filter((n) => /^v?\d+\.\d+\.\d+/.test(n))
-			.sort(compareSemver);
-		return semver.length ? (semver[semver.length - 1] as string) : null;
+			.sort(compareSemver)
+			.reverse();
 	} catch {
-		return null;
+		return [];
 	}
 };
 
@@ -225,28 +223,27 @@ export const getUpdateData = async (
 			process.env.NOMPLOY_IMAGE || "ghcr.io/nomploy/nomploy:latest";
 		const { registry, repository, tag } = parseImageRef(imageRef);
 
-		// Release channel: compare running version against the newest release tag.
+		// Release channel: compare running version against published release tags.
 		if (tag === "latest" && currentVersion) {
-			const releaseTag = await getLatestReleaseTag(repository);
-			if (releaseTag && compareSemver(releaseTag, currentVersion) > 0) {
-				// A newer version was TAGGED — but release.sh pushes the git tag first
-				// (that's what triggers the build), so the tag exists ~10 min before CI
-				// publishes the image. Only report the update once that release's image
-				// is actually pullable, otherwise "update available" shows while a click
-				// would just re-pull the current :latest. The tag's own image manifest
-				// (`:vX.Y.Z`) appears exactly when the build's merge job completes.
-				const releaseImagePublished = await getRemoteManifestDigest(
-					registry,
-					repository,
-					releaseTag,
-				);
-				return {
-					updateAvailable: !!releaseImagePublished,
-					latestVersion: releaseImagePublished ? releaseTag : null,
-				};
-			}
-			if (releaseTag) {
-				// Up to date (running >= latest release).
+			const tags = await getReleaseTagsDesc(repository);
+			if (tags.length > 0) {
+				// Only tags newer than what's running, highest first.
+				const newer = tags.filter((t) => compareSemver(t, currentVersion) > 0);
+				// release.sh pushes the git tag FIRST (it triggers the build), so the
+				// newest tag can exist ~10 min before CI publishes its image. Report the
+				// highest newer tag whose image is actually pullable — so a pending or
+				// failed top build doesn't mask older, already-published updates.
+				for (const t of newer) {
+					const published = await getRemoteManifestDigest(
+						registry,
+						repository,
+						t,
+					);
+					if (published) {
+						return { updateAvailable: true, latestVersion: t };
+					}
+				}
+				// Either up to date, or newer tags exist but none is published yet.
 				return { updateAvailable: false, latestVersion: null };
 			}
 			// GitHub unreachable — fall through to the digest comparison below.
@@ -260,7 +257,7 @@ export const getUpdateData = async (
 		const updateAvailable = localDigest !== remoteDigest;
 		if (!updateAvailable) return { updateAvailable, latestVersion: null };
 		// Show the real release version when we can resolve it; else the digest.
-		const releaseTag = await getLatestReleaseTag(repository);
+		const releaseTag = (await getReleaseTagsDesc(repository))[0] ?? null;
 		return {
 			updateAvailable,
 			latestVersion:
