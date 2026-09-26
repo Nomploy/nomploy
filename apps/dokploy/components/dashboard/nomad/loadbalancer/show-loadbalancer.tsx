@@ -29,6 +29,8 @@ import {
 import {
 	type ChartConfig,
 	ChartContainer,
+	ChartLegend,
+	ChartLegendContent,
 	ChartTooltip,
 	ChartTooltipContent,
 } from "@/components/ui/chart";
@@ -618,6 +620,7 @@ const MetricsChartsCard = () => {
 											/>
 										}
 									/>
+									<ChartLegend content={<ChartLegendContent />} />
 									{(
 										["req2xxPerSec", "req4xxPerSec", "req5xxPerSec"] as const
 									).map((k) => (
