@@ -907,10 +907,19 @@ export const nomadRouter = createTRPCRouter({
 		return { certCount };
 	}),
 
-	stopLoadBalancer: withPermission("server", "delete").mutation(async () => {
-		await stopTraefikHaSystemJob();
-		return true;
-	}),
+	stopLoadBalancer: withPermission("server", "delete").mutation(
+		async ({ ctx }) => {
+			await stopTraefikHaSystemJob();
+			// Don't leave DNS pointing at a torn-down pool — clear the A records now
+			// instead of waiting for the 30s health-prune loop.
+			const org = ctx.session.activeOrganizationId;
+			const cfg = await db.query.loadBalancer.findFirst({
+				where: eq(loadBalancer.organizationId, org),
+			});
+			if (cfg?.enabled) await clearLoadBalancerDns(org).catch(() => {});
+			return true;
+		},
+	),
 
 	// Re-seed the shared cert store (Consul KV) from the hub's acme.json — run
 	// after cert renewals so the pool picks up fresh certs (file provider reloads).

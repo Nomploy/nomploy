@@ -222,9 +222,13 @@ const DnsCard = ({ canManage }: { canManage: boolean }) => {
 	const upsert = api.nomad.upsertLoadBalancerConfig.useMutation();
 	const toggle = api.nomad.setLoadBalancerDnsEnabled.useMutation();
 	const reconcile = api.nomad.reconcileLoadBalancerDns.useMutation();
+	const { data: nodes } = api.nomad.getLoadBalancerNodes.useQuery(undefined, {
+		refetchInterval: 15000,
+	});
 
 	const cfg = data?.config;
 	const providers = data?.dnsProviders ?? [];
+	const missingPublicIp = (nodes ?? []).filter((n) => n.healthy && !n.publicIp);
 
 	// Seed the local form from the saved config once loaded.
 	useEffect(() => {
@@ -448,6 +452,48 @@ const DnsCard = ({ canManage }: { canManage: boolean }) => {
 										</span>
 									)}
 								</div>
+
+								{/* Live pool nodes + the IP each would publish */}
+								{(nodes ?? []).length > 0 && (
+									<div className="flex flex-col gap-1.5">
+										<Label className="text-muted-foreground text-xs">
+											Pool nodes
+										</Label>
+										{(nodes ?? []).map((n) => (
+											<div
+												key={n.node}
+												className="flex items-center justify-between rounded-md border px-2.5 py-1.5 text-sm"
+											>
+												<span className="font-medium">{n.node}</span>
+												<div className="flex items-center gap-2">
+													<span className="font-mono text-muted-foreground text-xs">
+														{n.publicIp ?? "no public IP"}
+													</span>
+													<Badge
+														variant="outline"
+														className={statusBadge(n.healthy && !!n.publicIp)}
+													>
+														{!n.healthy
+															? n.status
+															: n.publicIp
+																? "eligible"
+																: "no IP"}
+													</Badge>
+												</div>
+											</div>
+										))}
+									</div>
+								)}
+
+								{missingPublicIp.length > 0 && (
+									<div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-amber-600 text-xs dark:text-amber-400">
+										{missingPublicIp.length} healthy node(s) have no detected
+										public IP, so they can't be published. Public IPs are
+										auto-detected via your Hetzner cloud provider — check that a
+										Hetzner token is set in Settings → Cloud and covers these
+										nodes.
+									</div>
+								)}
 							</div>
 						)}
 					</>
@@ -473,6 +519,10 @@ const MetricsCard = () => {
 		{ requests: 0, reqPerSec: 0, req5xx: 0 },
 	);
 
+	// Healthy nodes with no scrapeable metrics endpoint → the running pool predates
+	// the :8082 Prometheus entrypoint; a redeploy adds it.
+	const needsRedeploy = (data ?? []).some((n) => n.healthy && !n.reachable);
+
 	return (
 		<Card className="bg-background">
 			<CardHeader>
@@ -496,6 +546,12 @@ const MetricsCard = () => {
 					</p>
 				) : (
 					<div className="flex flex-col gap-4">
+						{needsRedeploy && (
+							<div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-amber-600 text-xs dark:text-amber-400">
+								Nodes are up but not exposing metrics. Redeploy the pool (Pool →
+								Redeploy) to add the Prometheus <code>:8082</code> endpoint.
+							</div>
+						)}
 						<div className="grid grid-cols-3 gap-3">
 							<Stat label="Requests/s" value={totals.reqPerSec.toFixed(1)} />
 							<Stat
