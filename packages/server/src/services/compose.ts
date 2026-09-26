@@ -157,6 +157,15 @@ export const loadServices = async (
 ) => {
 	const compose = await findComposeById(composeId);
 
+	// Nomad Packs have no docker-compose file to parse — their "services" are the
+	// Consul services their deployed jobs register. List those instead.
+	if (compose.composeType === "nomad-pack") {
+		const { loadPackServices } = await import(
+			"@nomploy/server/setup/pack-domains"
+		);
+		return await loadPackServices(compose.appName);
+	}
+
 	if (type === "fetch") {
 		const command = await cloneCompose(compose);
 		if (compose.serverId) {
@@ -549,6 +558,13 @@ export const startCompose = async (composeId: string) => {
 			} else {
 				await execAsync(cmd);
 			}
+			// Route the pack's domains via a Traefik file-provider config.
+			const { applyPackDomains } = await import(
+				"@nomploy/server/setup/pack-domains"
+			);
+			await applyPackDomains(compose).catch((e) =>
+				console.error("pack domains apply failed:", e),
+			);
 		}
 
 		await updateCompose(composeId, {
@@ -614,6 +630,13 @@ export const stopCompose = async (composeId: string) => {
 			} else {
 				await execAsync(stopCmd);
 			}
+			// Remove the pack's Traefik domain routing (service is gone now).
+			const { applyPackDomains } = await import(
+				"@nomploy/server/setup/pack-domains"
+			);
+			await applyPackDomains({ ...compose, domains: [] }).catch((e) =>
+				console.error("pack domains removal failed:", e),
+			);
 		}
 
 		await updateCompose(composeId, {
