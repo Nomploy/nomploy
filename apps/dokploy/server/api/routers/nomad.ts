@@ -1085,12 +1085,14 @@ export const nomadRouter = createTRPCRouter({
 		async ({ ctx }) => getLoadBalancerMetrics(ctx.session.activeOrganizationId),
 	),
 
-	// Tail a pool node's Traefik logs (access log + errors, from the alloc's
-	// stdout/stderr via the Nomad fs API). `node` is the Nomad NodeName.
+	// Tail pool nodes' Traefik logs (access log + errors) from each alloc's
+	// stdout/stderr via the Nomad fs API. Returns one entry per running node so
+	// the UI can present a consolidated view tagged by instance. Pass `node` to
+	// scope to a single instance; omit for all.
 	getLoadBalancerLogs: withPermission("server", "read")
 		.input(
 			z.object({
-				node: z.string(),
+				node: z.string().optional(),
 				logType: z.enum(["stdout", "stderr"]).default("stdout"),
 			}),
 		)
@@ -1101,23 +1103,32 @@ export const nomadRouter = createTRPCRouter({
 				const res = await client.request(
 					withNs(`/job/${TRAEFIK_HA_JOB_NAME}/allocations`, cfg.namespace),
 				);
-				if (!res.ok) return "";
+				if (!res.ok) return [] as { node: string; text: string }[];
 				// biome-ignore lint/suspicious/noExplicitAny: Nomad alloc stub shape
 				const allocs = (await res.json()) as any[];
-				const alloc = allocs.find(
+				const running = allocs.filter(
 					(a) =>
-						a.NodeName === input.node &&
 						a.DesiredStatus === "run" &&
-						a.ClientStatus === "running",
+						a.ClientStatus === "running" &&
+						(!input.node || a.NodeName === input.node),
 				);
-				if (!alloc) return "";
-				const logRes = await client.request(
-					`/client/fs/logs/${alloc.ID}?task=traefik&type=${input.logType}&plain=true&origin=end&offset=60000`,
+				return Promise.all(
+					running.map(async (a) => {
+						try {
+							const logRes = await client.request(
+								`/client/fs/logs/${a.ID}?task=traefik&type=${input.logType}&plain=true&origin=end&offset=60000`,
+							);
+							return {
+								node: a.NodeName as string,
+								text: logRes.ok ? await logRes.text() : "",
+							};
+						} catch {
+							return { node: a.NodeName as string, text: "" };
+						}
+					}),
 				);
-				if (!logRes.ok) return "";
-				return logRes.text();
 			} catch {
-				return "";
+				return [] as { node: string; text: string }[];
 			}
 		}),
 

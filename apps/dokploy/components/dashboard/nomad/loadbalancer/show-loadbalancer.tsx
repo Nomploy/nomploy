@@ -34,6 +34,7 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/utils/api";
 
 const statusBadge = (ok: boolean) =>
@@ -58,7 +59,7 @@ const PoolCard = ({ canManage }: { canManage: boolean }) => {
 
 	return (
 		<Card className="bg-background">
-			<CardHeader className="flex flex-row items-start justify-between gap-4">
+			<CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
 				<div className="flex flex-col gap-0.5">
 					<CardTitle className="flex flex-row gap-2 text-xl">
 						<Network className="size-5 self-center text-muted-foreground" />
@@ -71,7 +72,7 @@ const PoolCard = ({ canManage }: { canManage: boolean }) => {
 					</CardDescription>
 				</div>
 				{canManage && (
-					<div className="flex flex-row gap-2">
+					<div className="flex flex-row flex-wrap gap-2">
 						<Button
 							size="sm"
 							isLoading={deploy.isPending}
@@ -254,7 +255,7 @@ const DnsCard = ({ canManage }: { canManage: boolean }) => {
 
 	return (
 		<Card className="bg-background">
-			<CardHeader className="flex flex-row items-start justify-between gap-4">
+			<CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
 				<div className="flex flex-col gap-0.5">
 					<CardTitle className="flex flex-row gap-2 text-xl">
 						<Globe className="size-5 self-center text-muted-foreground" />
@@ -671,7 +672,8 @@ const Stat = ({
 );
 
 type AccessEntry = {
-	raw: string;
+	node: string;
+	ts: number;
 	time: string;
 	status: number;
 	method: string;
@@ -681,18 +683,17 @@ type AccessEntry = {
 	client: string;
 };
 
-const parseAccessLine = (line: string): AccessEntry | null => {
+const parseAccessLine = (line: string, node: string): AccessEntry | null => {
 	try {
 		const j = JSON.parse(line) as Record<string, unknown>;
 		const status = Number(j.DownstreamStatus ?? j.OriginStatus ?? 0);
 		const iso = String(j.time ?? j.StartUTC ?? "");
 		const t = iso ? new Date(iso) : null;
+		const valid = t && !Number.isNaN(t.getTime());
 		return {
-			raw: line,
-			time:
-				t && !Number.isNaN(t.getTime())
-					? t.toLocaleTimeString()
-					: iso.slice(11, 19),
+			node,
+			ts: valid ? (t as Date).getTime() : 0,
+			time: valid ? (t as Date).toLocaleTimeString() : iso.slice(11, 19),
 			status,
 			method: String(j.RequestMethod ?? ""),
 			host: String(j.RequestHost ?? ""),
@@ -703,6 +704,16 @@ const parseAccessLine = (line: string): AccessEntry | null => {
 	} catch {
 		return null;
 	}
+};
+
+// Best-effort timestamp from an error/app-log line, for consolidated ordering.
+const errorTs = (line: string): number => {
+	const m = line.match(/"?time"?[:=]"?([0-9T:.\-Z+]{10,})/);
+	if (m?.[1]) {
+		const t = new Date(m[1]).getTime();
+		if (!Number.isNaN(t)) return t;
+	}
+	return 0;
 };
 
 const statusColor = (s: number) =>
@@ -716,61 +727,79 @@ const statusColor = (s: number) =>
 
 const MAX_ROWS = 500;
 
-/** Tail + search a pool node's Traefik logs (access log + errors). */
-const LogsCard = () => {
+const NodeTag = ({ node }: { node: string }) => (
+	<Badge
+		variant="outline"
+		className="border-primary/30 font-mono text-[10px] text-primary"
+	>
+		{node}
+	</Badge>
+);
+
+/** Consolidated, instance-tagged, searchable Traefik logs across the pool. */
+const LogsView = () => {
 	const { data: nodes } = api.nomad.getLoadBalancerNodes.useQuery();
-	const [node, setNode] = useState<string>("");
+	const [scope, setScope] = useState<string>("all");
 	const [logType, setLogType] = useState<"stdout" | "stderr">("stdout");
 	const [query, setQuery] = useState("");
 	const [errorsOnly, setErrorsOnly] = useState(false);
 	const [paused, setPaused] = useState(false);
 
-	useEffect(() => {
-		const first = nodes?.[0];
-		if (!node && first) setNode(first.node);
-	}, [nodes, node]);
-
-	const { data: logs, isFetching } = api.nomad.getLoadBalancerLogs.useQuery(
-		{ node, logType },
-		{ enabled: !!node, refetchInterval: paused ? false : 5000 },
+	const { data: perNode, isFetching } = api.nomad.getLoadBalancerLogs.useQuery(
+		{ node: scope === "all" ? undefined : scope, logType },
+		{ refetchInterval: paused ? false : 5000 },
 	);
 
 	const q = query.trim().toLowerCase();
-	const allLines = (logs ?? "").split("\n").filter((l) => l.trim());
-	const filtered = q
-		? allLines.filter((l) => l.toLowerCase().includes(q))
-		: allLines;
+	const sources = perNode ?? [];
+	const totalLines = sources.reduce(
+		(n, s) => n + s.text.split("\n").filter((l) => l.trim()).length,
+		0,
+	);
 
-	const access =
-		logType === "stdout"
-			? filtered
-					.map(parseAccessLine)
-					.filter((e): e is AccessEntry => e !== null)
-					.filter((e) => !errorsOnly || e.status >= 400)
-					.slice(-MAX_ROWS)
-			: [];
-	const errorLines = logType === "stderr" ? filtered.slice(-MAX_ROWS) : [];
+	// Consolidate every instance's lines into one time-ordered stream.
+	const access: AccessEntry[] = [];
+	const errors: { node: string; ts: number; line: string }[] = [];
+	for (const s of sources) {
+		for (const line of s.text.split("\n")) {
+			if (!line.trim()) continue;
+			if (q && !line.toLowerCase().includes(q)) continue;
+			if (logType === "stdout") {
+				const e = parseAccessLine(line, s.node);
+				if (e && (!errorsOnly || e.status >= 400)) access.push(e);
+			} else {
+				errors.push({ node: s.node, ts: errorTs(line), line });
+			}
+		}
+	}
+	access.sort((a, b) => a.ts - b.ts);
+	errors.sort((a, b) => a.ts - b.ts);
+	const accessRows = access.slice(-MAX_ROWS);
+	const errorRows = errors.slice(-MAX_ROWS);
+	const shown = logType === "stdout" ? accessRows.length : errorRows.length;
 
 	return (
 		<Card className="bg-background">
 			<CardHeader className="flex flex-col gap-3">
-				<div className="flex flex-row items-start justify-between gap-4">
-					<div className="flex flex-col gap-0.5">
-						<CardTitle className="flex flex-row gap-2 text-xl">
-							<ScrollText className="size-5 self-center text-muted-foreground" />
-							Logs
-						</CardTitle>
-						<CardDescription>
-							Live Traefik logs per pool node — access log on stdout, errors on
-							stderr. {paused ? "Paused." : "Refreshes every 5s."}
-						</CardDescription>
-					</div>
+				<div className="flex flex-col gap-1">
+					<CardTitle className="flex flex-row gap-2 text-xl">
+						<ScrollText className="size-5 self-center text-muted-foreground" />
+						Logs
+					</CardTitle>
+					<CardDescription>
+						Consolidated Traefik logs across the pool, tagged by instance —
+						access on stdout, errors on stderr.{" "}
+						{paused ? "Paused." : "Refreshes every 5s."}
+					</CardDescription>
+				</div>
+				<div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
 					<div className="flex flex-row gap-2">
-						<Select value={node} onValueChange={setNode}>
-							<SelectTrigger className="w-36">
-								<SelectValue placeholder="Node" />
+						<Select value={scope} onValueChange={setScope}>
+							<SelectTrigger className="flex-1 sm:w-40">
+								<SelectValue placeholder="Instance" />
 							</SelectTrigger>
 							<SelectContent>
+								<SelectItem value="all">All instances</SelectItem>
 								{(nodes ?? []).map((n) => (
 									<SelectItem key={n.node} value={n.node}>
 										{n.node}
@@ -782,7 +811,7 @@ const LogsCard = () => {
 							value={logType}
 							onValueChange={(v) => setLogType(v as "stdout" | "stderr")}
 						>
-							<SelectTrigger className="w-28">
+							<SelectTrigger className="flex-1 sm:w-28">
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
@@ -791,60 +820,59 @@ const LogsCard = () => {
 							</SelectContent>
 						</Select>
 					</div>
-				</div>
-				<div className="flex flex-row flex-wrap items-center gap-2">
-					<div className="relative flex-1 min-w-48">
+					<div className="relative min-w-0 flex-1">
 						<Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted-foreground" />
 						<Input
-							placeholder="Search logs (host, path, status, IP…)"
+							placeholder="Search (host, path, status, IP, instance…)"
 							value={query}
 							onChange={(e) => setQuery(e.target.value)}
 							className="pl-8"
 						/>
 					</div>
-					{logType === "stdout" && (
+					<div className="flex flex-row gap-2">
+						{logType === "stdout" && (
+							<Button
+								size="sm"
+								variant={errorsOnly ? "default" : "outline"}
+								onClick={() => setErrorsOnly((v) => !v)}
+								className="flex-1 sm:flex-none"
+							>
+								4xx/5xx
+							</Button>
+						)}
 						<Button
 							size="sm"
-							variant={errorsOnly ? "default" : "outline"}
-							onClick={() => setErrorsOnly((v) => !v)}
+							variant="outline"
+							onClick={() => setPaused((v) => !v)}
+							className="flex-1 sm:flex-none"
 						>
-							4xx/5xx only
+							{paused ? (
+								<Play className="mr-1 size-4" />
+							) : (
+								<Pause className="mr-1 size-4" />
+							)}
+							{paused ? "Resume" : "Pause"}
 						</Button>
-					)}
-					<Button
-						size="sm"
-						variant="outline"
-						onClick={() => setPaused((v) => !v)}
-					>
-						{paused ? (
-							<Play className="mr-1 size-4" />
-						) : (
-							<Pause className="mr-1 size-4" />
-						)}
-						{paused ? "Resume" : "Pause"}
-					</Button>
+					</div>
 				</div>
 			</CardHeader>
 			<CardContent>
-				{!node ? (
-					<p className="text-muted-foreground text-sm">
-						No pool nodes running.
-					</p>
-				) : logType === "stdout" ? (
-					access.length === 0 ? (
+				{logType === "stdout" ? (
+					accessRows.length === 0 ? (
 						<p className="text-muted-foreground text-sm">
-							{isFetching && !logs
+							{isFetching && !perNode
 								? "Loading…"
 								: q || errorsOnly
 									? "No matching requests."
 									: "No access logs yet. (Redeploy the pool if it predates the access-log config.)"}
 						</p>
 					) : (
-						<div className="max-h-96 overflow-auto rounded-lg border">
+						<div className="max-h-[28rem] overflow-auto rounded-lg border">
 							<table className="w-full font-mono text-xs">
 								<thead className="sticky top-0 bg-muted/80 backdrop-blur">
 									<tr className="text-left text-muted-foreground">
 										<th className="px-2 py-1.5 font-medium">Time</th>
+										<th className="px-2 py-1.5 font-medium">Instance</th>
 										<th className="px-2 py-1.5 font-medium">Status</th>
 										<th className="px-2 py-1.5 font-medium">Method</th>
 										<th className="px-2 py-1.5 font-medium">Host / Path</th>
@@ -853,13 +881,16 @@ const LogsCard = () => {
 									</tr>
 								</thead>
 								<tbody>
-									{access.map((e, i) => (
+									{accessRows.map((e, i) => (
 										<tr
-											key={`${e.time}-${i}`}
+											key={`${e.node}-${e.ts}-${i}`}
 											className="border-t hover:bg-muted/40"
 										>
 											<td className="whitespace-nowrap px-2 py-1 text-muted-foreground">
 												{e.time}
+											</td>
+											<td className="px-2 py-1">
+												<NodeTag node={e.node} />
 											</td>
 											<td className="px-2 py-1">
 												<Badge
@@ -886,36 +917,42 @@ const LogsCard = () => {
 							</table>
 						</div>
 					)
-				) : errorLines.length === 0 ? (
+				) : errorRows.length === 0 ? (
 					<p className="text-muted-foreground text-sm">
-						{isFetching && !logs
+						{isFetching && !perNode
 							? "Loading…"
 							: q
 								? "No matching lines."
 								: "No error output."}
 					</p>
 				) : (
-					<pre className="max-h-96 overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
-						{errorLines.map((l, i) => (
+					<div className="max-h-[28rem] overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
+						{errorRows.map((e, i) => (
 							<div
-								key={`${i}-${l.slice(0, 24)}`}
-								className={
-									/"level":"error"|level=error|ERR/.test(l)
-										? "text-destructive"
-										: /"level":"warn"|level=warn|WRN/.test(l)
-											? "text-amber-600 dark:text-amber-400"
-											: undefined
-								}
+								key={`${e.node}-${i}-${e.line.slice(0, 24)}`}
+								className="flex gap-2"
 							>
-								{l}
+								<span className="shrink-0">
+									<NodeTag node={e.node} />
+								</span>
+								<span
+									className={
+										/"level":"error"|level=error|ERR/.test(e.line)
+											? "text-destructive"
+											: /"level":"warn"|level=warn|WRN/.test(e.line)
+												? "text-amber-600 dark:text-amber-400"
+												: undefined
+									}
+								>
+									{e.line}
+								</span>
 							</div>
 						))}
-					</pre>
+					</div>
 				)}
-				{node && (q || errorsOnly) && (
+				{(q || errorsOnly) && (
 					<p className="mt-2 text-muted-foreground text-xs">
-						Showing {logType === "stdout" ? access.length : errorLines.length}{" "}
-						of {allLines.length} lines
+						Showing {shown} of {totalLines} lines
 					</p>
 				)}
 			</CardContent>
@@ -927,11 +964,19 @@ export const ShowLoadBalancer = () => {
 	const { data: permissions } = api.user.getPermissions.useQuery();
 	const canManage = !!permissions?.server?.create;
 	return (
-		<div className="flex flex-col gap-4">
-			<PoolCard canManage={canManage} />
-			<DnsCard canManage={canManage} />
-			<MetricsCard />
-			<LogsCard />
-		</div>
+		<Tabs defaultValue="overview" className="w-full">
+			<TabsList>
+				<TabsTrigger value="overview">Overview</TabsTrigger>
+				<TabsTrigger value="logs">Logs</TabsTrigger>
+			</TabsList>
+			<TabsContent value="overview" className="mt-4 flex flex-col gap-4">
+				<PoolCard canManage={canManage} />
+				<DnsCard canManage={canManage} />
+				<MetricsCard />
+			</TabsContent>
+			<TabsContent value="logs" className="mt-4">
+				<LogsView />
+			</TabsContent>
+		</Tabs>
 	);
 };
