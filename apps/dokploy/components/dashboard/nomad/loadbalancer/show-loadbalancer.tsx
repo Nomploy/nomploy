@@ -11,6 +11,7 @@ import {
 	RefreshCw,
 	ScrollText,
 	Search,
+	ShieldCheck,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -63,19 +64,9 @@ const PoolCard = ({ canManage }: { canManage: boolean }) => {
 	const { data: nodes } = api.nomad.getLoadBalancerNodes.useQuery(undefined, {
 		refetchInterval: 10000,
 	});
-	const { data: certs } = api.nomad.getLoadBalancerCerts.useQuery(undefined, {
-		refetchInterval: 60000,
-	});
 	const deploy = api.nomad.deployLoadBalancer.useMutation();
 	const stop = api.nomad.stopLoadBalancer.useMutation();
 	const syncCerts = api.nomad.syncLoadBalancerCerts.useMutation();
-
-	const certBadge = (d: number) =>
-		d < 14
-			? "border-destructive/40 text-destructive"
-			: d < 30
-				? "border-amber-500/40 text-amber-600 dark:text-amber-400"
-				: "border-emerald-500/40 text-emerald-500";
 
 	return (
 		<Card className="bg-background">
@@ -197,28 +188,86 @@ const PoolCard = ({ canManage }: { canManage: boolean }) => {
 								</Badge>
 							</div>
 						))}
+					</div>
+				)}
+			</CardContent>
+		</Card>
+	);
+};
 
-						{(certs ?? []).length > 0 && (
-							<div className="mt-2 flex flex-col gap-1.5">
-								<span className="text-muted-foreground text-xs">
-									Certificates ({certs?.length}) — auto-renewed on the hub,
-									resynced to the pool every 6h
-								</span>
-								{(certs ?? []).map((c) => (
-									<div
-										key={c.domain}
-										className="flex items-center justify-between rounded-md border px-2.5 py-1.5 text-sm"
-									>
-										<span className="truncate font-mono text-xs">
-											{c.domain}
-										</span>
-										<Badge variant="outline" className={certBadge(c.daysLeft)}>
-											{c.daysLeft}d left
-										</Badge>
-									</div>
-								))}
+/** Certificates the pool serves + expiry. Auto-renewed on the hub, resynced to
+ * the pool's Consul KV every 6h. */
+const CertificatesCard = ({ canManage }: { canManage: boolean }) => {
+	const { data: certs } = api.nomad.getLoadBalancerCerts.useQuery(undefined, {
+		refetchInterval: 60000,
+	});
+	const syncCerts = api.nomad.syncLoadBalancerCerts.useMutation();
+	const certBadge = (d: number) =>
+		d < 14
+			? "border-destructive/40 text-destructive"
+			: d < 30
+				? "border-amber-500/40 text-amber-600 dark:text-amber-400"
+				: "border-emerald-500/40 text-emerald-500";
+
+	return (
+		<Card className="bg-background">
+			<CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+				<div className="flex flex-col gap-0.5">
+					<CardTitle className="flex flex-row gap-2 text-xl">
+						<ShieldCheck className="size-5 self-center text-muted-foreground" />
+						Certificates
+					</CardTitle>
+					<CardDescription>
+						TLS certs the pool serves, shared via Consul KV. Issued/renewed on
+						the hub and resynced to the pool every 6h.
+					</CardDescription>
+				</div>
+				{canManage && (
+					<Button
+						size="sm"
+						variant="outline"
+						isLoading={syncCerts.isPending}
+						onClick={async () => {
+							await syncCerts
+								.mutateAsync()
+								.then((r) =>
+									toast.success("Certs synced", {
+										description: `${r.certCount} cert(s) refreshed in the shared store`,
+									}),
+								)
+								.catch((e) =>
+									toast.error("Cert sync failed", { description: e.message }),
+								);
+						}}
+					>
+						Sync now
+					</Button>
+				)}
+			</CardHeader>
+			<CardContent>
+				{(certs ?? []).length === 0 ? (
+					<p className="text-muted-foreground text-sm">
+						No certificates found. They appear once the pool is deployed and the
+						hub has issued certs for your domains.
+					</p>
+				) : (
+					<div className="flex flex-col gap-1.5">
+						{(certs ?? []).map((c) => (
+							<div
+								key={c.domain}
+								className="flex items-center justify-between rounded-md border px-2.5 py-1.5 text-sm"
+							>
+								<span className="truncate font-mono text-xs">{c.domain}</span>
+								<div className="flex items-center gap-2">
+									<span className="text-muted-foreground text-xs">
+										{new Date(c.notAfter).toLocaleDateString()}
+									</span>
+									<Badge variant="outline" className={certBadge(c.daysLeft)}>
+										{c.daysLeft}d left
+									</Badge>
+								</div>
 							</div>
-						)}
+						))}
 					</div>
 				)}
 			</CardContent>
@@ -235,6 +284,22 @@ const PoolMembershipCard = ({ canManage }: { canManage: boolean }) => {
 		},
 	);
 	const setMembership = api.nomad.setPoolMembership.useMutation();
+	// Optimistic overrides per node id — Nomad's node-meta read lags the write, so
+	// an immediate refetch can still report the old value and snap the switch back.
+	const [pending, setPending] = useState<Record<string, boolean>>({});
+	const [busy, setBusy] = useState<Record<string, boolean>>({});
+
+	// Drop an override once the server data catches up to it.
+	useEffect(() => {
+		if (!candidates) return;
+		setPending((prev) => {
+			const next = { ...prev };
+			for (const c of candidates) {
+				if (c.id in next && next[c.id] === c.lbEnabled) delete next[c.id];
+			}
+			return next;
+		});
+	}, [candidates]);
 
 	return (
 		<Card className="bg-background">
@@ -274,24 +339,38 @@ const PoolMembershipCard = ({ canManage }: { canManage: boolean }) => {
 									</Badge>
 								) : (
 									<Switch
-										checked={n.lbEnabled}
-										disabled={!canManage || setMembership.isPending}
+										checked={pending[n.id] ?? n.lbEnabled}
+										disabled={!canManage || busy[n.id]}
 										onCheckedChange={async (enabled) => {
-											await setMembership
-												.mutateAsync({ nodeId: n.id, enabled })
-												.then(async () => {
-													toast.success(
-														enabled
-															? `${n.name} added to the pool`
-															: `${n.name} removed from the pool`,
-													);
-													await refetch();
-												})
-												.catch((e) =>
-													toast.error("Update failed", {
-														description: e.message,
-													}),
+											setPending((p) => ({ ...p, [n.id]: enabled }));
+											setBusy((b) => ({ ...b, [n.id]: true }));
+											try {
+												await setMembership.mutateAsync({
+													nodeId: n.id,
+													enabled,
+												});
+												toast.success(
+													enabled
+														? `${n.name} added to the pool`
+														: `${n.name} removed from the pool`,
 												);
+												// Give Nomad a moment to propagate the meta change, then refetch.
+												await new Promise((r) => setTimeout(r, 1500));
+												await refetch();
+											} catch (e) {
+												setPending((p) => {
+													const { [n.id]: _, ...rest } = p;
+													return rest;
+												});
+												toast.error("Update failed", {
+													description: (e as Error).message,
+												});
+											} finally {
+												setBusy((b) => {
+													const { [n.id]: _, ...rest } = b;
+													return rest;
+												});
+											}
 										}}
 									/>
 								)}
@@ -304,6 +383,33 @@ const PoolMembershipCard = ({ canManage }: { canManage: boolean }) => {
 	);
 };
 
+// Clipboard that also works where navigator.clipboard is unavailable (insecure
+// context / some desktop webviews): fall back to a hidden textarea + execCommand.
+const copyText = async (value: string): Promise<boolean> => {
+	try {
+		if (navigator.clipboard?.writeText) {
+			await navigator.clipboard.writeText(value);
+			return true;
+		}
+	} catch {
+		// fall through to the legacy path
+	}
+	try {
+		const ta = document.createElement("textarea");
+		ta.value = value;
+		ta.style.position = "fixed";
+		ta.style.opacity = "0";
+		document.body.appendChild(ta);
+		ta.focus();
+		ta.select();
+		const ok = document.execCommand("copy");
+		document.body.removeChild(ta);
+		return ok;
+	} catch {
+		return false;
+	}
+};
+
 const CopyButton = ({ value }: { value: string }) => {
 	const [copied, setCopied] = useState(false);
 	return (
@@ -311,12 +417,11 @@ const CopyButton = ({ value }: { value: string }) => {
 			size="sm"
 			variant="outline"
 			onClick={async () => {
-				try {
-					await navigator.clipboard.writeText(value);
+				if (await copyText(value)) {
 					setCopied(true);
 					setTimeout(() => setCopied(false), 1500);
-				} catch {
-					toast.error("Could not copy");
+				} else {
+					toast.error("Could not copy — select and copy manually");
 				}
 			}}
 		>
@@ -1257,6 +1362,7 @@ export const ShowLoadBalancer = () => {
 		<Tabs defaultValue="overview" className="w-full">
 			<TabsList>
 				<TabsTrigger value="overview">Overview</TabsTrigger>
+				<TabsTrigger value="certificates">Certificates</TabsTrigger>
 				<TabsTrigger value="metrics">Metrics</TabsTrigger>
 				<TabsTrigger value="logs">Logs</TabsTrigger>
 			</TabsList>
@@ -1264,6 +1370,9 @@ export const ShowLoadBalancer = () => {
 				<PoolCard canManage={canManage} />
 				<PoolMembershipCard canManage={canManage} />
 				<DnsCard canManage={canManage} />
+			</TabsContent>
+			<TabsContent value="certificates" className="mt-4">
+				<CertificatesCard canManage={canManage} />
 			</TabsContent>
 			<TabsContent value="metrics" className="mt-4 flex flex-col gap-4">
 				<MetricsChartsCard />
