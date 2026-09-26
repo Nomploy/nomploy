@@ -1,6 +1,12 @@
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, gte, lt } from "drizzle-orm";
 import { db } from "../db";
-import { cloudProvider, dnsProvider, loadBalancer, server } from "../db/schema";
+import {
+	cloudProvider,
+	dnsProvider,
+	lbMetricSample,
+	loadBalancer,
+	server,
+} from "../db/schema";
 import { TRAEFIK_HA_JOB_NAME } from "./traefik-ha";
 
 const HETZNER_API = "https://api.hetzner.cloud/v1";
@@ -405,6 +411,46 @@ const sumByCodeClass = (body: string): Record<string, number> => {
 	return out;
 };
 
+type RawCounters = {
+	reqTotal: number;
+	req2xx: number;
+	req4xx: number;
+	req5xx: number;
+	durSum: number;
+	durCount: number;
+};
+
+/** Scrape a node's Traefik Prometheus endpoint into cumulative counters. */
+const scrapeRawCounters = async (host: string): Promise<RawCounters | null> => {
+	try {
+		const ctl = new AbortController();
+		const t = setTimeout(() => ctl.abort(), 4000);
+		const res = await fetch(`http://${host}:${METRICS_PORT}/metrics`, {
+			signal: ctl.signal,
+		});
+		clearTimeout(t);
+		if (!res.ok) return null;
+		const body = await res.text();
+		const classes = sumByCodeClass(body);
+		return {
+			reqTotal: sumMetric(body, "traefik_entrypoint_requests_total"),
+			req2xx: classes["2"] ?? 0,
+			req4xx: classes["4"] ?? 0,
+			req5xx: classes["5"] ?? 0,
+			durSum: sumMetric(
+				body,
+				"traefik_entrypoint_request_duration_seconds_sum",
+			),
+			durCount: sumMetric(
+				body,
+				"traefik_entrypoint_request_duration_seconds_count",
+			),
+		};
+	} catch {
+		return null;
+	}
+};
+
 const scrapeNode = async (
 	n: LbNode,
 	inDns: boolean,
@@ -424,48 +470,28 @@ const scrapeNode = async (
 		reqPerSec: 0,
 	};
 	if (!host) return base;
-	try {
-		const ctl = new AbortController();
-		const t = setTimeout(() => ctl.abort(), 4000);
-		const res = await fetch(`http://${host}:${METRICS_PORT}/metrics`, {
-			signal: ctl.signal,
-		});
-		clearTimeout(t);
-		if (!res.ok) return base;
-		const body = await res.text();
-		const total = sumMetric(body, "traefik_entrypoint_requests_total");
-		const classes = sumByCodeClass(body);
-		const durSum = sumMetric(
-			body,
-			"traefik_entrypoint_request_duration_seconds_sum",
-		);
-		const durCount = sumMetric(
-			body,
-			"traefik_entrypoint_request_duration_seconds_count",
-		);
+	const c = await scrapeRawCounters(host);
+	if (!c) return base;
 
-		// Request rate from the delta since the previous poll for this node.
-		const now = Date.now();
-		const prev = lastSample.get(n.node);
-		let reqPerSec = 0;
-		if (prev && now > prev.ts && total >= prev.total) {
-			reqPerSec = (total - prev.total) / ((now - prev.ts) / 1000);
-		}
-		lastSample.set(n.node, { ts: now, total });
-
-		return {
-			...base,
-			reachable: true,
-			requests: total,
-			req2xx: classes["2"] ?? 0,
-			req4xx: classes["4"] ?? 0,
-			req5xx: classes["5"] ?? 0,
-			avgLatencyMs: durCount > 0 ? (durSum / durCount) * 1000 : 0,
-			reqPerSec,
-		};
-	} catch {
-		return base;
+	// Request rate from the delta since the previous poll for this node.
+	const now = Date.now();
+	const prev = lastSample.get(n.node);
+	let reqPerSec = 0;
+	if (prev && now > prev.ts && c.reqTotal >= prev.total) {
+		reqPerSec = (c.reqTotal - prev.total) / ((now - prev.ts) / 1000);
 	}
+	lastSample.set(n.node, { ts: now, total: c.reqTotal });
+
+	return {
+		...base,
+		reachable: true,
+		requests: c.reqTotal,
+		req2xx: c.req2xx,
+		req4xx: c.req4xx,
+		req5xx: c.req5xx,
+		avgLatencyMs: c.durCount > 0 ? (c.durSum / c.durCount) * 1000 : 0,
+		reqPerSec,
+	};
 };
 
 export const getLoadBalancerMetrics = async (
@@ -497,6 +523,162 @@ export const getLoadBalancerMetrics = async (
 	return Promise.all(
 		nodes.map((n) => scrapeNode(n, !!(n.publicIp && inDnsIps.has(n.publicIp)))),
 	);
+};
+
+// ---------------------------------------------------------------------------
+// Metrics history (sampled time-series → time-range graphs)
+// ---------------------------------------------------------------------------
+
+const METRICS_RETENTION_DAYS = 7;
+
+/** Scrape every pool node's cumulative counters once and persist a sample row
+ * per node, for each org that has pool nodes. Prunes past the retention window. */
+export const sampleLoadBalancerMetrics = async (): Promise<number> => {
+	const orgRows = await db
+		.selectDistinct({ organizationId: server.organizationId })
+		.from(server);
+	let written = 0;
+	for (const { organizationId } of orgRows) {
+		try {
+			const nodes = await resolveLbNodes(organizationId);
+			for (const n of nodes) {
+				const host = n.wgIp || n.ip;
+				if (!host) continue;
+				const c = await scrapeRawCounters(host);
+				if (!c) continue;
+				await db.insert(lbMetricSample).values({
+					organizationId,
+					node: n.node,
+					reqTotal: c.reqTotal,
+					req2xx: c.req2xx,
+					req4xx: c.req4xx,
+					req5xx: c.req5xx,
+					durSum: c.durSum,
+					durCount: c.durCount,
+				});
+				written++;
+			}
+		} catch (e) {
+			console.error(
+				`loadbalancer-metrics: sample failed for org ${organizationId}:`,
+				e,
+			);
+		}
+	}
+	const cutoff = new Date(Date.now() - METRICS_RETENTION_DAYS * 86400_000);
+	await db.delete(lbMetricSample).where(lt(lbMetricSample.ts, cutoff));
+	return written;
+};
+
+export type LbMetricPoint = {
+	ts: number;
+	reqPerSec: number;
+	req2xxPerSec: number;
+	req4xxPerSec: number;
+	req5xxPerSec: number;
+	latencyMs: number;
+};
+
+/**
+ * Build a pool-wide time series over the last `minutes`, from the sampled
+ * cumulative counters: diff consecutive samples per node into rates (clamping
+ * counter resets), then aggregate across nodes into per-timestamp buckets.
+ */
+export const getLoadBalancerMetricsHistory = async (
+	organizationId: string,
+	minutes: number,
+): Promise<LbMetricPoint[]> => {
+	const since = new Date(Date.now() - minutes * 60_000);
+	const rows = await db
+		.select()
+		.from(lbMetricSample)
+		.where(
+			and(
+				eq(lbMetricSample.organizationId, organizationId),
+				gte(lbMetricSample.ts, since),
+			),
+		)
+		.orderBy(asc(lbMetricSample.ts));
+
+	// Group by node, diff consecutive samples into per-interval rates.
+	const byNode = new Map<string, typeof rows>();
+	for (const r of rows) {
+		const arr = byNode.get(r.node) ?? [];
+		arr.push(r);
+		byNode.set(r.node, arr);
+	}
+
+	// Bucket rates by sample timestamp (rounded to 60s) and sum across nodes.
+	const buckets = new Map<
+		number,
+		{
+			req: number;
+			r2: number;
+			r4: number;
+			r5: number;
+			latWeighted: number;
+			latWeight: number;
+		}
+	>();
+	const bucketMs = 60_000;
+	for (const arr of byNode.values()) {
+		for (let i = 1; i < arr.length; i++) {
+			const a = arr[i - 1];
+			const b = arr[i];
+			if (!a || !b) continue;
+			const dt = (b.ts.getTime() - a.ts.getTime()) / 1000;
+			if (dt <= 0) continue;
+			const d = (x: number, y: number) => (y >= x ? y - x : y); // clamp resets
+			const req = d(a.reqTotal, b.reqTotal) / dt;
+			const r2 = d(a.req2xx, b.req2xx) / dt;
+			const r4 = d(a.req4xx, b.req4xx) / dt;
+			const r5 = d(a.req5xx, b.req5xx) / dt;
+			const dCount = d(a.durCount, b.durCount);
+			const dSum = d(a.durSum, b.durSum);
+			const lat = dCount > 0 ? (dSum / dCount) * 1000 : 0;
+			const key = Math.round(b.ts.getTime() / bucketMs) * bucketMs;
+			const cur = buckets.get(key) ?? {
+				req: 0,
+				r2: 0,
+				r4: 0,
+				r5: 0,
+				latWeighted: 0,
+				latWeight: 0,
+			};
+			cur.req += req;
+			cur.r2 += r2;
+			cur.r4 += r4;
+			cur.r5 += r5;
+			cur.latWeighted += lat * Math.max(req, 0.001);
+			cur.latWeight += Math.max(req, 0.001);
+			buckets.set(key, cur);
+		}
+	}
+
+	return [...buckets.entries()]
+		.sort((a, b) => a[0] - b[0])
+		.map(([ts, v]) => ({
+			ts,
+			reqPerSec: v.req,
+			req2xxPerSec: v.r2,
+			req4xxPerSec: v.r4,
+			req5xxPerSec: v.r5,
+			latencyMs: v.latWeight > 0 ? v.latWeighted / v.latWeight : 0,
+		}));
+};
+
+export const startLoadBalancerMetricsSampler = (
+	intervalSeconds = 60,
+): NodeJS.Timeout => {
+	const tick = async () => {
+		try {
+			await sampleLoadBalancerMetrics();
+		} catch (e) {
+			console.error("loadbalancer-metrics: sampler error:", e);
+		}
+	};
+	void tick();
+	return setInterval(tick, intervalSeconds * 1000);
 };
 
 // ---------------------------------------------------------------------------

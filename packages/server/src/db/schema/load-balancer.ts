@@ -1,6 +1,8 @@
 import { relations } from "drizzle-orm";
 import {
 	boolean,
+	doublePrecision,
+	index,
 	integer,
 	pgTable,
 	text,
@@ -74,3 +76,34 @@ export const apiUpsertLoadBalancer = z.object({
 
 export type LoadBalancer = typeof loadBalancer.$inferSelect;
 export { createSchema as loadBalancerInsertSchema };
+
+/**
+ * Rolling time-series of each pool instance's Traefik metrics, scraped every
+ * ~60s by the sampler. Stores CUMULATIVE Prometheus counters + a timestamp;
+ * rates are derived at query time by diffing consecutive samples (clamping
+ * negatives so a Traefik restart's counter reset doesn't spike). Pruned to a
+ * short retention window. Powers the Metrics tab's time-range graphs.
+ */
+export const lbMetricSample = pgTable(
+	"lb_metric_sample",
+	{
+		lbMetricSampleId: text("lbMetricSampleId")
+			.notNull()
+			.primaryKey()
+			.$defaultFn(() => nanoid()),
+		organizationId: text("organizationId")
+			.notNull()
+			.references(() => organization.id, { onDelete: "cascade" }),
+		node: text("node").notNull(),
+		ts: timestamp("ts").notNull().defaultNow(),
+		reqTotal: doublePrecision("reqTotal").notNull().default(0),
+		req2xx: doublePrecision("req2xx").notNull().default(0),
+		req4xx: doublePrecision("req4xx").notNull().default(0),
+		req5xx: doublePrecision("req5xx").notNull().default(0),
+		durSum: doublePrecision("durSum").notNull().default(0),
+		durCount: doublePrecision("durCount").notNull().default(0),
+	},
+	(t) => ({
+		orgTsIdx: index("lb_metric_sample_org_ts_idx").on(t.organizationId, t.ts),
+	}),
+);

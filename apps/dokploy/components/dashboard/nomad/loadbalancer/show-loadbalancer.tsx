@@ -1,3 +1,4 @@
+import { format } from "date-fns";
 import {
 	Activity,
 	Check,
@@ -13,6 +14,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
 import { DialogAction } from "@/components/shared/dialog-action";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +26,12 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import {
+	type ChartConfig,
+	ChartContainer,
+	ChartTooltip,
+	ChartTooltipContent,
+} from "@/components/ui/chart";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -508,6 +516,175 @@ const DnsCard = ({ canManage }: { canManage: boolean }) => {
 	);
 };
 
+const RANGES = [
+	{ label: "1h", minutes: 60 },
+	{ label: "6h", minutes: 360 },
+	{ label: "24h", minutes: 1440 },
+	{ label: "7d", minutes: 10080 },
+];
+
+const rateChartConfig = {
+	req2xxPerSec: { label: "2xx", color: "hsl(142 71% 45%)" },
+	req4xxPerSec: { label: "4xx", color: "hsl(38 92% 50%)" },
+	req5xxPerSec: { label: "5xx", color: "hsl(0 84% 60%)" },
+} satisfies ChartConfig;
+
+const latencyChartConfig = {
+	latencyMs: { label: "Latency (ms)", color: "hsl(var(--chart-1))" },
+} satisfies ChartConfig;
+
+/** Time-range graphs of pool-wide throughput + latency from sampled history. */
+const MetricsChartsCard = () => {
+	const [minutes, setMinutes] = useState(360);
+	const { data, isPending } = api.nomad.getLoadBalancerMetricsHistory.useQuery(
+		{ minutes },
+		{ refetchInterval: 30000 },
+	);
+	const points = (data ?? []).map((p) => ({ ...p }));
+	const span = minutes <= 360 ? "HH:mm" : minutes <= 1440 ? "HH:mm" : "MM/dd";
+
+	return (
+		<Card className="bg-background">
+			<CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+				<div className="flex flex-col gap-0.5">
+					<CardTitle className="flex flex-row gap-2 text-xl">
+						<Activity className="size-5 self-center text-muted-foreground" />
+						Traffic over time
+					</CardTitle>
+					<CardDescription>
+						Pool-wide throughput by status class and average latency, sampled
+						every 60s.
+					</CardDescription>
+				</div>
+				<div className="flex flex-row gap-1 rounded-lg border p-1">
+					{RANGES.map((r) => (
+						<Button
+							key={r.minutes}
+							size="sm"
+							variant={minutes === r.minutes ? "default" : "ghost"}
+							className="h-7 px-2.5"
+							onClick={() => setMinutes(r.minutes)}
+						>
+							{r.label}
+						</Button>
+					))}
+				</div>
+			</CardHeader>
+			<CardContent className="flex flex-col gap-6">
+				{isPending ? (
+					<div className="flex items-center gap-2 text-muted-foreground text-sm">
+						<Loader2 className="size-4 animate-spin" /> Loading history…
+					</div>
+				) : points.length < 2 ? (
+					<p className="text-muted-foreground text-sm">
+						Not enough samples yet — the graphs fill in as history is collected
+						(one sample per minute). Redeploy the pool if it predates the
+						metrics endpoint.
+					</p>
+				) : (
+					<>
+						<div className="flex flex-col gap-2">
+							<span className="font-medium text-sm">Requests / sec</span>
+							<ChartContainer
+								config={rateChartConfig}
+								className="h-[12rem] w-full"
+							>
+								<LineChart
+									data={points}
+									margin={{ top: 6, right: 8, left: 0, bottom: 0 }}
+								>
+									<CartesianGrid vertical={false} />
+									<XAxis
+										dataKey="ts"
+										tickLine={false}
+										axisLine={false}
+										tickMargin={8}
+										minTickGap={32}
+										tickFormatter={(t) => format(new Date(t), span)}
+									/>
+									<YAxis
+										tickLine={false}
+										axisLine={false}
+										width={30}
+										allowDecimals={false}
+									/>
+									<ChartTooltip
+										content={
+											<ChartTooltipContent
+												labelFormatter={(_, p) => {
+													const t = p?.[0]?.payload?.ts;
+													return t ? format(new Date(t), "PPpp") : "";
+												}}
+											/>
+										}
+									/>
+									{(
+										["req2xxPerSec", "req4xxPerSec", "req5xxPerSec"] as const
+									).map((k) => (
+										<Line
+											key={k}
+											type="monotone"
+											dataKey={k}
+											stroke={`var(--color-${k})`}
+											strokeWidth={2}
+											dot={false}
+										/>
+									))}
+								</LineChart>
+							</ChartContainer>
+						</div>
+						<div className="flex flex-col gap-2">
+							<span className="font-medium text-sm">Avg latency (ms)</span>
+							<ChartContainer
+								config={latencyChartConfig}
+								className="h-[10rem] w-full"
+							>
+								<LineChart
+									data={points}
+									margin={{ top: 6, right: 8, left: 0, bottom: 0 }}
+								>
+									<CartesianGrid vertical={false} />
+									<XAxis
+										dataKey="ts"
+										tickLine={false}
+										axisLine={false}
+										tickMargin={8}
+										minTickGap={32}
+										tickFormatter={(t) => format(new Date(t), span)}
+									/>
+									<YAxis
+										tickLine={false}
+										axisLine={false}
+										width={30}
+										allowDecimals={false}
+									/>
+									<ChartTooltip
+										content={
+											<ChartTooltipContent
+												labelFormatter={(_, p) => {
+													const t = p?.[0]?.payload?.ts;
+													return t ? format(new Date(t), "PPpp") : "";
+												}}
+											/>
+										}
+									/>
+									<Line
+										type="monotone"
+										dataKey="latencyMs"
+										stroke="var(--color-latencyMs)"
+										strokeWidth={2}
+										dot={false}
+									/>
+								</LineChart>
+							</ChartContainer>
+						</div>
+					</>
+				)}
+			</CardContent>
+		</Card>
+	);
+};
+
 /** Per-node Traefik metrics: request rate, status classes, latency, in-DNS. */
 const MetricsCard = () => {
 	const { data, isPending } = api.nomad.getLoadBalancerMetrics.useQuery(
@@ -967,11 +1144,15 @@ export const ShowLoadBalancer = () => {
 		<Tabs defaultValue="overview" className="w-full">
 			<TabsList>
 				<TabsTrigger value="overview">Overview</TabsTrigger>
+				<TabsTrigger value="metrics">Metrics</TabsTrigger>
 				<TabsTrigger value="logs">Logs</TabsTrigger>
 			</TabsList>
 			<TabsContent value="overview" className="mt-4 flex flex-col gap-4">
 				<PoolCard canManage={canManage} />
 				<DnsCard canManage={canManage} />
+			</TabsContent>
+			<TabsContent value="metrics" className="mt-4 flex flex-col gap-4">
+				<MetricsChartsCard />
 				<MetricsCard />
 			</TabsContent>
 			<TabsContent value="logs" className="mt-4">

@@ -41,6 +41,7 @@ import {
 	clearLoadBalancerDns,
 	generateLbHostname,
 	getLoadBalancerMetrics,
+	getLoadBalancerMetricsHistory,
 	reconcileLoadBalancerDns,
 	resolveLbNodes,
 } from "@nomploy/server/setup/loadbalancer-dns";
@@ -1084,6 +1085,16 @@ export const nomadRouter = createTRPCRouter({
 	getLoadBalancerMetrics: withPermission("server", "read").query(
 		async ({ ctx }) => getLoadBalancerMetrics(ctx.session.activeOrganizationId),
 	),
+
+	// Pool-wide metrics time series over a window (minutes) for the graphs.
+	getLoadBalancerMetricsHistory: withPermission("server", "read")
+		.input(z.object({ minutes: z.number().int().min(5).max(43200) }))
+		.query(async ({ ctx, input }) =>
+			getLoadBalancerMetricsHistory(
+				ctx.session.activeOrganizationId,
+				input.minutes,
+			),
+		),
 
 	// Tail pool nodes' Traefik logs (access log + errors) from each alloc's
 	// stdout/stderr via the Nomad fs API. Returns one entry per running node so
