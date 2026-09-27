@@ -25,6 +25,7 @@ try {
 			entryPoints: {
 				server: "server/server.ts",
 				migration: "migration.ts",
+				"lb-controller": "lb-controller.ts",
 				"wait-for-postgres": "wait-for-postgres.ts",
 				"reset-password": "reset-password.ts",
 				"reset-2fa": "reset-2fa.ts",

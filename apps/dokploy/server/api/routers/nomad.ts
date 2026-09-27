@@ -37,6 +37,10 @@ import {
 	rescheduleAutoscalingAction,
 } from "@nomploy/server/setup/autoscale/schedule";
 import {
+	deployLbControllerJob,
+	stopLbControllerJob,
+} from "@nomploy/server/setup/lb-controller-job";
+import {
 	cfListZones,
 	clearLoadBalancerDns,
 	generateLbHostname,
@@ -908,12 +912,18 @@ export const nomadRouter = createTRPCRouter({
 	// from the local Consul catalog + shared certs from Consul KV.
 	deployLoadBalancer: withPermission("server", "create").mutation(async () => {
 		const { certCount } = await deployTraefikHaSystemJob();
+		// Deploy the HA DNS controller alongside the pool (runs on every node,
+		// Consul-lock leader) so DNS management survives the hub going down.
+		await deployLbControllerJob().catch((e) =>
+			console.error("lb-controller deploy failed:", e),
+		);
 		return { certCount };
 	}),
 
 	stopLoadBalancer: withPermission("server", "delete").mutation(
 		async ({ ctx }) => {
 			await stopTraefikHaSystemJob();
+			await stopLbControllerJob().catch(() => {});
 			// Don't leave DNS pointing at a torn-down pool — clear the A records now
 			// instead of waiting for the 30s health-prune loop.
 			const org = ctx.session.activeOrganizationId;

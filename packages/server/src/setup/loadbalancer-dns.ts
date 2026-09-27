@@ -18,6 +18,12 @@ const CF_API = "https://api.cloudflare.com/client/v4";
 // Traefik's Prometheus entryPoint on each pool node (see generateTraefikHaJob).
 const METRICS_PORT = 8082;
 
+const CONSUL_ADDR = "http://127.0.0.1:8500";
+const consulHeaders = (): Record<string, string> => {
+	const token = process.env.CONSUL_TOKEN;
+	return token ? { "X-Consul-Token": token } : {};
+};
+
 const nomad = async <T>(path: string): Promise<T> => {
 	const res = await fetch(`${NOMAD_ADDRESS.replace(/\/$/, "")}/v1${path}`, {
 		headers: NOMAD_TOKEN ? { "X-Nomad-Token": NOMAD_TOKEN } : {},
@@ -191,6 +197,31 @@ const hetznerPublicIpIndex = async (
 	return { byPrivate, byName };
 };
 
+// The hub's own public IPv4 (the panel runs on the hub / control plane). Prefer
+// Hetzner's metadata service, fall back to a public IP-echo. Cached for the process.
+let hubIpCache: string | null = null;
+const hubPublicIp = async (): Promise<string | null> => {
+	if (hubIpCache) return hubIpCache;
+	const tryFetch = async (url: string): Promise<string | null> => {
+		try {
+			const ctl = new AbortController();
+			const t = setTimeout(() => ctl.abort(), 3000);
+			const res = await fetch(url, { signal: ctl.signal });
+			clearTimeout(t);
+			if (!res.ok) return null;
+			const txt = (await res.text()).trim();
+			return /^\d{1,3}(\.\d{1,3}){3}$/.test(txt) ? txt : null;
+		} catch {
+			return null;
+		}
+	};
+	hubIpCache =
+		(await tryFetch(
+			"http://169.254.169.254/hetzner/v1/metadata/public-ipv4",
+		)) ?? (await tryFetch("https://api.ipify.org"));
+	return hubIpCache;
+};
+
 /**
  * Resolve the pool's current members: the running system-job allocs mapped to
  * their server rows (public + wg IPs). A node is healthy when Nomad still wants
@@ -274,6 +305,24 @@ export const resolveLbNodes = async (
 			wgIp: derivedWg ?? s?.wgIp ?? null,
 		});
 	}
+
+	// The control-plane node (hub) is a load balancer too — it runs the standalone
+	// Traefik and routes every domain — so include it as a pool member (its own
+	// public IP), letting all server nodes serve. It's not part of the traefik-ha
+	// system job, hence added explicitly.
+	const hubIp = await hubPublicIp();
+	if (hubIp && !out.some((n) => n.publicIp === hubIp)) {
+		out.push({
+			node: "nomploy",
+			nodeId: "control-plane",
+			status: "running",
+			healthy: true,
+			draining: false,
+			ip: hubIp,
+			publicIp: hubIp,
+			wgIp: "10.10.0.1",
+		});
+	}
 	return out;
 };
 
@@ -286,6 +335,36 @@ export type LbReconcileResult = {
 	desired: string[];
 	created: string[];
 	removed: string[];
+};
+
+/**
+ * Publish the LB config to Consul KV (`nomploy/lb/config`) so the HA controller
+ * (setup/lb-controller-job.ts) can manage DNS without the panel/DB — it survives
+ * the hub going down. Contains the CF token (already a mesh-trusted secret, like
+ * the Consul catalog token). Members are the pool nodes' public IPs (incl. hub).
+ */
+const publishLbConfigToKV = async (
+	lb: { hostname: string; zoneName: string; ttl: number; enabled: boolean },
+	cfToken: string,
+	nodes: LbNode[],
+): Promise<void> => {
+	const members = nodes
+		.filter((n) => n.publicIp)
+		.map((n) => ({ name: n.node, publicIp: n.publicIp as string }));
+	const cfg = {
+		hostname: lb.hostname,
+		zoneName: lb.zoneName,
+		cfToken,
+		ttl: lb.ttl,
+		enabled: lb.enabled,
+		members,
+	};
+	const res = await fetch(`${CONSUL_ADDR}/v1/kv/nomploy/lb/config`, {
+		method: "PUT",
+		headers: consulHeaders(),
+		body: JSON.stringify(cfg),
+	});
+	if (!res.ok) throw new Error(`Consul KV PUT lb/config failed: ${res.status}`);
 };
 
 export const reconcileLoadBalancerDns = async (
@@ -312,6 +391,10 @@ export const reconcileLoadBalancerDns = async (
 				.map((n) => n.publicIp as string),
 		),
 	].sort();
+
+	// Publish the config for the HA controller (runs on every server node) to act
+	// on if the panel/hub is down. Best-effort — never block the reconcile.
+	await publishLbConfigToKV(lb, provider.token, nodes).catch(() => {});
 
 	const token = provider.token;
 	const zoneId = await cfZoneId(token, lb.zoneName);
