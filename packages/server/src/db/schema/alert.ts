@@ -48,6 +48,7 @@ export const alertRule = pgTable("alert_rule", {
 	target: text("target"),
 	comparator: text("comparator").notNull().default("gt"), // "gt" | "lt"
 	threshold: doublePrecision("threshold").notNull(),
+	severity: text("severity").notNull().default("warning"), // "critical" | "warning" | "info"
 	forMinutes: integer("forMinutes").notNull().default(5),
 	enabled: boolean("enabled").notNull().default(true),
 	state: text("state").notNull().default("ok"), // "ok" | "firing"
@@ -102,6 +103,7 @@ const createSchema = createInsertSchema(alertRule, {
 	metric: z.enum(ALERT_METRICS),
 	comparator: z.enum(["gt", "lt"]),
 	threshold: z.number(),
+	severity: z.enum(["critical", "warning", "info"]),
 	forMinutes: z.number().int().min(1).max(1440),
 });
 
@@ -112,10 +114,14 @@ export const apiCreateAlertRule = createSchema
 		target: true,
 		comparator: true,
 		threshold: true,
+		severity: true,
 		forMinutes: true,
 		enabled: true,
 	})
-	.extend({ target: z.string().optional().nullable() });
+	.extend({
+		target: z.string().optional().nullable(),
+		severity: z.enum(["critical", "warning", "info"]).optional(),
+	});
 
 export const apiUpdateAlertRule = apiCreateAlertRule.partial().extend({
 	alertRuleId: z.string().min(1),

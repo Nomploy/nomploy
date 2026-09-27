@@ -1,5 +1,20 @@
-import { AlertTriangle, Bell, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+	AlertTriangle,
+	Bell,
+	ChevronDown,
+	Pencil,
+	Plus,
+	Trash2,
+} from "lucide-react";
 import { useEffect, useState } from "react";
+import {
+	CartesianGrid,
+	Line,
+	LineChart,
+	ReferenceLine,
+	XAxis,
+	YAxis,
+} from "recharts";
 import { toast } from "sonner";
 import { DialogAction } from "@/components/shared/dialog-action";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +26,12 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import {
+	type ChartConfig,
+	ChartContainer,
+	ChartTooltip,
+	ChartTooltipContent,
+} from "@/components/ui/chart";
 import {
 	Dialog,
 	DialogContent,
@@ -39,10 +60,141 @@ type Rule = {
 	target: string | null;
 	comparator: string;
 	threshold: number;
+	severity: string;
 	forMinutes: number;
 	enabled: boolean;
 	state: string;
 	lastValue: number | null;
+};
+
+const SEVERITIES = [
+	{ value: "critical", label: "Critical" },
+	{ value: "warning", label: "Warning" },
+	{ value: "info", label: "Info" },
+];
+
+const severityBadge = (s: string) =>
+	s === "critical"
+		? "border-destructive/40 text-destructive"
+		: s === "warning"
+			? "border-amber-500/40 text-amber-600 dark:text-amber-400"
+			: "border-sky-500/40 text-sky-500";
+
+const chartConfig = {
+	value: { label: "Value", color: "hsl(var(--chart-1))" },
+} satisfies ChartConfig;
+
+/** SigNoz-style metric graph with the alert threshold drawn as a reference line. */
+const MetricChart = ({
+	metric,
+	target,
+	needsTarget,
+	threshold,
+	comparator,
+	minutes = 360,
+	height = "h-40",
+}: {
+	metric: string;
+	target: string | null;
+	needsTarget: boolean;
+	threshold: number;
+	comparator: string;
+	minutes?: number;
+	height?: string;
+}) => {
+	const { data, isPending } = api.alert.metricHistory.useQuery(
+		{ metric, target, minutes },
+		{ enabled: !!metric && (!needsTarget || !!target), refetchInterval: 30000 },
+	);
+	const points = data?.points ?? [];
+	const unit = data?.unit ?? "";
+	const breached = (v: number) =>
+		comparator === "gt" ? v > threshold : v < threshold;
+
+	if (!metric || (needsTarget && !target)) {
+		return (
+			<div
+				className={`flex ${height} items-center justify-center rounded-lg border text-muted-foreground text-xs`}
+			>
+				Pick a service to preview
+			</div>
+		);
+	}
+	if (points.length < 2) {
+		return (
+			<div
+				className={`flex ${height} items-center justify-center rounded-lg border text-muted-foreground text-xs`}
+			>
+				{isPending ? "Loading…" : "Not enough data yet"}
+			</div>
+		);
+	}
+	return (
+		<ChartContainer config={chartConfig} className={`${height} w-full`}>
+			<LineChart
+				data={points}
+				margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+			>
+				<CartesianGrid vertical={false} />
+				<XAxis
+					dataKey="ts"
+					tickLine={false}
+					axisLine={false}
+					tickMargin={8}
+					minTickGap={40}
+					tickFormatter={(t) =>
+						new Date(t).toLocaleTimeString([], {
+							hour: "2-digit",
+							minute: "2-digit",
+						})
+					}
+				/>
+				<YAxis tickLine={false} axisLine={false} width={34} />
+				<ChartTooltip
+					content={
+						<ChartTooltipContent
+							labelFormatter={(_, p) => {
+								const t = p?.[0]?.payload?.ts;
+								return t ? new Date(t).toLocaleString() : "";
+							}}
+							formatter={(v) => [`${Number(v).toFixed(1)}${unit}`, "value"]}
+						/>
+					}
+				/>
+				<ReferenceLine
+					y={threshold}
+					stroke="hsl(0 84% 60%)"
+					strokeDasharray="5 4"
+					label={{
+						value: `threshold ${threshold}${unit}`,
+						position: "insideTopRight",
+						fontSize: 10,
+						fill: "hsl(0 84% 60%)",
+					}}
+				/>
+				<Line
+					type="monotone"
+					dataKey="value"
+					stroke="var(--color-value)"
+					strokeWidth={2}
+					dot={(props) => {
+						const { cx, cy, payload, index } = props;
+						if (cx == null || cy == null || !breached(payload.value))
+							return <g key={index} />;
+						return (
+							<circle
+								key={index}
+								cx={cx}
+								cy={cy}
+								r={2.5}
+								fill="hsl(0 84% 60%)"
+							/>
+						);
+					}}
+				/>
+			</LineChart>
+		</ChartContainer>
+	);
 };
 
 const RuleDialog = ({
@@ -67,6 +219,7 @@ const RuleDialog = ({
 	const [target, setTarget] = useState("");
 	const [comparator, setComparator] = useState<"gt" | "lt">("gt");
 	const [threshold, setThreshold] = useState(1);
+	const [severity, setSeverity] = useState("warning");
 	const [forMinutes, setForMinutes] = useState(5);
 
 	// Seed the form when opening.
@@ -78,6 +231,7 @@ const RuleDialog = ({
 			setTarget(rule.target ?? "");
 			setComparator(rule.comparator === "lt" ? "lt" : "gt");
 			setThreshold(rule.threshold);
+			setSeverity(rule.severity ?? "warning");
 			setForMinutes(rule.forMinutes);
 		} else {
 			setName("");
@@ -85,6 +239,7 @@ const RuleDialog = ({
 			setTarget("");
 			setComparator("gt");
 			setThreshold(1);
+			setSeverity("warning");
 			setForMinutes(5);
 		}
 	}, [open, rule]);
@@ -112,6 +267,7 @@ const RuleDialog = ({
 			target: needsTarget ? target.trim() : null,
 			comparator,
 			threshold,
+			severity: severity as never,
 			forMinutes,
 			enabled: rule?.enabled ?? true,
 		};
@@ -132,7 +288,7 @@ const RuleDialog = ({
 	return (
 		<Dialog open={open} onOpenChange={setOpen}>
 			<DialogTrigger asChild>{trigger}</DialogTrigger>
-			<DialogContent className="sm:max-w-lg">
+			<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
 				<DialogHeader>
 					<DialogTitle>
 						{rule ? "Edit alert rule" : "New alert rule"}
@@ -141,6 +297,19 @@ const RuleDialog = ({
 						Fire when the metric stays past the threshold for the chosen window.
 					</DialogDescription>
 				</DialogHeader>
+				{/* Live preview — the metric with the threshold drawn on it (SigNoz-style). */}
+				<div className="flex flex-col gap-1.5 rounded-lg border p-3">
+					<span className="text-muted-foreground text-xs">
+						Preview (last 6h)
+					</span>
+					<MetricChart
+						metric={metric}
+						target={needsTarget ? target : null}
+						needsTarget={needsTarget}
+						threshold={threshold}
+						comparator={comparator}
+					/>
+				</div>
 				<div className="flex flex-col gap-3">
 					<div className="flex flex-col gap-1.5">
 						<Label>Name</Label>
@@ -188,7 +357,7 @@ const RuleDialog = ({
 							</Select>
 						</div>
 					)}
-					<div className="grid grid-cols-3 gap-3">
+					<div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
 						<div className="flex flex-col gap-1.5">
 							<Label>Condition</Label>
 							<Select
@@ -221,6 +390,21 @@ const RuleDialog = ({
 								onChange={(e) => setForMinutes(Number(e.target.value) || 1)}
 							/>
 						</div>
+						<div className="flex flex-col gap-1.5">
+							<Label>Severity</Label>
+							<Select value={severity} onValueChange={setSeverity}>
+								<SelectTrigger>
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{SEVERITIES.map((s) => (
+										<SelectItem key={s.value} value={s.value}>
+											{s.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</div>
 					</div>
 				</div>
 				<DialogFooter>
@@ -236,6 +420,125 @@ const RuleDialog = ({
 	);
 };
 
+const RuleRow = ({
+	rule: r,
+	canManage,
+	needsTarget,
+	metricLabel,
+	metricUnit,
+	refetch,
+}: {
+	rule: Rule;
+	canManage: boolean;
+	needsTarget: boolean;
+	metricLabel: string;
+	metricUnit: string;
+	refetch: () => void;
+}) => {
+	const [open, setOpen] = useState(false);
+	const setEnabled = api.alert.setEnabled.useMutation();
+	const remove = api.alert.delete.useMutation();
+
+	return (
+		<div className="flex flex-col gap-2 rounded-lg border p-3 text-sm">
+			<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+				<div className="flex flex-col gap-0.5">
+					<div className="flex flex-wrap items-center gap-2">
+						<button
+							type="button"
+							onClick={() => setOpen((v) => !v)}
+							className="flex items-center gap-1 font-medium hover:underline"
+						>
+							<ChevronDown
+								className={`size-4 text-muted-foreground transition-transform ${
+									open ? "rotate-180" : ""
+								}`}
+							/>
+							{r.name}
+						</button>
+						<Badge variant="outline" className={severityBadge(r.severity)}>
+							{r.severity}
+						</Badge>
+						<Badge
+							variant="outline"
+							className={
+								!r.enabled
+									? "text-muted-foreground"
+									: r.state === "firing"
+										? "border-destructive/40 text-destructive"
+										: "border-emerald-500/40 text-emerald-500"
+							}
+						>
+							{!r.enabled ? "disabled" : r.state}
+						</Badge>
+					</div>
+					<span className="pl-5 text-muted-foreground text-xs">
+						{metricLabel}
+						{r.target ? ` [${r.target}]` : ""}{" "}
+						{r.comparator === "gt" ? ">" : "<"} {r.threshold}
+						{metricUnit} · {r.forMinutes}m
+						{r.lastValue != null &&
+							` · now ${r.lastValue.toFixed(1)}${metricUnit}`}
+					</span>
+				</div>
+				{canManage && (
+					<div className="flex items-center gap-2">
+						<Switch
+							checked={r.enabled}
+							onCheckedChange={async (enabled) => {
+								await setEnabled
+									.mutateAsync({ alertRuleId: r.alertRuleId, enabled })
+									.then(() => refetch())
+									.catch((e) =>
+										toast.error("Failed", { description: e.message }),
+									);
+							}}
+						/>
+						<RuleDialog
+							rule={r}
+							trigger={
+								<Button size="sm" variant="outline">
+									<Pencil className="size-4" />
+								</Button>
+							}
+							onDone={refetch}
+						/>
+						<DialogAction
+							title="Delete alert rule"
+							description={`Delete "${r.name}"? This can't be undone.`}
+							type="destructive"
+							onClick={async () => {
+								await remove
+									.mutateAsync({ alertRuleId: r.alertRuleId })
+									.then(() => {
+										toast.success("Rule deleted");
+										refetch();
+									})
+									.catch((e) =>
+										toast.error("Delete failed", { description: e.message }),
+									);
+							}}
+						>
+							<Button size="sm" variant="outline">
+								<Trash2 className="size-4 text-destructive" />
+							</Button>
+						</DialogAction>
+					</div>
+				)}
+			</div>
+			{open && (
+				<MetricChart
+					metric={r.metric}
+					target={r.target}
+					needsTarget={needsTarget}
+					threshold={r.threshold}
+					comparator={r.comparator}
+				/>
+			)}
+		</div>
+	);
+};
+
 export const ShowAlerts = () => {
 	const { data: rules, refetch } = api.alert.list.useQuery(undefined, {
 		refetchInterval: 15000,
@@ -247,9 +550,6 @@ export const ShowAlerts = () => {
 	const { data: metrics } = api.alert.metrics.useQuery();
 	const { data: permissions } = api.user.getPermissions.useQuery();
 	const canManage = !!permissions?.server?.create;
-
-	const setEnabled = api.alert.setEnabled.useMutation();
-	const remove = api.alert.delete.useMutation();
 
 	const list = (rules ?? []) as Rule[];
 	const firing = list.filter((r) => r.state === "firing" && r.enabled);
@@ -318,85 +618,18 @@ export const ShowAlerts = () => {
 					) : (
 						<div className="flex flex-col gap-2">
 							{list.map((r) => (
-								<div
+								<RuleRow
 									key={r.alertRuleId}
-									className="flex flex-col gap-2 rounded-lg border p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
-								>
-									<div className="flex flex-col gap-0.5">
-										<div className="flex items-center gap-2">
-											<span className="font-medium">{r.name}</span>
-											<Badge
-												variant="outline"
-												className={
-													!r.enabled
-														? "text-muted-foreground"
-														: r.state === "firing"
-															? "border-destructive/40 text-destructive"
-															: "border-emerald-500/40 text-emerald-500"
-												}
-											>
-												{!r.enabled ? "disabled" : r.state}
-											</Badge>
-										</div>
-										<span className="text-muted-foreground text-xs">
-											{metricLabel(r.metric)}
-											{r.target ? ` [${r.target}]` : ""}{" "}
-											{r.comparator === "gt" ? ">" : "<"} {r.threshold}
-											{metricUnit(r.metric)} · {r.forMinutes}m
-											{r.lastValue != null &&
-												` · now ${r.lastValue.toFixed(1)}${metricUnit(r.metric)}`}
-										</span>
-									</div>
-									{canManage && (
-										<div className="flex items-center gap-2">
-											<Switch
-												checked={r.enabled}
-												onCheckedChange={async (enabled) => {
-													await setEnabled
-														.mutateAsync({
-															alertRuleId: r.alertRuleId,
-															enabled,
-														})
-														.then(() => refetch())
-														.catch((e) =>
-															toast.error("Failed", { description: e.message }),
-														);
-												}}
-											/>
-											<RuleDialog
-												rule={r}
-												trigger={
-													<Button size="sm" variant="outline">
-														<Pencil className="size-4" />
-													</Button>
-												}
-												onDone={refetch}
-											/>
-											<DialogAction
-												title="Delete alert rule"
-												description={`Delete "${r.name}"? This can't be undone.`}
-												type="destructive"
-												onClick={async () => {
-													await remove
-														.mutateAsync({ alertRuleId: r.alertRuleId })
-														.then(() => {
-															toast.success("Rule deleted");
-															refetch();
-														})
-														.catch((e) =>
-															toast.error("Delete failed", {
-																description: e.message,
-															}),
-														);
-												}}
-											>
-												<Button size="sm" variant="outline">
-													<Trash2 className="size-4 text-destructive" />
-												</Button>
-											</DialogAction>
-										</div>
-									)}
-								</div>
+									rule={r}
+									canManage={canManage}
+									needsTarget={
+										(metrics ?? []).find((m) => m.metric === r.metric)
+											?.needsTarget ?? false
+									}
+									metricLabel={metricLabel(r.metric)}
+									metricUnit={metricUnit(r.metric)}
+									refetch={refetch}
+								/>
 							))}
 						</div>
 					)}

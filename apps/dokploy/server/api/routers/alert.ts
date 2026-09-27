@@ -6,6 +6,7 @@ import {
 } from "@nomploy/server/db/schema";
 import {
 	AVAILABLE_METRICS,
+	getMetricHistory,
 	listAlertEvents,
 	listAlertTargets,
 } from "@nomploy/server/services/alerts";
@@ -22,6 +23,24 @@ export const alertRouter = createTRPCRouter({
 	targets: withPermission("monitoring", "read").query(async ({ ctx }) =>
 		listAlertTargets(ctx.session.activeOrganizationId),
 	),
+
+	// Time series for a metric (rule editor preview chart + per-rule graphs).
+	metricHistory: withPermission("monitoring", "read")
+		.input(
+			z.object({
+				metric: z.string(),
+				target: z.string().nullable().optional(),
+				minutes: z.number().int().min(5).max(1440).default(360),
+			}),
+		)
+		.query(async ({ ctx, input }) =>
+			getMetricHistory(
+				ctx.session.activeOrganizationId,
+				input.metric,
+				input.target ?? null,
+				input.minutes,
+			),
+		),
 
 	list: withPermission("monitoring", "read").query(async ({ ctx }) =>
 		db.query.alertRule.findMany({
@@ -48,6 +67,7 @@ export const alertRouter = createTRPCRouter({
 					target: input.target ?? null,
 					comparator: input.comparator,
 					threshold: input.threshold,
+					severity: input.severity ?? "warning",
 					forMinutes: input.forMinutes,
 					enabled: input.enabled ?? true,
 				})

@@ -117,6 +117,58 @@ const metricLabel = (m: string): string =>
 const metricUnit = (m: string): string =>
 	AVAILABLE_METRICS.find((x) => x.metric === m)?.unit ?? "";
 
+export type MetricPoint = { ts: number; value: number };
+
+/**
+ * Time series for a single metric over the last `minutes` — powers the rule
+ * editor's live preview chart and per-rule graphs. Works for both LB pool metrics
+ * (from the sampled history) and service CPU/mem % (from service_metric_sample).
+ */
+export const getMetricHistory = async (
+	organizationId: string,
+	metric: string,
+	target: string | null | undefined,
+	minutes: number,
+): Promise<{ points: MetricPoint[]; unit: string }> => {
+	const unit = metricUnit(metric);
+	if (metric.startsWith("lb_")) {
+		const series = await getLoadBalancerMetricsHistory(organizationId, minutes);
+		const pick = (p: {
+			reqPerSec: number;
+			req5xxPerSec: number;
+			latencyMs: number;
+		}) =>
+			metric === "lb_5xx_per_sec"
+				? p.req5xxPerSec
+				: metric === "lb_req_per_sec"
+					? p.reqPerSec
+					: p.latencyMs;
+		return { points: series.map((p) => ({ ts: p.ts, value: pick(p) })), unit };
+	}
+	if (!target) return { points: [], unit };
+	const since = new Date(Date.now() - minutes * 60_000).toISOString();
+	const rows = await db.query.serviceMetricSample.findMany({
+		where: and(
+			eq(serviceMetricSample.appName, target),
+			gte(serviceMetricSample.createdAt, since),
+		),
+	});
+	const points = rows
+		.map((r) => ({
+			ts: new Date(r.createdAt).getTime(),
+			value:
+				metric === "service_cpu_pct"
+					? r.cpuAllocMhz > 0
+						? (r.cpuUsedMhz / r.cpuAllocMhz) * 100
+						: 0
+					: r.memAllocMb > 0
+						? (r.memUsedMb / r.memAllocMb) * 100
+						: 0,
+		}))
+		.sort((a, b) => a.ts - b.ts);
+	return { points, unit };
+};
+
 /**
  * Evaluate every enabled rule once: compute its value, transition ok↔firing on
  * threshold breach, record an event and notify (via cluster-alert channels) only
@@ -164,7 +216,11 @@ export const runAlertEvaluations = async (): Promise<void> => {
 			});
 
 			await sendClusterAlertNotifications(rule.organizationId, {
-				EventType: violates ? "critical" : "recovered",
+				EventType: violates
+					? rule.severity === "critical"
+						? "critical"
+						: "warning"
+					: "recovered",
 				Title: violates ? `Alert: ${rule.name}` : `Resolved: ${rule.name}`,
 				Message: `${label}${scope} is ${value.toFixed(1)}${unit} (threshold ${cmp} ${rule.threshold}${unit}, sustained ${rule.forMinutes}m).`,
 				Timestamp: now.toISOString(),
