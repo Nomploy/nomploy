@@ -353,6 +353,21 @@ export const composeRouter = createTRPCRouter({
 			});
 			return await loadServices(input.composeId, input.type);
 		}),
+	// Nomad Pack services with their reachable Consul ports — so the domain form
+	// can show/auto-fill the right port (packs have no compose file to inspect).
+	loadPackServices: protectedProcedure
+		.input(z.object({ composeId: z.string().min(1) }))
+		.query(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.composeId, {
+				service: ["read"],
+			});
+			const composeRow = await findComposeById(input.composeId);
+			if (composeRow.composeType !== "nomad-pack") return [];
+			const { loadPackServices } = await import(
+				"@nomploy/server/setup/pack-domains"
+			);
+			return await loadPackServices(composeRow.appName);
+		}),
 	loadMountsByService: protectedProcedure
 		.input(
 			z.object({

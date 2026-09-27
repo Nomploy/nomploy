@@ -23,13 +23,35 @@ const nomadFetch = async <T>(path: string): Promise<T> => {
 	return res.json() as Promise<T>;
 };
 
+// The port a Consul service is reachable on (its registered ServicePort) — this
+// is exactly the port a domain's `<name>.service.consul:<port>` backend needs.
+const consulServicePort = async (name: string): Promise<number | null> => {
+	try {
+		const token = process.env.CONSUL_TOKEN || "";
+		const res = await fetch(
+			`http://127.0.0.1:8500/v1/catalog/service/${encodeURIComponent(name)}`,
+			{ headers: token ? { "X-Consul-Token": token } : {} },
+		);
+		if (!res.ok) return null;
+		const entries = (await res.json()) as { ServicePort?: number }[];
+		return entries[0]?.ServicePort ?? null;
+	} catch {
+		return null;
+	}
+};
+
+export type PackService = { name: string; port: number | null };
+
 /**
- * The Consul service names a Nomad Pack deployment registers. A pack's jobs are
- * named after the pack, not the appName, so we find them by the
- * `pack.deployment_name == appName` meta, then read each job's service stanzas.
- * These are what a domain routes to (via `<name>.service.consul`).
+ * The Consul services a Nomad Pack deployment registers, with their reachable
+ * ports. A pack's jobs are named after the pack, not the appName, so we find them
+ * by the `pack.deployment_name == appName` meta, read each job's service stanzas,
+ * then look up each service's registered port in Consul. A domain routes to one of
+ * these via `<name>.service.consul:<port>`.
  */
-export const loadPackServices = async (appName: string): Promise<string[]> => {
+export const loadPackServices = async (
+	appName: string,
+): Promise<PackService[]> => {
 	let jobs: { ID: string; Meta?: Record<string, string> }[] = [];
 	try {
 		jobs =
@@ -60,7 +82,12 @@ export const loadPackServices = async (appName: string): Promise<string[]> => {
 			// skip unreadable job
 		}
 	}
-	return [...names];
+	return Promise.all(
+		[...names].map(async (name) => ({
+			name,
+			port: await consulServicePort(name),
+		})),
+	);
 };
 
 const resolverFor = (d: Domain): string =>

@@ -200,6 +200,20 @@ export const AddDomain = ({ id, type, domainId = "", children }: Props) => {
 		},
 	);
 
+	// Nomad Pack services expose no compose file, so surface their reachable Consul
+	// ports here to label the dropdown and auto-fill the domain port.
+	const isNomadPack =
+		type === "compose" &&
+		(application as { composeType?: string } | undefined)?.composeType ===
+			"nomad-pack";
+	const { data: packServices } = api.compose.loadPackServices.useQuery(
+		{ composeId: id },
+		{ enabled: isNomadPack && !!id, retry: false },
+	);
+	const packPortByService = new Map(
+		(packServices ?? []).map((s) => [s.name, s.port] as const),
+	);
+
 	const form = useForm<Domain>({
 		resolver: zodResolver(domain),
 		defaultValues: {
@@ -373,7 +387,12 @@ export const AddDomain = ({ id, type, domainId = "", children }: Props) => {
 																</FormControl>
 															) : (
 																<Select
-																	onValueChange={field.onChange}
+																	onValueChange={(value) => {
+																		field.onChange(value);
+																		// Auto-fill the port from the pack service's Consul port.
+																		const p = packPortByService.get(value);
+																		if (p != null) form.setValue("port", p);
+																	}}
 																	defaultValue={field.value || ""}
 																>
 																	<FormControl>
@@ -383,14 +402,18 @@ export const AddDomain = ({ id, type, domainId = "", children }: Props) => {
 																	</FormControl>
 
 																	<SelectContent>
-																		{services?.map((service, index) => (
-																			<SelectItem
-																				value={service}
-																				key={`${service}-${index}`}
-																			>
-																				{service}
-																			</SelectItem>
-																		))}
+																		{services?.map((service, index) => {
+																			const p = packPortByService.get(service);
+																			return (
+																				<SelectItem
+																					value={service}
+																					key={`${service}-${index}`}
+																				>
+																					{service}
+																					{p != null ? ` (:${p})` : ""}
+																				</SelectItem>
+																			);
+																		})}
 																		<SelectItem value="none" disabled>
 																			Empty
 																		</SelectItem>

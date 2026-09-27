@@ -163,7 +163,7 @@ export const loadServices = async (
 		const { loadPackServices } = await import(
 			"@nomploy/server/setup/pack-domains"
 		);
-		return await loadPackServices(compose.appName);
+		return (await loadPackServices(compose.appName)).map((s) => s.name);
 	}
 
 	if (type === "fetch") {
