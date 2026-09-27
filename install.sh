@@ -325,11 +325,33 @@ echo "==> Starting Consul + Nomad"
 # The packaged consul unit is Type=notify; on some builds the readiness signal
 # never arrives, so systemd kills it at TimeoutStartSec and restart-loops. Track
 # it by process liveness instead.
-$SUDO mkdir -p /etc/systemd/system/consul.service.d
+$SUDO mkdir -p /etc/systemd/system/consul.service.d /etc/systemd/system/nomad.service.d
 $SUDO tee /etc/systemd/system/consul.service.d/type.conf >/dev/null <<'CONSULUNIT'
 [Service]
 Type=exec
 CONSULUNIT
+# Consul binds to the WireGuard overlay IP, so it must not start before wg0 is up
+# — otherwise it can't bind and the cluster fails to form quorum after a reboot.
+# Nomad advertises over wg and depends on Consul. Order both after wg-quick@wg0
+# (and Nomad after Consul), with a short wait-for-wg0 guard.
+$SUDO tee /etc/systemd/system/consul.service.d/10-nomploy-wg.conf >/dev/null <<'CONSULWG'
+[Unit]
+After=wg-quick@wg0.service
+Wants=wg-quick@wg0.service
+
+[Service]
+RestartSec=3
+ExecStartPre=/bin/sh -c "for i in $(seq 1 60); do ip -4 addr show wg0 2>/dev/null | grep -q 'inet ' && exit 0; sleep 1; done; exit 0"
+CONSULWG
+$SUDO tee /etc/systemd/system/nomad.service.d/10-nomploy-wg.conf >/dev/null <<'NOMADWG'
+[Unit]
+After=wg-quick@wg0.service consul.service
+Wants=wg-quick@wg0.service
+
+[Service]
+RestartSec=3
+ExecStartPre=/bin/sh -c "for i in $(seq 1 60); do ip -4 addr show wg0 2>/dev/null | grep -q 'inet ' && exit 0; sleep 1; done; exit 0"
+NOMADWG
 $SUDO systemctl daemon-reload
 $SUDO systemctl enable consul nomad >/dev/null 2>&1 || true
 $SUDO systemctl restart --no-block consul

@@ -136,6 +136,30 @@ const nomadAclBlock = (t?: ClusterAclTokens): string =>
 const nomadConsulTokenAttr = (t?: ClusterAclTokens): string =>
 	t ? ` token = "${t.nomadConsul}"` : "";
 
+// systemd ordering so Consul/Nomad start only after the WireGuard overlay (wg0) is
+// up — they bind/advertise on wg IPs, so a reboot that starts them before wg0
+// exists breaks binding and quorum. Nomad also waits for Consul. Idempotent.
+const wgUnitOrdering = `$SUDO mkdir -p /etc/systemd/system/consul.service.d /etc/systemd/system/nomad.service.d
+$SUDO tee /etc/systemd/system/consul.service.d/10-nomploy-wg.conf >/dev/null <<'CONSULWG'
+[Unit]
+After=wg-quick@wg0.service
+Wants=wg-quick@wg0.service
+
+[Service]
+RestartSec=3
+ExecStartPre=/bin/sh -c "for i in $(seq 1 60); do ip -4 addr show wg0 2>/dev/null | grep -q 'inet ' && exit 0; sleep 1; done; exit 0"
+CONSULWG
+$SUDO tee /etc/systemd/system/nomad.service.d/10-nomploy-wg.conf >/dev/null <<'NOMADWG'
+[Unit]
+After=wg-quick@wg0.service consul.service
+Wants=wg-quick@wg0.service
+
+[Service]
+RestartSec=3
+ExecStartPre=/bin/sh -c "for i in $(seq 1 60); do ip -4 addr show wg0 2>/dev/null | grep -q 'inet ' && exit 0; sleep 1; done; exit 0"
+NOMADWG
+$SUDO systemctl daemon-reload`;
+
 /** Shared install steps (Docker + Consul + Nomad + CNI + WireGuard + docker auth). */
 const installPreamble = (cniVersion: string): string => `
 set -e
@@ -324,6 +348,7 @@ plugin "docker" {
 NOMAD
 
 echo "==> Starting Consul + Nomad clients"
+${wgUnitOrdering}
 $SUDO systemctl enable consul nomad >/dev/null 2>&1 || true
 $SUDO systemctl restart --no-block consul
 sleep 3
@@ -437,6 +462,7 @@ $SUDO systemctl enable dnsmasq >/dev/null 2>&1 || true
 $SUDO systemctl restart dnsmasq >/dev/null 2>&1 || true
 
 echo "==> Starting Consul + Nomad servers"
+${wgUnitOrdering}
 $SUDO systemctl enable consul nomad >/dev/null 2>&1 || true
 $SUDO systemctl restart --no-block consul
 sleep 3
