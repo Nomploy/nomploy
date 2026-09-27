@@ -64,19 +64,46 @@ export const loadPackServices = async (
 	const ids = jobs
 		.filter((j) => j.Meta?.["pack.deployment_name"] === appName)
 		.map((j) => j.ID);
+
+	// Resolve each service's port from the job spec: PortLabel → the group's
+	// network port (prefer the host-mapped Value, else the container `To`). This is
+	// deterministic and doesn't depend on the Consul name matching.
+	type NomadPort = { Label?: string; Value?: number; To?: number };
+	type NomadSvc = { Name?: string; PortLabel?: string };
+	const jobPortByName = new Map<string, number>();
 	const names = new Set<string>();
 	for (const id of ids) {
 		try {
 			const job = await nomadFetch<{
 				TaskGroups?: {
-					Services?: { Name?: string }[];
-					Tasks?: { Services?: { Name?: string }[] }[];
+					Networks?: {
+						DynamicPorts?: NomadPort[];
+						ReservedPorts?: NomadPort[];
+					}[];
+					Services?: NomadSvc[];
+					Tasks?: { Services?: NomadSvc[] }[];
 				}[];
 			}>(`/job/${encodeURIComponent(id)}`);
 			for (const tg of job.TaskGroups ?? []) {
-				for (const s of tg.Services ?? []) if (s.Name) names.add(s.Name);
-				for (const t of tg.Tasks ?? [])
-					for (const s of t.Services ?? []) if (s.Name) names.add(s.Name);
+				const portByLabel = new Map<string, number>();
+				for (const net of tg.Networks ?? []) {
+					for (const p of [
+						...(net.ReservedPorts ?? []),
+						...(net.DynamicPorts ?? []),
+					]) {
+						if (p.Label) portByLabel.set(p.Label, p.Value || p.To || 0);
+					}
+				}
+				const svcs = [
+					...(tg.Services ?? []),
+					...(tg.Tasks ?? []).flatMap((t) => t.Services ?? []),
+				];
+				for (const s of svcs) {
+					if (!s.Name) continue;
+					names.add(s.Name);
+					const p = s.PortLabel ? portByLabel.get(s.PortLabel) : undefined;
+					if (p) jobPortByName.set(s.Name, p);
+				}
 			}
 		} catch {
 			// skip unreadable job
@@ -85,7 +112,8 @@ export const loadPackServices = async (
 	return Promise.all(
 		[...names].map(async (name) => ({
 			name,
-			port: await consulServicePort(name),
+			// Prefer the job-spec port; fall back to the Consul-registered port.
+			port: jobPortByName.get(name) ?? (await consulServicePort(name)),
 		})),
 	);
 };
