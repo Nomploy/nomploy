@@ -101,7 +101,16 @@ if [ ! -f /opt/cni/bin/consul-cni ]; then
   fi
   rm -f "$tmpz"
 fi
-echo 1 | $SUDO tee /proc/sys/net/bridge/bridge-nf-call-iptables >/dev/null 2>&1 || true
+# Bridge networking for Nomad `mode="bridge"` allocs. Load br_netfilter (creates
+# the bridge-nf-call sysctls) and PERSIST both the module and the sysctls, so a
+# reboot doesn't drop bridge networking and leave bridge-mode jobs unplaceable
+# ("missing network"). Without persistence, a host reboot silently breaks apps.
+$SUDO modprobe bridge >/dev/null 2>&1 || true
+$SUDO modprobe br_netfilter >/dev/null 2>&1 || true
+printf 'bridge\nbr_netfilter\n' | $SUDO tee /etc/modules-load.d/nomploy-bridge.conf >/dev/null 2>&1 || true
+printf 'net.bridge.bridge-nf-call-iptables = 1\nnet.bridge.bridge-nf-call-ip6tables = 1\nnet.ipv4.ip_forward = 1\n' \
+  | $SUDO tee /etc/sysctl.d/99-nomploy-bridge.conf >/dev/null 2>&1 || true
+$SUDO sysctl --system >/dev/null 2>&1 || true
 
 # ── Consul + Nomad config (single node: server + client) ─────────────────────
 $SUDO mkdir -p /etc/consul.d /opt/consul /etc/nomad.d /opt/nomad

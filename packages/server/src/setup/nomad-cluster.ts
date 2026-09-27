@@ -199,6 +199,14 @@ if [ ! -f /opt/cni/bin/consul-cni ]; then
   rm -f "$tmpz"
 fi
 
+# Bridge networking for Nomad mode="bridge" allocs — load + PERSIST so a reboot
+# doesn't drop it (else bridge-mode jobs become unplaceable: "missing network").
+$SUDO modprobe bridge >/dev/null 2>&1 || true
+$SUDO modprobe br_netfilter >/dev/null 2>&1 || true
+printf 'bridge\\nbr_netfilter\\n' | $SUDO tee /etc/modules-load.d/nomploy-bridge.conf >/dev/null 2>&1 || true
+printf 'net.bridge.bridge-nf-call-iptables = 1\\nnet.bridge.bridge-nf-call-ip6tables = 1\\nnet.ipv4.ip_forward = 1\\n' | $SUDO tee /etc/sysctl.d/99-nomploy-bridge.conf >/dev/null 2>&1 || true
+$SUDO sysctl --system >/dev/null 2>&1 || true
+
 # Docker auth config (docker driver needs this file to exist, even for public pulls)
 $SUDO mkdir -p /root/.docker
 [ -s /root/.docker/config.json ] || echo '{"auths":{}}' | $SUDO tee /root/.docker/config.json >/dev/null
