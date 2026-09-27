@@ -243,11 +243,23 @@ ${updateBlock}
     // once the new panel actually serves.
     shutdown_delay = "10s"
 
+    // Boot resilience: on a cold reboot the panel may start before Postgres/Redis
+    // are accepting connections. Keep retrying in-place, and if the task still
+    // fails, reschedule forever at a fixed short delay (NOT Nomad's default
+    // exponential backoff, which can leave the control plane down for up to an
+    // hour). This makes the panel come back on its own within ~seconds of its
+    // dependencies being ready after a host failure/reboot.
     restart {
-      attempts = 3
-      interval = "5m"
+      attempts = 5
+      interval = "10m"
       delay    = "15s"
       mode     = "delay"
+    }
+
+    reschedule {
+      delay          = "15s"
+      delay_function = "constant"
+      unlimited      = true
     }
 ${networkBlock}${serviceBlock}
     task "${PANEL_JOB_NAME}" {
