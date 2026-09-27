@@ -7,6 +7,7 @@ import {
 import {
 	AVAILABLE_METRICS,
 	listAlertEvents,
+	listAlertTargets,
 } from "@nomploy/server/services/alerts";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq } from "drizzle-orm";
@@ -16,6 +17,11 @@ import { createTRPCRouter, withPermission } from "@/server/api/trpc";
 export const alertRouter = createTRPCRouter({
 	// Catalogue of alertable metrics for the rule editor.
 	metrics: withPermission("monitoring", "read").query(() => AVAILABLE_METRICS),
+
+	// Services (appName targets) for service-scoped metric rules.
+	targets: withPermission("monitoring", "read").query(async ({ ctx }) =>
+		listAlertTargets(ctx.session.activeOrganizationId),
+	),
 
 	list: withPermission("monitoring", "read").query(async ({ ctx }) =>
 		db.query.alertRule.findMany({

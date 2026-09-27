@@ -5,6 +5,7 @@ import {
 	type AlertRule,
 	alertEvent,
 	alertRule,
+	projects,
 	serviceMetricSample,
 } from "../db/schema";
 import { getLoadBalancerMetricsHistory } from "../setup/loadbalancer-dns";
@@ -180,6 +181,58 @@ export const startAlertLoop = (intervalSeconds = 60): NodeJS.Timeout => {
 	};
 	tick();
 	return setInterval(tick, intervalSeconds * 1000);
+};
+
+export type AlertTarget = { appName: string; label: string };
+
+/**
+ * The org's services, as alert-rule targets (value = the Nomad job id / appName).
+ * Mirrors the scaling-suggestions service enumeration so service metrics can be
+ * picked from a list instead of typed.
+ */
+export const listAlertTargets = async (
+	organizationId: string,
+): Promise<AlertTarget[]> => {
+	const rows = await db.query.projects.findMany({
+		where: eq(projects.organizationId, organizationId),
+		columns: { name: true },
+		with: {
+			environments: {
+				columns: { environmentId: true },
+				with: {
+					applications: { columns: { appName: true, name: true } },
+					compose: { columns: { appName: true, name: true } },
+					postgres: { columns: { appName: true, name: true } },
+					mysql: { columns: { appName: true, name: true } },
+					mariadb: { columns: { appName: true, name: true } },
+					mongo: { columns: { appName: true, name: true } },
+					redis: { columns: { appName: true, name: true } },
+					libsql: { columns: { appName: true, name: true } },
+				},
+			},
+		},
+	});
+	const out: AlertTarget[] = [];
+	for (const p of rows) {
+		for (const env of p.environments) {
+			const add = (svc: { appName: string; name: string }, type: string) => {
+				if (svc.appName)
+					out.push({
+						appName: svc.appName,
+						label: `${p.name} / ${svc.name} (${type})`,
+					});
+			};
+			for (const s of env.applications) add(s, "app");
+			for (const s of env.compose) add(s, "compose");
+			for (const s of env.postgres) add(s, "postgres");
+			for (const s of env.mysql) add(s, "mysql");
+			for (const s of env.mariadb) add(s, "mariadb");
+			for (const s of env.mongo) add(s, "mongo");
+			for (const s of env.redis) add(s, "redis");
+			for (const s of env.libsql) add(s, "libsql");
+		}
+	}
+	return out.sort((a, b) => a.label.localeCompare(b.label));
 };
 
 /** Recent alert events for an org (newest first). */

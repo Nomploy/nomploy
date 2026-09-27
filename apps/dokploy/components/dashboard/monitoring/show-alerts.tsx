@@ -56,6 +56,9 @@ const RuleDialog = ({
 }) => {
 	const [open, setOpen] = useState(false);
 	const { data: metrics } = api.alert.metrics.useQuery();
+	const { data: targets } = api.alert.targets.useQuery(undefined, {
+		enabled: open,
+	});
 	const create = api.alert.create.useMutation();
 	const update = api.alert.update.useMutation();
 
@@ -164,12 +167,25 @@ const RuleDialog = ({
 					</div>
 					{needsTarget && (
 						<div className="flex flex-col gap-1.5">
-							<Label>Target service (Nomad job id / appName)</Label>
-							<Input
-								value={target}
-								onChange={(e) => setTarget(e.target.value)}
-								placeholder="e.g. cefiro-norish-abc123"
-							/>
+							<Label>Target service</Label>
+							<Select value={target} onValueChange={setTarget}>
+								<SelectTrigger>
+									<SelectValue placeholder="Select a service" />
+								</SelectTrigger>
+								<SelectContent>
+									{(targets ?? []).length === 0 ? (
+										<SelectItem value="__none" disabled>
+											No services with metrics yet
+										</SelectItem>
+									) : (
+										(targets ?? []).map((t) => (
+											<SelectItem key={t.appName} value={t.appName}>
+												{t.label}
+											</SelectItem>
+										))
+									)}
+								</SelectContent>
+							</Select>
 						</div>
 					)}
 					<div className="grid grid-cols-3 gap-3">
