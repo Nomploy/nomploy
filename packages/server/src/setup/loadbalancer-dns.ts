@@ -500,6 +500,135 @@ export const clearLoadBalancerDns = async (
 };
 
 // ---------------------------------------------------------------------------
+// Auto-point app domains at the LB (CNAME <host> → lb hostname)
+// ---------------------------------------------------------------------------
+
+// Find the DNS provider zone (across the org's providers) that governs `host` —
+// the most specific zone that is a suffix of it. Null when no provider covers it.
+const resolveZoneForHost = async (
+	organizationId: string,
+	host: string,
+): Promise<{ token: string; zoneId: string; zoneName: string } | null> => {
+	const providers = await db.query.dnsProvider.findMany({
+		where: eq(dnsProvider.organizationId, organizationId),
+	});
+	let best: { token: string; zoneId: string; zoneName: string } | null = null;
+	for (const p of providers) {
+		if (!p.token) continue;
+		try {
+			for (const z of await cfListZones(p.token)) {
+				if (host === z.name || host.endsWith(`.${z.name}`)) {
+					if (!best || z.name.length > best.zoneName.length)
+						best = { token: p.token, zoneId: z.id, zoneName: z.name };
+				}
+			}
+		} catch {
+			// try the next provider
+		}
+	}
+	return best;
+};
+
+/**
+ * Point an app domain at the LB hostname via a CNAME (Cloudflare, unproxied; CF
+ * flattens it at the apex). No-op unless auto-pointing is enabled and a configured
+ * provider governs the host's zone. Replaces any conflicting A/AAAA/CNAME on the
+ * exact name so the domain resolves to the HA pool instead of a single node.
+ */
+export const pointDomainAtLb = async (
+	organizationId: string,
+	host: string,
+): Promise<void> => {
+	const lb = await db.query.loadBalancer.findFirst({
+		where: eq(loadBalancer.organizationId, organizationId),
+	});
+	if (!lb?.autoPointDomains || !lb.hostname) return;
+	if (!host || host === lb.hostname) return;
+	const zone = await resolveZoneForHost(organizationId, host);
+	if (!zone) return; // unmanaged zone — leave DNS to the user
+
+	const existing = await cf<CfRecord[]>(
+		zone.token,
+		`/zones/${zone.zoneId}/dns_records?name=${encodeURIComponent(host)}&per_page=100`,
+	);
+	if (existing.some((r) => r.type === "CNAME" && r.content === lb.hostname)) {
+		return; // already pointed
+	}
+	for (const r of existing) {
+		if (["A", "AAAA", "CNAME"].includes(r.type)) {
+			await cf(zone.token, `/zones/${zone.zoneId}/dns_records/${r.id}`, {
+				method: "DELETE",
+			});
+		}
+	}
+	await cf(zone.token, `/zones/${zone.zoneId}/dns_records`, {
+		method: "POST",
+		body: JSON.stringify({
+			type: "CNAME",
+			name: host,
+			content: lb.hostname,
+			ttl: 60,
+			proxied: false,
+		}),
+	});
+};
+
+/** Remove the auto-created CNAME for a host (only if it points at the LB). */
+export const unpointDomain = async (
+	organizationId: string,
+	host: string,
+): Promise<void> => {
+	const lb = await db.query.loadBalancer.findFirst({
+		where: eq(loadBalancer.organizationId, organizationId),
+	});
+	if (!lb?.hostname || !host) return;
+	const zone = await resolveZoneForHost(organizationId, host);
+	if (!zone) return;
+	const existing = await cf<CfRecord[]>(
+		zone.token,
+		`/zones/${zone.zoneId}/dns_records?type=CNAME&name=${encodeURIComponent(host)}&per_page=100`,
+	);
+	for (const r of existing) {
+		if (r.content === lb.hostname) {
+			await cf(zone.token, `/zones/${zone.zoneId}/dns_records/${r.id}`, {
+				method: "DELETE",
+			});
+		}
+	}
+};
+
+/** Point every existing app domain in the org at the LB (bulk action). */
+export const reconcileOrgDomains = async (
+	organizationId: string,
+): Promise<{ pointed: number; skipped: number }> => {
+	const lb = await db.query.loadBalancer.findFirst({
+		where: eq(loadBalancer.organizationId, organizationId),
+	});
+	if (!lb?.autoPointDomains) return { pointed: 0, skipped: 0 };
+	const rows = await db.query.domains.findMany({
+		with: {
+			application: { with: { environment: { with: { project: true } } } },
+			compose: { with: { environment: { with: { project: true } } } },
+		},
+	});
+	let pointed = 0;
+	let skipped = 0;
+	for (const d of rows) {
+		const org =
+			d.application?.environment?.project?.organizationId ??
+			d.compose?.environment?.project?.organizationId;
+		if (org !== organizationId || !d.host) continue;
+		try {
+			await pointDomainAtLb(organizationId, d.host);
+			pointed++;
+		} catch {
+			skipped++;
+		}
+	}
+	return { pointed, skipped };
+};
+
+// ---------------------------------------------------------------------------
 // Metrics (Traefik Prometheus, scraped per node over the wg mesh)
 // ---------------------------------------------------------------------------
 

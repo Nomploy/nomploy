@@ -470,6 +470,8 @@ const DnsCard = ({ canManage }: { canManage: boolean }) => {
 	const upsert = api.nomad.upsertLoadBalancerConfig.useMutation();
 	const toggle = api.nomad.setLoadBalancerDnsEnabled.useMutation();
 	const reconcile = api.nomad.reconcileLoadBalancerDns.useMutation();
+	const autoPoint = api.nomad.setLoadBalancerAutoPoint.useMutation();
+	const pointAll = api.nomad.pointAllDomainsAtLoadBalancer.useMutation();
 	const { data: nodes } = api.nomad.getLoadBalancerNodes.useQuery(undefined, {
 		refetchInterval: 15000,
 	});
@@ -699,6 +701,67 @@ const DnsCard = ({ canManage }: { canManage: boolean }) => {
 											{cfg.lastReconcileStatus}
 										</span>
 									)}
+								</div>
+
+								{/* Auto-point app domains at the LB (CNAME) */}
+								<div className="flex flex-wrap items-center gap-4 rounded-lg border p-3">
+									<div className="flex items-center gap-2">
+										<Switch
+											checked={cfg.autoPointDomains}
+											disabled={!canManage || autoPoint.isPending}
+											onCheckedChange={async (enabled) => {
+												await autoPoint
+													.mutateAsync({ enabled })
+													.then(async (r) => {
+														toast.success(
+															enabled
+																? `Auto-point on — ${r.pointed} domain(s) pointed at the LB`
+																: "Auto-point off",
+														);
+														await refetch();
+													})
+													.catch((e) =>
+														toast.error("Toggle failed", {
+															description: e.message,
+														}),
+													);
+											}}
+										/>
+										<span className="text-sm">
+											Auto-point app domains at the LB (CNAME →{" "}
+											<code>{cfg.hostname}</code>)
+										</span>
+									</div>
+									{canManage && cfg.autoPointDomains && (
+										<Button
+											size="sm"
+											variant="outline"
+											isLoading={pointAll.isPending}
+											onClick={async () => {
+												await pointAll
+													.mutateAsync()
+													.then((r) =>
+														toast.success(
+															`Pointed ${r.pointed} domain(s) at the LB`,
+															{
+																description: r.skipped
+																	? `${r.skipped} skipped (unmanaged zone / error)`
+																	: undefined,
+															},
+														),
+													)
+													.catch((e) =>
+														toast.error("Failed", { description: e.message }),
+													);
+											}}
+										>
+											Point all domains now
+										</Button>
+									)}
+									<span className="text-muted-foreground text-xs">
+										Only domains whose zone is on a configured DNS provider are
+										pointed; others are left untouched.
+									</span>
 								</div>
 
 								{/* Live pool nodes + the IP each would publish */}

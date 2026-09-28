@@ -43,6 +43,8 @@ export const loadBalancer = pgTable("load_balancer", {
 	),
 	// When true, the health-prune loop keeps the A records in sync with healthy nodes.
 	enabled: boolean("enabled").notNull().default(false),
+	// When true, app domains are auto-pointed (CNAME) at the LB hostname on create.
+	autoPointDomains: boolean("autoPointDomains").notNull().default(false),
 	// A-record TTL in seconds (low for fast DNS failover).
 	ttl: integer("ttl").notNull().default(60),
 	// Last reconcile bookkeeping (shown in the UI).

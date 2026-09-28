@@ -17,6 +17,10 @@ import {
 	validateDomain,
 } from "@nomploy/server";
 import { checkServicePermissionAndAccess } from "@nomploy/server/services/permission";
+import {
+	pointDomainAtLb,
+	unpointDomain,
+} from "@nomploy/server/setup/loadbalancer-dns";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
@@ -55,6 +59,12 @@ export const domainRouter = createTRPCRouter({
 					await updateApplication(domain.applicationId, {
 						pendingDeploy: true,
 					});
+				// Auto-point the domain at the LB (CNAME) if enabled — best-effort.
+				if (domain.host)
+					await pointDomainAtLb(
+						ctx.session.activeOrganizationId,
+						domain.host,
+					).catch((e) => console.error("pointDomainAtLb failed:", e));
 				await audit(ctx, {
 					action: "create",
 					resourceType: "domain",
@@ -127,12 +137,22 @@ export const domainRouter = createTRPCRouter({
 				});
 			}
 
+			const oldHost = currentDomain.host;
 			const result = await updateDomainById(input.domainId, input);
 			const domain = await findDomainById(input.domainId);
 			if (domain.composeId)
 				await updateCompose(domain.composeId, { pendingDeploy: true });
 			if (domain.applicationId)
 				await updateApplication(domain.applicationId, { pendingDeploy: true });
+			// Keep the LB CNAME in sync: unpoint the old host if it changed, then
+			// point the (new) host. Best-effort.
+			const org = ctx.session.activeOrganizationId;
+			if (oldHost && oldHost !== domain.host)
+				await unpointDomain(org, oldHost).catch(() => {});
+			if (domain.host)
+				await pointDomainAtLb(org, domain.host).catch((e) =>
+					console.error("pointDomainAtLb failed:", e),
+				);
 			await audit(ctx, {
 				action: "update",
 				resourceType: "domain",
@@ -194,6 +214,12 @@ export const domainRouter = createTRPCRouter({
 				await updateCompose(domain.composeId, { pendingDeploy: true });
 			if (domain.applicationId)
 				await updateApplication(domain.applicationId, { pendingDeploy: true });
+			// Remove the auto-created LB CNAME for this host. Best-effort.
+			if (domain.host)
+				await unpointDomain(
+					ctx.session.activeOrganizationId,
+					domain.host,
+				).catch((e) => console.error("unpointDomain failed:", e));
 			await audit(ctx, {
 				action: "delete",
 				resourceType: "domain",

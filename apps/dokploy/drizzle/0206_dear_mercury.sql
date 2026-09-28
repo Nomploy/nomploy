@@ -1,0 +1,1 @@
+ALTER TABLE "load_balancer" ADD COLUMN "autoPointDomains" boolean DEFAULT false NOT NULL;

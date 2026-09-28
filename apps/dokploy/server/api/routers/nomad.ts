@@ -48,6 +48,7 @@ import {
 	getLoadBalancerMetricsHistory,
 	listPoolCandidates,
 	reconcileLoadBalancerDns,
+	reconcileOrgDomains,
 	resolveLbNodes,
 	setNodePoolMembership,
 } from "@nomploy/server/setup/loadbalancer-dns";
@@ -988,6 +989,7 @@ export const nomadRouter = createTRPCRouter({
 							zoneName: cfg.zoneName,
 							dnsProviderId: cfg.dnsProviderId,
 							enabled: cfg.enabled,
+							autoPointDomains: cfg.autoPointDomains,
 							ttl: cfg.ttl,
 							lastReconcileAt: cfg.lastReconcileAt,
 							lastReconcileStatus: cfg.lastReconcileStatus,
@@ -1112,6 +1114,25 @@ export const nomadRouter = createTRPCRouter({
 	reconcileLoadBalancerDns: withPermission("server", "create").mutation(
 		async ({ ctx }) =>
 			reconcileLoadBalancerDns(ctx.session.activeOrganizationId),
+	),
+
+	// Toggle auto-pointing app domains (CNAME) at the LB hostname. On enable,
+	// immediately point all existing domains.
+	setLoadBalancerAutoPoint: withPermission("server", "create")
+		.input(z.object({ enabled: z.boolean() }))
+		.mutation(async ({ ctx, input }) => {
+			const org = ctx.session.activeOrganizationId;
+			await db
+				.update(loadBalancer)
+				.set({ autoPointDomains: input.enabled })
+				.where(eq(loadBalancer.organizationId, org));
+			if (input.enabled) return reconcileOrgDomains(org);
+			return { pointed: 0, skipped: 0 };
+		}),
+
+	// Point every existing app domain at the LB now (bulk).
+	pointAllDomainsAtLoadBalancer: withPermission("server", "create").mutation(
+		async ({ ctx }) => reconcileOrgDomains(ctx.session.activeOrganizationId),
 	),
 
 	// Pool members with public IP + health (for the DNS/members view).
