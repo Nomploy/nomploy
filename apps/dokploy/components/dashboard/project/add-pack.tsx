@@ -40,6 +40,11 @@ interface Props {
 	defaultOpen?: boolean;
 	initialPackName?: string;
 	initialRegistryUrl?: string;
+	// When rendered outside a dropdown menu (e.g. the deploy-pack landing page),
+	// hide the DropdownMenuItem trigger and drive the dialog via defaultOpen.
+	hideTrigger?: boolean;
+	// Called after a service is successfully created (lets a host page redirect).
+	onCreated?: () => void;
 }
 
 // A Nomad Pack registry is a git repo of packs. Default to Nomploy's own; the
@@ -158,6 +163,8 @@ export const AddPack = ({
 	defaultOpen = false,
 	initialPackName,
 	initialRegistryUrl,
+	hideTrigger = false,
+	onCreated,
 }: Props) => {
 	const utils = api.useUtils();
 	const slug = slugify(projectName);
@@ -234,6 +241,7 @@ export const AddPack = ({
 			reset();
 			await utils.environment.one.invalidate({ environmentId });
 			await utils.project.all.invalidate();
+			onCreated?.();
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : "Failed to create");
 		}
@@ -291,15 +299,17 @@ export const AddPack = ({
 				if (!o) reset();
 			}}
 		>
-			<DialogTrigger className="w-full">
-				<DropdownMenuItem
-					className="w-full cursor-pointer space-x-3"
-					onSelect={(e) => e.preventDefault()}
-				>
-					<Box className="size-4 text-muted-foreground" />
-					<span>Nomad Pack</span>
-				</DropdownMenuItem>
-			</DialogTrigger>
+			{!hideTrigger && (
+				<DialogTrigger className="w-full">
+					<DropdownMenuItem
+						className="w-full cursor-pointer space-x-3"
+						onSelect={(e) => e.preventDefault()}
+					>
+						<Box className="size-4 text-muted-foreground" />
+						<span>Nomad Pack</span>
+					</DropdownMenuItem>
+				</DialogTrigger>
+			)}
 			<DialogContent className="p-0 sm:max-w-[70vw]">
 				{selected ? (
 					// ── Configure step ────────────────────────────────────────────────
