@@ -136,10 +136,11 @@ const nomadAclBlock = (t?: ClusterAclTokens): string =>
 const nomadConsulTokenAttr = (t?: ClusterAclTokens): string =>
 	t ? ` token = "${t.nomadConsul}"` : "";
 
-// systemd ordering so Consul/Nomad start only after the WireGuard overlay (wg0) is
-// up — they bind/advertise on wg IPs, so a reboot that starts them before wg0
-// exists breaks binding and quorum. Nomad also waits for Consul. Idempotent.
-const wgUnitOrdering = `$SUDO mkdir -p /etc/systemd/system/consul.service.d /etc/systemd/system/nomad.service.d
+// systemd ordering so Consul/Nomad/dnsmasq start only after the WireGuard overlay
+// (wg0) is up — they bind/advertise on wg IPs, so a reboot that starts them before
+// wg0 exists breaks binding (Consul quorum, dnsmasq listen-addr). Nomad also waits
+// for Consul. Idempotent.
+const wgUnitOrdering = `$SUDO mkdir -p /etc/systemd/system/consul.service.d /etc/systemd/system/nomad.service.d /etc/systemd/system/dnsmasq.service.d
 $SUDO tee /etc/systemd/system/consul.service.d/10-nomploy-wg.conf >/dev/null <<'CONSULWG'
 [Unit]
 After=wg-quick@wg0.service
@@ -158,6 +159,15 @@ Wants=wg-quick@wg0.service
 RestartSec=3
 ExecStartPre=/bin/sh -c "for i in $(seq 1 60); do ip -4 addr show wg0 2>/dev/null | grep -q 'inet ' && exit 0; sleep 1; done; exit 0"
 NOMADWG
+$SUDO tee /etc/systemd/system/dnsmasq.service.d/10-nomploy-wg.conf >/dev/null <<'DNSMASQWG'
+[Unit]
+After=wg-quick@wg0.service
+Wants=wg-quick@wg0.service
+
+[Service]
+RestartSec=3
+ExecStartPre=/bin/sh -c "for i in $(seq 1 60); do ip -4 addr show wg0 2>/dev/null | grep -q 'inet ' && exit 0; sleep 1; done; exit 0"
+DNSMASQWG
 $SUDO systemctl daemon-reload`;
 
 /** Shared install steps (Docker + Consul + Nomad + CNI + WireGuard + docker auth). */

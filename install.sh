@@ -482,6 +482,20 @@ server=/consul/127.0.0.1#8600
 server=1.1.1.1
 server=8.8.8.8
 DNSMASQ
+# dnsmasq binds listen-address=10.10.0.1 (the wg IP), so it must start after wg0 is
+# up — otherwise a reboot leaves it dead ("Cannot assign requested address") and the
+# node's Cluster DNS resolver fails (breaking .consul name resolution).
+$SUDO mkdir -p /etc/systemd/system/dnsmasq.service.d
+$SUDO tee /etc/systemd/system/dnsmasq.service.d/10-nomploy-wg.conf >/dev/null <<'DNSMASQWG'
+[Unit]
+After=wg-quick@wg0.service
+Wants=wg-quick@wg0.service
+
+[Service]
+RestartSec=3
+ExecStartPre=/bin/sh -c "for i in $(seq 1 60); do ip -4 addr show wg0 2>/dev/null | grep -q 'inet ' && exit 0; sleep 1; done; exit 0"
+DNSMASQWG
+$SUDO systemctl daemon-reload
 $SUDO systemctl enable dnsmasq >/dev/null 2>&1 || true
 $SUDO systemctl restart dnsmasq >/dev/null 2>&1 || true
 
