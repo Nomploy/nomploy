@@ -530,10 +530,16 @@ const resolveZoneForHost = async (
 };
 
 /**
- * Point an app domain at the LB hostname via a CNAME (Cloudflare, unproxied; CF
- * flattens it at the apex). No-op unless auto-pointing is enabled and a configured
- * provider governs the host's zone. Replaces any conflicting A/AAAA/CNAME on the
- * exact name so the domain resolves to the HA pool instead of a single node.
+ * Point an app domain at the LB hostname via a CNAME (Cloudflare, unproxied).
+ * No-op unless auto-pointing is enabled and a configured provider governs the
+ * host's zone. Replaces any conflicting A/AAAA/CNAME on the exact name so the
+ * domain resolves to the HA pool instead of a single node.
+ *
+ * SKIPS the zone apex: a CNAME can't coexist with the apex's MX/TXT/CAA records,
+ * so the delete-then-CNAME below would strip the apex A records and then fail to
+ * create the CNAME, taking the domain offline (regression fixed here). Apex
+ * domains must be pointed at the pool's IPs manually (A records) — only
+ * subdomains are auto-CNAMEd.
  */
 export const pointDomainAtLb = async (
 	organizationId: string,
@@ -546,6 +552,9 @@ export const pointDomainAtLb = async (
 	if (!host || host === lb.hostname) return;
 	const zone = await resolveZoneForHost(organizationId, host);
 	if (!zone) return; // unmanaged zone — leave DNS to the user
+	// Never touch the zone apex — a CNAME there conflicts with MX/TXT/CAA and the
+	// delete-then-CNAME would orphan the domain. Apex is pointed manually.
+	if (host === zone.zoneName) return;
 
 	const existing = await cf<CfRecord[]>(
 		zone.token,
@@ -584,6 +593,7 @@ export const unpointDomain = async (
 	if (!lb?.hostname || !host) return;
 	const zone = await resolveZoneForHost(organizationId, host);
 	if (!zone) return;
+	if (host === zone.zoneName) return; // apex is never auto-pointed (see pointDomainAtLb)
 	const existing = await cf<CfRecord[]>(
 		zone.token,
 		`/zones/${zone.zoneId}/dns_records?type=CNAME&name=${encodeURIComponent(host)}&per_page=100`,
