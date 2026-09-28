@@ -101,6 +101,9 @@ export type LbNode = {
 	nodeId: string;
 	status: string;
 	healthy: boolean;
+	/** The control-plane node — serves via the standalone Traefik, not the pool job
+	 * (so it has no :8082 Prometheus endpoint to scrape). */
+	isHub: boolean;
 	/** True while the node is being gracefully removed: kept running + serving, but
 	 * pulled from DNS, until the TTL elapses and Traefik is stopped. */
 	draining: boolean;
@@ -299,6 +302,7 @@ export const resolveLbNodes = async (
 			nodeId: a.NodeID,
 			status: a.ClientStatus,
 			healthy: a.ClientStatus === "running",
+			isHub: false,
 			draining: drainByNode.get(a.NodeName) ?? false,
 			ip,
 			publicIp,
@@ -317,6 +321,7 @@ export const resolveLbNodes = async (
 			nodeId: "control-plane",
 			status: "running",
 			healthy: true,
+			isHub: true,
 			draining: false,
 			ip: hubIp,
 			publicIp: hubIp,
@@ -478,6 +483,7 @@ export type LbNodeMetrics = {
 	node: string;
 	ip: string | null;
 	healthy: boolean;
+	isHub: boolean;
 	inDns: boolean;
 	reachable: boolean;
 	requests: number;
@@ -561,6 +567,7 @@ const scrapeNode = async (
 		node: n.node,
 		ip: n.publicIp ?? n.ip,
 		healthy: n.healthy,
+		isHub: n.isHub,
 		inDns,
 		reachable: false,
 		requests: 0,
@@ -775,6 +782,7 @@ export const sampleLoadBalancerMetrics = async (): Promise<number> => {
 		try {
 			const nodes = await resolveLbNodes(organizationId);
 			for (const n of nodes) {
+				if (n.isHub) continue; // hub runs standalone Traefik — no :8082 metrics
 				const host = n.wgIp || n.ip;
 				if (!host) continue;
 				const c = await scrapeRawCounters(host);

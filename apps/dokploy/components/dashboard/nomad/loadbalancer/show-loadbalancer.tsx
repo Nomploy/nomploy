@@ -313,9 +313,10 @@ const PoolMembershipCard = ({ canManage }: { canManage: boolean }) => {
 					Pool membership
 				</CardTitle>
 				<CardDescription>
-					Choose which nodes run the ingress pool. Toggling a node sets its{" "}
-					<code>nomploy_lb</code> tag; the hub is excluded (it runs the
-					standalone Traefik).
+					Choose which nodes run the ingress <strong>pool</strong> (the Traefik{" "}
+					<code>nomploy_lb</code> system job). The hub isn't in the pool job —
+					it runs the standalone Traefik — but it's still a load balancer: it
+					serves traffic and is included in the LB DNS.
 				</CardDescription>
 			</CardHeader>
 			<CardContent>
@@ -334,12 +335,17 @@ const PoolMembershipCard = ({ canManage }: { canManage: boolean }) => {
 									<span className="font-medium">{n.name}</span>
 									<span className="text-muted-foreground text-xs">
 										{n.status}
-										{n.isHub ? " · control plane (excluded)" : ""}
+										{n.isHub
+											? " · control plane · serves via standalone Traefik"
+											: ""}
 									</span>
 								</div>
 								{n.isHub ? (
-									<Badge variant="outline" className="text-muted-foreground">
-										hub
+									<Badge
+										variant="outline"
+										className="border-emerald-500/40 text-emerald-500"
+									>
+										hub · in DNS
 									</Badge>
 								) : (
 									<div className="flex items-center gap-2">
@@ -933,7 +939,11 @@ const MetricsCard = () => {
 
 	// Healthy nodes with no scrapeable metrics endpoint → the running pool predates
 	// the :8082 Prometheus entrypoint; a redeploy adds it.
-	const needsRedeploy = (data ?? []).some((n) => n.healthy && !n.reachable);
+	// The hub runs the standalone Traefik (no :8082 endpoint), so it never exposes
+	// pool metrics — don't let it trigger the "redeploy the pool" hint.
+	const needsRedeploy = (data ?? []).some(
+		(n) => n.healthy && !n.reachable && !n.isHub,
+	);
 
 	return (
 		<Card className="bg-background">
@@ -1010,13 +1020,19 @@ const MetricsCard = () => {
 											<td className="py-1.5 pr-3">
 												<Badge
 													variant="outline"
-													className={statusBadge(n.healthy && n.reachable)}
+													className={
+														n.isHub
+															? "text-muted-foreground"
+															: statusBadge(n.healthy && n.reachable)
+													}
 												>
-													{n.healthy
-														? n.reachable
-															? "up"
-															: "no metrics"
-														: "down"}
+													{n.isHub
+														? "hub · standalone"
+														: n.healthy
+															? n.reachable
+																? "up"
+																: "no metrics"
+															: "down"}
 												</Badge>
 											</td>
 											<td className="py-1.5 pr-3">
