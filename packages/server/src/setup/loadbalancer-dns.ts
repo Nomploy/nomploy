@@ -605,10 +605,34 @@ export const reconcileOrgDomains = async (
 		where: eq(loadBalancer.organizationId, organizationId),
 	});
 	if (!lb?.autoPointDomains) return { pointed: 0, skipped: 0 };
+	// Column-trim to dodge Postgres's 100-arg json_build_array cap: the full
+	// application/compose rows (~95 cols each) overflow it. We only need the
+	// domain host + the owning org (via project). See memory json-build-array cap.
 	const rows = await db.query.domains.findMany({
+		columns: { host: true },
 		with: {
-			application: { with: { environment: { with: { project: true } } } },
-			compose: { with: { environment: { with: { project: true } } } },
+			application: {
+				columns: { applicationId: true },
+				with: {
+					environment: {
+						columns: { environmentId: true },
+						with: {
+							project: { columns: { organizationId: true } },
+						},
+					},
+				},
+			},
+			compose: {
+				columns: { composeId: true },
+				with: {
+					environment: {
+						columns: { environmentId: true },
+						with: {
+							project: { columns: { organizationId: true } },
+						},
+					},
+				},
+			},
 		},
 	});
 	let pointed = 0;
