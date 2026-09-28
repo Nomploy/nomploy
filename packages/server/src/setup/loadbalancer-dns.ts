@@ -701,6 +701,36 @@ const isHubNode = async (nodeId: string): Promise<boolean> => {
 	return !!d.Meta?.nomploy_control_plane;
 };
 
+/** Force a re-eval of the pool system job (so it places on newly-tagged nodes). */
+const evalTraefikHaJob = async (): Promise<void> => {
+	await execAsync(`nomad job eval ${TRAEFIK_HA_JOB_NAME} 2>&1 || true`);
+};
+
+/**
+ * Stop the node's Traefik alloc so it actually stops serving. Nomad does NOT reap
+ * a *system-job* alloc when a node's meta stops matching the constraint, so
+ * untagging alone leaves Traefik running — we must stop the alloc explicitly.
+ * Safe: the node is already `nomploy_lb=false`, so it won't be rescheduled there.
+ */
+const stopNodeTraefikAlloc = async (nodeName: string): Promise<void> => {
+	try {
+		const allocs = await nomad<
+			{ ID: string; NodeName: string; DesiredStatus: string }[]
+		>(`/job/${TRAEFIK_HA_JOB_NAME}/allocations`);
+		for (const a of allocs) {
+			if (
+				a.NodeName === nodeName &&
+				a.DesiredStatus === "run" &&
+				/^[0-9a-fA-F-]{36}$/.test(a.ID)
+			) {
+				await execAsync(`nomad alloc stop ${a.ID} 2>&1 || true`);
+			}
+		}
+	} catch (e) {
+		console.error(`loadbalancer: stop Traefik alloc on ${nodeName} failed:`, e);
+	}
+};
+
 /**
  * Add or remove a node from the ingress pool.
  *
@@ -724,6 +754,8 @@ export const setNodePoolMembership = async (
 			[META_DRAIN]: "false",
 			[META_DRAIN_AT]: "0",
 		});
+		// System jobs don't auto-place on a newly-matching node without a re-eval.
+		await evalTraefikHaJob();
 		return { phase: "enabled" };
 	}
 	// Start the drain: out of DNS first, Traefik stays up.
@@ -759,6 +791,8 @@ export const finalizeDrains = async (organizationId: string): Promise<void> => {
 				[META_DRAIN]: "false",
 				[META_DRAIN_AT]: "0",
 			});
+			// Meta alone won't stop the system-job alloc — stop it so Traefik ends.
+			await stopNodeTraefikAlloc(n.name);
 		} catch (e) {
 			console.error(`loadbalancer: finalize drain failed for ${n.name}:`, e);
 		}
