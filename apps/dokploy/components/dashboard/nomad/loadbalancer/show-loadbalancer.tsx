@@ -196,7 +196,7 @@ const PoolCard = ({ canManage }: { canManage: boolean }) => {
 };
 
 /** Certificates the pool serves + expiry. Auto-renewed on the hub, resynced to
- * the pool's Consul KV every 6h. */
+ * the pool's Consul KV every ~5 min (only when they change). */
 const CertificatesCard = ({ canManage }: { canManage: boolean }) => {
 	const { data: certs } = api.nomad.getLoadBalancerCerts.useQuery(undefined, {
 		refetchInterval: 60000,
@@ -219,7 +219,11 @@ const CertificatesCard = ({ canManage }: { canManage: boolean }) => {
 					</CardTitle>
 					<CardDescription>
 						TLS certs the pool serves, shared via Consul KV. Issued/renewed on
-						the hub and resynced to the pool every 6h.
+						the hub via <strong>DNS-01</strong> (Cloudflare) — HTTP-01 can't
+						work behind the pool — and resynced to the pool every ~5 min when
+						they change. A new domain gets its cert a few minutes after its app
+						is <strong>redeployed</strong> (redeploy re-tags the router onto the
+						DNS-01 resolver); use “Sync now” to push it to the pool immediately.
 					</CardDescription>
 				</div>
 				{canManage && (

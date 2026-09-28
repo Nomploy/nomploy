@@ -940,7 +940,7 @@ export const nomadRouter = createTRPCRouter({
 	// after cert renewals so the pool picks up fresh certs (file provider reloads).
 	syncLoadBalancerCerts: withPermission("server", "create").mutation(
 		async () => {
-			const { certCount } = await syncTraefikCertsToConsulKV();
+			const { certCount } = await syncTraefikCertsToConsulKV({ force: true });
 			return { certCount };
 		},
 	),

@@ -1,4 +1,4 @@
-import { X509Certificate } from "node:crypto";
+import { createHash, X509Certificate } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { paths } from "../constants";
@@ -254,16 +254,31 @@ export const getPoolCertMeta = (): PoolCert[] => {
 	return out.sort((a, b) => a.daysLeft - b.daysLeft);
 };
 
+// Hash of the cert set last written to KV. Lets the frequent auto-resync loop
+// (startLoadBalancerCertSyncLoop) skip the delete+re-put when nothing changed, so
+// Traefik's consul KV provider doesn't needlessly hot-reload every cycle. The
+// manual "Sync certs" button and pool deploy pass force=true to always write.
+let lastSyncedCertHash = "";
+
 /**
  * Seed/refresh the LB pool's shared certs into Consul KV as a Traefik dynamic-
  * config subtree (traefik/tls/certificates/<i>/certFile|keyFile, inline PEM).
  * Traefik's `consul` KV provider serves them directly and hot-reloads on change.
  * Idempotent — clears the subtree first so removed certs don't linger.
+ *
+ * Change-aware: when the cert set is byte-identical to the last successful sync
+ * it's a no-op (unless `force`), so the ~10-min auto-resync loop is cheap and
+ * doesn't churn KV / trigger Traefik reloads. Returns `changed=false` when it
+ * skipped.
  */
-export const syncTraefikCertsToConsulKV = async (): Promise<{
-	certCount: number;
-}> => {
+export const syncTraefikCertsToConsulKV = async (opts?: {
+	force?: boolean;
+}): Promise<{ certCount: number; changed: boolean }> => {
 	const certs = readAcmeCertificates();
+	const hash = createHash("sha256").update(JSON.stringify(certs)).digest("hex");
+	if (!opts?.force && hash === lastSyncedCertHash) {
+		return { certCount: certs.length, changed: false };
+	}
 	await consulKvDeleteTree(KV_CERTS_PREFIX);
 	// Drop the stale single-blob key from the earlier design, if present.
 	await consulKvDeleteTree("traefik/dynamic-config");
@@ -273,7 +288,8 @@ export const syncTraefikCertsToConsulKV = async (): Promise<{
 		await consulKvPut(`${KV_CERTS_PREFIX}/${i}/keyFile`, c.key);
 		i++;
 	}
-	return { certCount: certs.length };
+	lastSyncedCertHash = hash;
+	return { certCount: certs.length, changed: true };
 };
 
 /**
@@ -284,7 +300,7 @@ export const syncTraefikCertsToConsulKV = async (): Promise<{
 export const deployTraefikHaSystemJob = async (): Promise<{
 	certCount: number;
 }> => {
-	const { certCount } = await syncTraefikCertsToConsulKV();
+	const { certCount } = await syncTraefikCertsToConsulKV({ force: true });
 	const hcl = generateTraefikHaJob({
 		consulToken: consulToken(),
 		email: resolveAcmeEmail(),

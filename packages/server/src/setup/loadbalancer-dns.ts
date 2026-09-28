@@ -1135,7 +1135,7 @@ export const getLoadBalancerMetricsHistory = async (
  * certs" click. No-op unless the pool is deployed.
  */
 export const startLoadBalancerCertSyncLoop = (
-	intervalHours = 6,
+	intervalMinutes = 5,
 ): NodeJS.Timeout => {
 	const tick = async () => {
 		try {
@@ -1143,13 +1143,15 @@ export const startLoadBalancerCertSyncLoop = (
 				`/job/${TRAEFIK_HA_JOB_NAME}/allocations`,
 			).catch(() => [] as Alloc[]);
 			if (!allocs.some((a) => a.DesiredStatus === "run")) return;
+			// Change-aware: a no-op unless the hub's certs actually changed, so a
+			// short interval propagates freshly-issued/renewed certs to the pool
+			// within minutes without churning KV or reloading Traefik every tick.
 			await syncTraefikCertsToConsulKV();
 		} catch (e) {
 			console.error("loadbalancer-certs: resync error:", e);
 		}
 	};
-	// Deploy already syncs; first auto-resync happens after the interval.
-	return setInterval(tick, intervalHours * 3600 * 1000);
+	return setInterval(tick, intervalMinutes * 60 * 1000);
 };
 
 export const startLoadBalancerMetricsSampler = (
