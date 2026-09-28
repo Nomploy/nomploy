@@ -1,3 +1,4 @@
+import net from "node:net";
 import { and, asc, eq, gte, lt } from "drizzle-orm";
 import { db } from "../db";
 import {
@@ -200,6 +201,25 @@ const hetznerPublicIpIndex = async (
 	return { byPrivate, byName };
 };
 
+// A node is a healthy LB when it accepts TCP on :443 (Traefik up). Used for the
+// hub, whose Traefik can be down independently of the panel process.
+const tcpProbe = (
+	host: string,
+	port = 443,
+	timeoutMs = 4000,
+): Promise<boolean> =>
+	new Promise((resolve) => {
+		const sock = net.connect({ host, port });
+		const done = (ok: boolean) => {
+			sock.destroy();
+			resolve(ok);
+		};
+		sock.setTimeout(timeoutMs);
+		sock.once("connect", () => done(true));
+		sock.once("timeout", () => done(false));
+		sock.once("error", () => done(false));
+	});
+
 // The hub's own public IPv4 (the panel runs on the hub / control plane). Prefer
 // Hetzner's metadata service, fall back to a public IP-echo. Cached for the process.
 let hubIpCache: string | null = null;
@@ -316,11 +336,15 @@ export const resolveLbNodes = async (
 	// system job, hence added explicitly.
 	const hubIp = await hubPublicIp();
 	if (hubIp && !out.some((n) => n.publicIp === hubIp)) {
+		// Health = does the hub actually serve on :443? The panel process can be up
+		// while the hub's Traefik is down, so don't assume healthy — probe it, or the
+		// panel loop would keep re-adding a dead hub to DNS.
+		const hubHealthy = await tcpProbe(hubIp, 443);
 		out.push({
 			node: "nomploy",
 			nodeId: "control-plane",
-			status: "running",
-			healthy: true,
+			status: hubHealthy ? "running" : "unreachable",
+			healthy: hubHealthy,
 			isHub: true,
 			draining: false,
 			ip: hubIp,
