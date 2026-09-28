@@ -1345,6 +1345,64 @@ done
 			}
 		}),
 
+	// Rich detail for a single pack from a GitHub-Pages registry: the variable
+	// schema (name/type/default/sensitive/placeholder) plus quick facts. Powers
+	// the "configure before deploy" form in the pack gallery. Returns null when the
+	// registry has no static API (custom git registries) — the caller then falls
+	// back to deploying with the pack's built-in defaults.
+	getNomadPack: withPermission("server", "read")
+		.input(
+			z.object({
+				registryUrl: z.string().optional(),
+				id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/i, "Invalid pack id"),
+			}),
+		)
+		.query(async ({ input }) => {
+			const url =
+				input.registryUrl?.trim() ||
+				"github.com/hashicorp/nomad-pack-community-registry";
+			const gh = url.match(
+				/^(?:https?:\/\/)?github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/.*)?$/i,
+			);
+			if (!gh) return null;
+			const apiUrl = `https://${gh[1].toLowerCase()}.github.io/${gh[2]}/api/packs/${input.id}.json`;
+			try {
+				const ctl = new AbortController();
+				const t = setTimeout(() => ctl.abort(), 6000);
+				const res = await fetch(apiUrl, { signal: ctl.signal });
+				clearTimeout(t);
+				if (!res.ok) return null;
+				const d = (await res.json()) as {
+					name?: string;
+					description?: string;
+					version?: string;
+					sourceUrl?: string;
+					appUrl?: string;
+					variables?: {
+						name: string;
+						description?: string;
+						type?: string;
+						kind?: string;
+						default?: string;
+						placeholder?: boolean;
+						sensitive?: boolean;
+					}[];
+					facts?: Record<string, unknown>;
+				};
+				return {
+					name: d.name ?? input.id,
+					description: d.description ?? "",
+					version: d.version ?? "",
+					sourceUrl: d.sourceUrl ?? "",
+					appUrl: d.appUrl ?? "",
+					variables: Array.isArray(d.variables) ? d.variables : [],
+					facts: d.facts ?? null,
+				};
+			} catch {
+				return null;
+			}
+		}),
+
 	getJobScale: withPermission("server", "read")
 		.input(serverInput.extend({ jobId: z.string() }))
 		.query(async ({ input, ctx }) => {

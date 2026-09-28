@@ -208,7 +208,7 @@ export const applicationRouter = createTRPCRouter({
 			try {
 				await updateApplicationStatus(input.applicationId, "idle");
 				// Re-submit the Nomad job (reload without a rebuild).
-				const command = getApplicationNomadDeployCommand(application);
+				const command = await getApplicationNomadDeployCommand(application);
 				if (application.serverId) {
 					await execAsyncRemote(application.serverId, command);
 				} else {

@@ -1,6 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { paths } from "@nomploy/server/constants";
+import {
+	applyDefaultCertResolver,
+	getDefaultCertResolver,
+} from "@nomploy/server/services/cert-resolver";
 import type { Domain } from "@nomploy/server/services/domain";
 import type { InferResultType } from "@nomploy/server/types/with";
 import { allServers, readCluster } from "../../setup/nomad-mesh";
@@ -224,7 +228,13 @@ export const getBuildNomadCommand = async (
 	compose: NomadComposeNested,
 ): Promise<string> => {
 	const { COMPOSE_PATH } = paths(!!compose.serverId);
-	const { appName, domains } = compose;
+	const { appName } = compose;
+	// Point Let's Encrypt domains at the DNS-01 resolver when one is configured —
+	// HTTP-01 can't work behind the HA LoadBalancer pool. No-op otherwise.
+	const domains = applyDefaultCertResolver(
+		compose.domains ?? [],
+		await getDefaultCertResolver(),
+	);
 	const projectPath = join(COMPOSE_PATH, appName, "code");
 	const jobFilePath = join(projectPath, `${appName}.nomad.hcl`);
 

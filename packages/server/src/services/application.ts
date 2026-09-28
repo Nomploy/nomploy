@@ -218,7 +218,7 @@ export const deployApplication = async ({
 		// Nomad-first: build the image, then submit it to Nomad (push to registry
 		// for multi-node pull) instead of creating a Docker Swarm service. Domains
 		// are normalized to the single service name so Consul/Traefik tags attach.
-		command += getBuildNomadApplicationCommand(
+		command += await getBuildNomadApplicationCommand(
 			application,
 			(application.domains ?? []).map((d) => ({
 				...d,
@@ -325,7 +325,7 @@ export const rebuildApplication = async ({
 		// Check case for docker only
 		command += await getBuildCommand(application);
 		// Nomad-first: submit to Nomad instead of a Docker Swarm service.
-		command += getBuildNomadApplicationCommand(
+		command += await getBuildNomadApplicationCommand(
 			application,
 			(application.domains ?? []).map((d) => ({
 				...d,
@@ -464,7 +464,7 @@ export const deployPreviewApplication = async ({
 			});
 			command += await getBuildCommand(application);
 			// Submit the preview to Nomad (routed by the preview domain).
-			command += getBuildNomadApplicationCommand(
+			command += await getBuildNomadApplicationCommand(
 				application,
 				previewDeployment.domain
 					? [
@@ -597,7 +597,7 @@ export const rebuildPreviewApplication = async ({
 		// Only rebuild, don't clone repository
 		command += await getBuildCommand(application);
 		// Submit the preview to Nomad (routed by the preview domain).
-		command += getBuildNomadApplicationCommand(
+		command += await getBuildNomadApplicationCommand(
 			application,
 			previewDeployment.domain
 				? [{ ...previewDeployment.domain, serviceName: NOMAD_APP_SERVICE_NAME }]

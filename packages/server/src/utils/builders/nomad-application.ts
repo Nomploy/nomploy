@@ -1,5 +1,9 @@
 import { join } from "node:path";
 import { paths } from "@nomploy/server/constants";
+import {
+	applyDefaultCertResolver,
+	getDefaultCertResolver,
+} from "@nomploy/server/services/cert-resolver";
 import type { Domain } from "@nomploy/server/services/domain";
 import { getRegistryTag } from "../cluster/upload";
 import { encodeBase64, getEnvironmentVariablesObject } from "../docker/utils";
@@ -197,18 +201,24 @@ export const generateApplicationNomadJob = (
  * and submit it to Nomad. `getBuildCommand` has already built the image before
  * this runs, mirroring the compose deploy pipeline.
  */
-export const getBuildNomadApplicationCommand = (
+export const getBuildNomadApplicationCommand = async (
 	application: ApplicationNested,
 	domains: Domain[],
 	imageOverride?: string,
-): string => {
+): Promise<string> => {
 	const { APPLICATIONS_PATH } = paths(!!application.serverId);
 	const projectPath = join(APPLICATIONS_PATH, application.appName, "code");
 	const jobFilePath = join(projectPath, `${application.appName}.nomad.hcl`);
 	const image = imageOverride ?? resolveApplicationImage(application);
+	// Point Let's Encrypt domains at the DNS-01 resolver when one is configured —
+	// HTTP-01 can't work behind the HA LoadBalancer pool. No-op otherwise.
+	const resolvedDomains = applyDefaultCertResolver(
+		domains,
+		await getDefaultCertResolver(),
+	);
 	const jobSpec = generateApplicationNomadJob(
 		application,
-		domains,
+		resolvedDomains,
 		imageOverride,
 	);
 	const encoded = encodeBase64(jobSpec);
@@ -247,7 +257,7 @@ ${
  */
 export const getApplicationNomadDeployCommand = (
 	application: ApplicationNested & { domains?: Domain[] },
-): string =>
+): Promise<string> =>
 	getBuildNomadApplicationCommand(
 		application,
 		(application.domains ?? []).map((d) => ({

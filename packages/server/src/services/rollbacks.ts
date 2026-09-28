@@ -161,7 +161,7 @@ export const rollback = async (rollbackId: string) => {
 		...d,
 		serviceName: NOMAD_APP_SERVICE_NAME,
 	}));
-	const command = getBuildNomadApplicationCommand(
+	const command = await getBuildNomadApplicationCommand(
 		application,
 		domains,
 		rollbackImage,
