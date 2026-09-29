@@ -68,80 +68,34 @@ const fmtMb = (v: number) =>
 	v >= 1024 ? `${(v / 1024).toFixed(1)} GB` : `${v} MB`;
 
 /**
- * Tiny donut showing used-of-reserved as a filled arc, color-coded by
- * utilization (green < 70%, amber < 90%, red above). Makes the used/reserved
- * ratio readable at a glance next to the numbers.
+ * Tiny area sparkline of recent USED values, with an optional dashed `threshold`
+ * line (the RESERVED level). When threshold is set the scale is anchored 0→max(
+ * data, threshold), so the line's height reads directly as utilization and the
+ * gap to the dashed ceiling shows remaining headroom. Data + threshold must be in
+ * the same unit (CPU: MHz, memory: MB).
  */
-const UsageRing = ({
-	used,
-	reserved,
-	size = 22,
-}: {
-	used: number;
-	reserved: number;
-	size?: number;
-}) => {
-	const pct = reserved > 0 ? Math.min(used / reserved, 1) : 0;
-	const r = (size - 4) / 2;
-	const circ = 2 * Math.PI * r;
-	const color =
-		pct >= 0.9
-			? "hsl(0 84% 60%)"
-			: pct >= 0.7
-				? "hsl(38 92% 50%)"
-				: "hsl(142 71% 45%)";
-	return (
-		<svg
-			width={size}
-			height={size}
-			viewBox={`0 0 ${size} ${size}`}
-			className="shrink-0"
-			aria-hidden="true"
-		>
-			<circle
-				cx={size / 2}
-				cy={size / 2}
-				r={r}
-				fill="none"
-				strokeWidth={3}
-				className="stroke-muted-foreground/20"
-			/>
-			<circle
-				cx={size / 2}
-				cy={size / 2}
-				r={r}
-				fill="none"
-				stroke={color}
-				strokeWidth={3}
-				strokeLinecap="round"
-				strokeDasharray={`${circ * pct} ${circ}`}
-				transform={`rotate(-90 ${size / 2} ${size / 2})`}
-			/>
-		</svg>
-	);
-};
-
 const Sparkline = ({
 	data,
 	color,
+	threshold,
 	width = 56,
 	height = 16,
 }: {
 	data: number[];
 	color: string;
+	threshold?: number;
 	width?: number;
 	height?: number;
 }) => {
 	if (data.length < 2) return null;
-	const max = Math.max(...data);
-	const min = Math.min(...data);
+	const dataMax = Math.max(...data);
+	const hasThr = typeof threshold === "number" && threshold > 0;
+	const min = hasThr ? 0 : Math.min(...data);
+	const max = hasThr ? Math.max(dataMax, threshold) : dataMax;
 	const range = max - min || 1;
+	const y = (v: number) => height - ((v - min) / range) * (height - 2) - 1;
 	const step = width / (data.length - 1);
-	const pts = data.map((v, i) => {
-		const x = i * step;
-		const y = height - ((v - min) / range) * (height - 2) - 1;
-		return `${x.toFixed(1)},${y.toFixed(1)}`;
-	});
+	const pts = data.map((v, i) => `${(i * step).toFixed(1)},${y(v).toFixed(1)}`);
 	const line = `M ${pts.join(" L ")}`;
 	return (
 		<svg
@@ -165,6 +119,18 @@ const Sparkline = ({
 				strokeLinecap="round"
 				strokeLinejoin="round"
 			/>
+			{hasThr && (
+				<line
+					x1={0}
+					y1={y(threshold)}
+					x2={width}
+					y2={y(threshold)}
+					stroke="hsl(0 84% 60%)"
+					strokeWidth={1}
+					strokeDasharray="2 2"
+					strokeOpacity={0.85}
+				/>
+			)}
 		</svg>
 	);
 };
@@ -201,7 +167,7 @@ export const ShowProjects = () => {
 			for (const p of projectMetrics.projects) {
 				const h = next[p.projectId] ?? { cpu: [], mem: [] };
 				next[p.projectId] = {
-					cpu: [...h.cpu, p.cpuPercent].slice(-24),
+					cpu: [...h.cpu, p.cpuUsedMhz ?? 0].slice(-24), // MHz, matches reserved threshold
 					mem: [...h.mem, p.memoryMb].slice(-24),
 				};
 			}
@@ -662,18 +628,12 @@ export const ShowProjects = () => {
 																					{pm && pm.cpuReservedMhz > 0
 																						? `${pm.cpuUsedMhz} / ${pm.cpuReservedMhz} MHz`
 																						: `${pm?.cpuPercent ?? 0}%`}
-																					{pm && pm.cpuReservedMhz > 0 ? (
-																						<UsageRing
-																							used={pm.cpuUsedMhz}
-																							reserved={pm.cpuReservedMhz}
+																					{hist && (
+																						<Sparkline
+																							data={hist.cpu}
+																							color="hsl(var(--chart-1))"
+																							threshold={pm?.cpuReservedMhz}
 																						/>
-																					) : (
-																						hist && (
-																							<Sparkline
-																								data={hist.cpu}
-																								color="hsl(var(--chart-1))"
-																							/>
-																						)
 																					)}
 																				</span>
 																				<span
@@ -689,18 +649,12 @@ export const ShowProjects = () => {
 																					{pm && pm.memReservedMb > 0
 																						? ` / ${fmtMb(pm.memReservedMb)}`
 																						: ""}
-																					{pm && pm.memReservedMb > 0 ? (
-																						<UsageRing
-																							used={pm.memoryMb}
-																							reserved={pm.memReservedMb}
+																					{hist && (
+																						<Sparkline
+																							data={hist.mem}
+																							color="hsl(var(--chart-2))"
+																							threshold={pm?.memReservedMb}
 																						/>
-																					) : (
-																						hist && (
-																							<Sparkline
-																								data={hist.mem}
-																								color="hsl(var(--chart-2))"
-																							/>
-																						)
 																					)}
 																				</span>
 																			</>
