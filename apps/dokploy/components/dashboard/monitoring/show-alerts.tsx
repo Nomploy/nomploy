@@ -314,7 +314,8 @@ const RuleDialog = ({
 					</span>
 					<MetricChart
 						metric={metric}
-						target={needsTarget ? target : null}
+						// No single-series preview for "all services" — pick one to preview.
+						target={needsTarget && target !== "__all__" ? target : null}
 						needsTarget={needsTarget}
 						threshold={threshold}
 						comparator={comparator}
@@ -352,6 +353,9 @@ const RuleDialog = ({
 									<SelectValue placeholder="Select a service" />
 								</SelectTrigger>
 								<SelectContent>
+									{/* SigNoz-style: one rule that watches every service and fires
+									    per-service (value "__all__" = ALERT_ALL_TARGETS). */}
+									<SelectItem value="__all__">All services</SelectItem>
 									{(targets ?? []).length === 0 ? (
 										<SelectItem value="__none" disabled>
 											No services with metrics yet
@@ -365,6 +369,12 @@ const RuleDialog = ({
 									)}
 								</SelectContent>
 							</Select>
+							{target === "__all__" && (
+								<p className="text-muted-foreground text-xs">
+									Evaluates every service independently and fires/resolves each
+									on its own.
+								</p>
+							)}
 						</div>
 					)}
 					<div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

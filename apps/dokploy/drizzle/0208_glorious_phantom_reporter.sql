@@ -1,0 +1,1 @@
+ALTER TABLE "alert_rule" ADD COLUMN "seriesState" jsonb;
