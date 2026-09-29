@@ -63,6 +63,10 @@ import { ScalingSuggestions } from "./scaling-suggestions";
  * Tiny inline-SVG trend line built from the polled metric snapshots (no TSDB).
  * Flat/blank until at least two points have been collected.
  */
+/** Format a MB value as MB, or GB when >= 1024. */
+const fmtMb = (v: number) =>
+	v >= 1024 ? `${(v / 1024).toFixed(1)} GB` : `${v} MB`;
+
 const Sparkline = ({
 	data,
 	color,
@@ -594,10 +598,16 @@ export const ShowProjects = () => {
 																			<>
 																				<span
 																					className="flex items-center gap-1"
-																					title="CPU usage across this project's services (live)"
+																					title={
+																						pm && pm.cpuReservedMhz > 0
+																							? `CPU used vs reserved across this project's services (live): ${pm.cpuUsedMhz} of ${pm.cpuReservedMhz} MHz reserved (${pm.cpuPercent}% of node)`
+																							: "CPU usage across this project's services (live)"
+																					}
 																				>
 																					<Cpu className="size-3.5" />
-																					{pm?.cpuPercent}%
+																					{pm && pm.cpuReservedMhz > 0
+																						? `${pm.cpuUsedMhz} / ${pm.cpuReservedMhz} MHz`
+																						: `${pm?.cpuPercent ?? 0}%`}
 																					{hist && (
 																						<Sparkline
 																							data={hist.cpu}
@@ -607,12 +617,17 @@ export const ShowProjects = () => {
 																				</span>
 																				<span
 																					className="flex items-center gap-1"
-																					title="Memory used across this project's services (live)"
+																					title={
+																						pm && pm.memReservedMb > 0
+																							? `Memory used vs reserved across this project's services (live): ${fmtMb(pm.memoryMb)} of ${fmtMb(pm.memReservedMb)} reserved`
+																							: "Memory used across this project's services (live)"
+																					}
 																				>
 																					<MemoryStick className="size-3.5" />
-																					{pm && pm.memoryMb >= 1024
-																						? `${(pm.memoryMb / 1024).toFixed(1)} GB`
-																						: `${pm?.memoryMb ?? 0} MB`}
+																					{fmtMb(pm?.memoryMb ?? 0)}
+																					{pm && pm.memReservedMb > 0
+																						? ` / ${fmtMb(pm.memReservedMb)}`
+																						: ""}
 																					{hist && (
 																						<Sparkline
 																							data={hist.mem}
