@@ -299,10 +299,98 @@ export const buildPackDomainConfig = (
 	return stringify({ http: { routers, services } });
 };
 
+// ── Consul KV publish (so the HA pool serves pack domains too) ───────────────
+// The pool's Traefik reads dynamic config from Consul KV (rootKey "traefik"),
+// NOT the hub's file-provider dir — so a hub-only file config 404s on pool nodes.
+// Mirror the pack routes into KV as a Traefik dynamic-config subtree; the pool's
+// consul provider serves them cluster-wide. (The hub keeps using the file.)
+const CONSUL_KV = "http://127.0.0.1:8500/v1/kv";
+const consulKvHeaders = (): Record<string, string> => {
+	const t = process.env.CONSUL_TOKEN || "";
+	return t ? { "X-Consul-Token": t } : {};
+};
+const kvPut = async (key: string, value: string): Promise<void> => {
+	await fetch(`${CONSUL_KV}/${key}`, {
+		method: "PUT",
+		headers: consulKvHeaders(),
+		body: value,
+	});
+};
+const kvDeleteTree = async (prefix: string): Promise<void> => {
+	await fetch(`${CONSUL_KV}/${prefix}?recurse=true`, {
+		method: "DELETE",
+		headers: consulKvHeaders(),
+	});
+};
+
 /**
- * Write (or remove) the pack's domain routing into Traefik's dynamic dir. Called
- * after a pack deploy/reload; idempotent. Handles the hub (local fs) and remote
- * servers (base64 over SSH).
+ * Publish (or clear) a pack's domain routers/services into Consul KV so the HA
+ * pool's Traefik serves them. Keys use Traefik's KV layout (lowercase). Cleans
+ * this app's previous routes first so removed domains don't linger. The
+ * redirect-to-https middleware is referenced from the pool's file provider
+ * (`@file`), where the Traefik-HA job renders it.
+ */
+const syncPackDomainsToConsulKV = async (
+	appName: string,
+	domains: Domain[],
+	backends: Map<string, string[]> | undefined,
+	defaultResolver: string,
+): Promise<void> => {
+	await kvDeleteTree(`traefik/http/routers/${appName}-`);
+	await kvDeleteTree(`traefik/http/services/${appName}-`);
+	for (const d of domains) {
+		if (!d.serviceName || !d.host) continue;
+		const base = `${appName}-${d.domainId}`;
+		const port = d.port ?? 80;
+		const rule =
+			d.path && d.path !== "/"
+				? `Host(\`${d.host}\`) && PathPrefix(\`${d.path}\`)`
+				: `Host(\`${d.host}\`)`;
+		const https = d.certificateType && d.certificateType !== "none";
+		const live = backends?.get(d.serviceName) ?? [];
+		const servers = live.length
+			? live
+			: [`http://${d.serviceName}.service.consul:${port}`];
+		for (let i = 0; i < servers.length; i++) {
+			await kvPut(
+				`traefik/http/services/${base}/loadbalancer/servers/${i}/url`,
+				servers[i],
+			);
+		}
+		await kvPut(
+			`traefik/http/services/${base}/loadbalancer/passhostheader`,
+			"true",
+		);
+		if (https) {
+			await kvPut(`traefik/http/routers/${base}-web/rule`, rule);
+			await kvPut(`traefik/http/routers/${base}-web/entrypoints/0`, "web");
+			await kvPut(`traefik/http/routers/${base}-web/service`, base);
+			await kvPut(
+				`traefik/http/routers/${base}-web/middlewares/0`,
+				"redirect-to-https@file",
+			);
+			await kvPut(`traefik/http/routers/${base}-secure/rule`, rule);
+			await kvPut(
+				`traefik/http/routers/${base}-secure/entrypoints/0`,
+				"websecure",
+			);
+			await kvPut(`traefik/http/routers/${base}-secure/service`, base);
+			await kvPut(
+				`traefik/http/routers/${base}-secure/tls/certresolver`,
+				resolverFor(d, defaultResolver),
+			);
+		} else {
+			await kvPut(`traefik/http/routers/${base}/rule`, rule);
+			await kvPut(`traefik/http/routers/${base}/entrypoints/0`, "web");
+			await kvPut(`traefik/http/routers/${base}/service`, base);
+		}
+	}
+};
+
+/**
+ * Write (or remove) the pack's domain routing into Traefik's dynamic dir (hub)
+ * AND Consul KV (the HA pool). Called after a pack deploy/reload; idempotent.
+ * Handles the hub (local fs + KV) and remote servers (base64 over SSH).
  */
 export const applyPackDomains = async (
 	compose: Pick<Compose, "appName" | "serverId"> & { domains?: Domain[] },
@@ -341,13 +429,28 @@ export const applyPackDomains = async (
 		return;
 	}
 
-	// Local (hub / control plane).
+	// Local (hub / control plane): write the hub file provider AND publish to
+	// Consul KV so the HA pool serves the same routes.
+	const domains = compose.domains ?? [];
 	if (!yaml) {
 		if (existsSync(filePath)) rmSync(filePath);
+		await syncPackDomainsToConsulKV(
+			compose.appName,
+			[],
+			backends,
+			defaultResolver,
+		).catch((e) => console.error("pack-domains: KV clear failed:", e));
 		return;
 	}
-	// Skip the write when unchanged so the reconcile loop doesn't churn the file
-	// and make Traefik's file provider hot-reload every tick.
+	// KV publish is cheap + idempotent (delete+put); always refresh it so the pool
+	// tracks alloc moves. The file write is skipped when unchanged to avoid
+	// churning the hub's file-provider reload.
+	await syncPackDomainsToConsulKV(
+		compose.appName,
+		domains,
+		backends,
+		defaultResolver,
+	).catch((e) => console.error("pack-domains: KV publish failed:", e));
 	if (existsSync(filePath)) {
 		try {
 			if (readFileSync(filePath, "utf8") === yaml) return;
