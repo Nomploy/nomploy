@@ -199,6 +199,17 @@ export const applyServiceScalingOverrides = (
 	for (const service of services) {
 		const o = overrides[service.name];
 		if (!o) continue;
+		// Reserved-resource override (applies in both modes — resources are per-task).
+		if (o.resources) {
+			service.resources = {
+				...service.resources,
+				...(o.resources.cpu != null ? { cpu: o.resources.cpu } : {}),
+				...(o.resources.memory != null ? { memory: o.resources.memory } : {}),
+				...(o.resources.memoryMax != null
+					? { memoryMax: o.resources.memoryMax }
+					: {}),
+			};
+		}
 		if (o.replicas != null) service.replicas = o.replicas;
 		if (o.autoscaling?.enabled) {
 			const min = Math.max(1, o.autoscaling.min);

@@ -123,6 +123,15 @@ export const compose = pgTable("compose", {
 						cpuTarget?: number;
 						memoryTarget?: number;
 					};
+					// Per-service reserved-resource override (Nomad `resources`): cpu in
+					// MHz, memory in MB (the reservation Nomad schedules on), memoryMax in
+					// MB (burst limit). Merged over the parsed compose values (UI wins).
+					// Applies in BOTH shared and independent mode (per-task).
+					resources?: {
+						cpu?: number;
+						memory?: number;
+						memoryMax?: number;
+					};
 				}
 			>
 		>(),
@@ -282,6 +291,13 @@ const createSchema = createInsertSchema(compose, {
 						max: z.number().int().min(1),
 						cpuTarget: z.number().int().min(1).max(100).optional(),
 						memoryTarget: z.number().int().min(1).max(100).optional(),
+					})
+					.optional(),
+				resources: z
+					.object({
+						cpu: z.number().int().min(1).optional(),
+						memory: z.number().int().min(1).optional(),
+						memoryMax: z.number().int().min(1).optional(),
 					})
 					.optional(),
 			}),

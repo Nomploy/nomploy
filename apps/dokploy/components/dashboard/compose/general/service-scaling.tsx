@@ -25,8 +25,19 @@ type Autoscaling = {
 	cpuTarget?: number;
 	memoryTarget?: number;
 };
-type ServiceConfig = { replicas?: number; autoscaling?: Autoscaling };
+type Resources = { cpu?: number; memory?: number; memoryMax?: number };
+type ServiceConfig = {
+	replicas?: number;
+	autoscaling?: Autoscaling;
+	resources?: Resources;
+};
 type ScalingMap = Record<string, ServiceConfig>;
+
+/** Parse a numeric input to a positive int, or undefined when blank/invalid. */
+const numOrUndef = (v: string) => {
+	const n = Number(v);
+	return v && Number.isFinite(n) && n > 0 ? Math.round(n) : undefined;
+};
 
 /**
  * Scaling for a Nomad compose, set from the panel instead of editing the YAML.
@@ -76,20 +87,35 @@ export const ShowServiceScaling = ({ composeId }: Props) => {
 		const cur = cfg(name).autoscaling ?? { enabled: false, min: 1, max: 3 };
 		patch(name, { autoscaling: { ...cur, ...next } });
 	};
+	const patchRes = (name: string, next: Partial<Resources>) => {
+		const cur = cfg(name).resources ?? {};
+		const merged = { ...cur, ...next };
+		// Drop empty keys so an all-blank override doesn't persist as {}.
+		for (const k of Object.keys(merged) as (keyof Resources)[]) {
+			if (merged[k] == null) delete merged[k];
+		}
+		patch(name, {
+			resources: Object.keys(merged).length ? merged : undefined,
+		});
+	};
 
 	const save = async () => {
 		try {
-			if (independent) {
-				await update.mutateAsync({ composeId, serviceScaling: scaling });
-			} else {
-				await update.mutateAsync({
-					composeId,
-					autoscalingEnabled: group.enabled,
-					minReplicas: group.min,
-					maxReplicas: group.max,
-					autoscaleCpuTarget: group.cpuTarget ?? null,
-				});
-			}
+			// Always persist serviceScaling — it now also carries per-service resource
+			// overrides, which are meaningful in shared mode too (per task). The
+			// whole-app autoscaling fields are only relevant in shared mode.
+			await update.mutateAsync({
+				composeId,
+				serviceScaling: scaling,
+				...(independent
+					? {}
+					: {
+							autoscalingEnabled: group.enabled,
+							minReplicas: group.min,
+							maxReplicas: group.max,
+							autoscaleCpuTarget: group.cpuTarget ?? null,
+						}),
+			});
 			toast.success("Scaling saved — redeploy to apply");
 			await refetch();
 		} catch (e) {
@@ -103,8 +129,8 @@ export const ShowServiceScaling = ({ composeId }: Props) => {
 				<CardTitle className="text-xl">Scaling</CardTitle>
 				<CardDescription>
 					{independent
-						? "Set each service's replica count or autoscaling. Redeploy to apply."
-						: "Autoscale the whole app (all services scale together as one group). For per-service scaling, turn on “Independent scaling” above. Redeploy to apply."}
+						? "Set each service's reserved resources, replica count or autoscaling. Redeploy to apply."
+						: "Override each service's reserved resources, and autoscale the whole app (all services scale together as one group). For per-service replica/autoscaling, turn on “Independent scaling” above. Redeploy to apply."}
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
@@ -174,31 +200,30 @@ export const ShowServiceScaling = ({ composeId }: Props) => {
 					</div>
 				)}
 
-				{/* ── Independent mode: per-service controls ────────────────────── */}
-				{independent && servicesLoading && (
+				{/* ── Per-service controls (resources: both modes; scaling: independent) ── */}
+				{servicesLoading && (
 					<div className="flex items-center gap-2 text-muted-foreground text-sm">
 						<Loader2 className="h-4 w-4 animate-spin" /> Loading services…
 					</div>
 				)}
-				{independent &&
-					!servicesLoading &&
-					(!services || services.length === 0) && (
-						<p className="text-muted-foreground text-sm">
-							No services found. Fetch/deploy the compose first.
-						</p>
-					)}
-				{independent &&
-					services?.map((name) => {
-						const c = cfg(name);
-						const auto = c.autoscaling;
-						const autoOn = !!auto?.enabled;
-						return (
-							<div
-								key={name}
-								className="flex flex-col gap-3 rounded-md border p-3"
-							>
-								<div className="flex flex-wrap items-center justify-between gap-3">
-									<span className="font-medium font-mono text-sm">{name}</span>
+				{!servicesLoading && (!services || services.length === 0) && (
+					<p className="text-muted-foreground text-sm">
+						No services found. Fetch/deploy the compose first.
+					</p>
+				)}
+				{services?.map((name) => {
+					const c = cfg(name);
+					const res = c.resources;
+					const auto = c.autoscaling;
+					const autoOn = !!auto?.enabled;
+					return (
+						<div
+							key={name}
+							className="flex flex-col gap-3 rounded-md border p-3"
+						>
+							<div className="flex flex-wrap items-center justify-between gap-3">
+								<span className="font-medium font-mono text-sm">{name}</span>
+								{independent && (
 									<div className="flex items-center gap-2">
 										<Label
 											htmlFor={`auto-${name}`}
@@ -214,9 +239,51 @@ export const ShowServiceScaling = ({ composeId }: Props) => {
 											}
 										/>
 									</div>
-								</div>
+								)}
+							</div>
 
-								{autoOn ? (
+							{/* Reserved resources — applies in both modes (per task). Blank = keep the compose/template value. */}
+							<div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+								<div className="space-y-1">
+									<Label className="text-xs">CPU reserved (MHz)</Label>
+									<Input
+										type="number"
+										min={1}
+										placeholder="256"
+										value={res?.cpu ?? ""}
+										onChange={(e) =>
+											patchRes(name, { cpu: numOrUndef(e.target.value) })
+										}
+									/>
+								</div>
+								<div className="space-y-1">
+									<Label className="text-xs">Memory reserved (MB)</Label>
+									<Input
+										type="number"
+										min={1}
+										placeholder="512"
+										value={res?.memory ?? ""}
+										onChange={(e) =>
+											patchRes(name, { memory: numOrUndef(e.target.value) })
+										}
+									/>
+								</div>
+								<div className="space-y-1">
+									<Label className="text-xs">Memory limit (MB)</Label>
+									<Input
+										type="number"
+										min={1}
+										placeholder="burst"
+										value={res?.memoryMax ?? ""}
+										onChange={(e) =>
+											patchRes(name, { memoryMax: numOrUndef(e.target.value) })
+										}
+									/>
+								</div>
+							</div>
+
+							{independent &&
+								(autoOn ? (
 									<div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
 										<div className="space-y-1">
 											<Label className="text-xs">Min replicas</Label>
@@ -275,10 +342,10 @@ export const ShowServiceScaling = ({ composeId }: Props) => {
 											}
 										/>
 									</div>
-								)}
-							</div>
-						);
-					})}
+								))}
+						</div>
+					);
+				})}
 
 				<div>
 					<Button type="button" onClick={save} disabled={update.isPending}>
