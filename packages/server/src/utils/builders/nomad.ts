@@ -1587,7 +1587,7 @@ const generateConsulServices = (
 /**
  * Generate Traefik-compatible Consul tags for a specific port's domains
  */
-const generateConsulTags = (
+export const generateConsulTags = (
 	appName: string,
 	serviceName: string,
 	domains: Domain[],
