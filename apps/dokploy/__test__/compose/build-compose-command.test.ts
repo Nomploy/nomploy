@@ -29,16 +29,9 @@ const baseCompose = {
 // `docker stack deploy --with-registry-auth` ships no credentials to the swarm
 // and private-registry images fail to pull.
 describe("getBuildComposeCommand registry auth (#4401)", () => {
-	it("preserves HOME for swarm stack deploys", async () => {
-		const command = await getBuildComposeCommand({
-			...baseCompose,
-			composeType: "stack",
-		});
-
-		expect(command).toContain("stack deploy");
-		expect(command).toContain("--with-registry-auth");
-		expect(command).toContain('env -i PATH="$PATH" HOME="$HOME"');
-	});
+	// (Removed: "preserves HOME for swarm stack deploys" — the fork dropped Docker
+	// Swarm, so getBuildComposeCommand no longer emits `docker stack deploy`; the
+	// only compose path is docker-compose, covered above.)
 
 	it("preserves HOME for docker compose deploys", async () => {
 		const command = await getBuildComposeCommand({

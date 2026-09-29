@@ -28,8 +28,16 @@ describe("nomad database builder — DB → HCL", () => {
 		// pinned to its node (data lives in a node-local volume)
 		expect(hcl).toContain("node.unique.name");
 		expect(hcl).toContain('value     = "nomploy"');
-		// persistent data volume for the engine's data dir
-		expect(hcl).toContain('"myproj-pg-abc123-data:/var/lib/postgresql/data"');
+		// persistent data volume for the engine's data dir — a REAL docker named
+		// volume via a `mount { type = "volume" }` stanza (persists across restarts
+		// AND reschedules), NOT the old `volumes = ["name:/path"]` bind that Nomad
+		// wiped on every reschedule (regression guard for the v0.30.60 fix).
+		expect(hcl).toContain('type   = "volume"');
+		expect(hcl).toContain('source = "myproj-pg-abc123-data"');
+		expect(hcl).toContain('target = "/var/lib/postgresql/data"');
+		expect(hcl).not.toContain(
+			'"myproj-pg-abc123-data:/var/lib/postgresql/data"',
+		);
 		// engine image + static standard port so <appName>:5432 works cluster-wide
 		expect(hcl).toContain('image   = "postgres:16"');
 		expect(hcl).toContain("static = 5432");
