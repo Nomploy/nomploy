@@ -301,6 +301,18 @@ export const deployCompose = async ({
 		}
 
 		await updateDeploymentStatus(deployment.deploymentId, "done");
+		// Nomad-Pack: patch the just-deployed job's service(s) to provider=consul
+		// + Traefik tags so nomploy's consulCatalog routes the pack's domains
+		// pool-wide (packs default to Nomad-native registration, invisible to
+		// consulCatalog). See setup/pack-domains.
+		if (compose.composeType === "nomad-pack") {
+			const { applyPackDomains } = await import(
+				"@nomploy/server/setup/pack-domains"
+			);
+			await applyPackDomains(compose).catch((e) =>
+				console.error("pack domains apply failed:", e),
+			);
+		}
 		// Phase B: refresh Connect intentions so this project's mesh services
 		// (isolated) get their allow-rules; no-op for non-isolated orgs.
 		if (compose.environment.project.isolated) {
@@ -428,6 +440,18 @@ export const rebuildCompose = async ({
 		}
 
 		await updateDeploymentStatus(deployment.deploymentId, "done");
+		// Nomad-Pack: patch the just-deployed job's service(s) to provider=consul
+		// + Traefik tags so nomploy's consulCatalog routes the pack's domains
+		// pool-wide (packs default to Nomad-native registration, invisible to
+		// consulCatalog). See setup/pack-domains.
+		if (compose.composeType === "nomad-pack") {
+			const { applyPackDomains } = await import(
+				"@nomploy/server/setup/pack-domains"
+			);
+			await applyPackDomains(compose).catch((e) =>
+				console.error("pack domains apply failed:", e),
+			);
+		}
 		// Phase B: refresh Connect intentions so this project's mesh services
 		// (isolated) get their allow-rules; no-op for non-isolated orgs.
 		if (compose.environment.project.isolated) {
