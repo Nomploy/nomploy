@@ -1,4 +1,18 @@
+<div align="center">
+
+<img src="apps/dokploy/public/logo.svg" alt="nomploy logo" width="128" height="128" />
+
 # nomploy
+
+**Self-hostable PaaS on a HashiCorp Nomad cluster** — deploy apps & databases,
+HA clusters, autoscaling and load balancing, from a familiar UI.
+
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![Orchestrator: Nomad](https://img.shields.io/badge/orchestrator-Nomad-00CA8E?logo=hashicorp&logoColor=white)](https://www.nomadproject.io/)
+[![Fork of Dokploy](https://img.shields.io/badge/fork%20of-Dokploy-8B5CF6)](https://github.com/dokploy/dokploy)
+[![Packs: packs.nomploy.com](https://img.shields.io/badge/packs-packs.nomploy.com-2DD4BF)](https://packs.nomploy.com)
+
+</div>
 
 **nomploy** is a free, self-hostable Platform as a Service (PaaS) that deploys and
 manages your applications and databases on a **[HashiCorp Nomad](https://www.nomadproject.io/)**
