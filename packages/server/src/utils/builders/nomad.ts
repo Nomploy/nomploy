@@ -429,13 +429,20 @@ export const getBuildNomadPackCommand = (
 	compose: NomadComposeNested,
 ): string => {
 	const { COMPOSE_PATH } = paths(!!compose.serverId);
-	const { appName, composeFile, nomadPack, nomadPackRegistry } = compose;
+	const { appName, composeFile, nomadPack, nomadPackRegistry, nomadPackRef } =
+		compose;
 	const projectPath = join(COMPOSE_PATH, appName, "code");
 	const varFile = join(projectPath, `${appName}.vars.hcl`);
 
 	if (!nomadPack || !nomadPack.trim()) {
 		return 'echo "Error: no Nomad Pack specified"; exit 1';
 	}
+
+	// Pin the registry to a git ref (SHA/tag) so redeploys are reproducible —
+	// otherwise nomad-pack pulls the registry HEAD every time. Sanitized (git
+	// refs are [A-Za-z0-9._/-]); empty ref = latest (first deploy pins it).
+	const safeRef = (nomadPackRef ?? "").replace(/[^A-Za-z0-9._/-]/g, "");
+	const refFlag = safeRef ? ` --ref ${safeRef}` : "";
 
 	const hasVars = !!composeFile && composeFile.trim().length > 0;
 	const encodedVars = encodeBase64(composeFile || "");
@@ -447,8 +454,8 @@ export const getBuildNomadPackCommand = (
 	// re-deploy (registry already present) doesn't fail.
 	const registryName = "nomploy-custom";
 	const addRegistry = nomadPackRegistry
-		? `\tnomad-pack registry add ${registryName} "${nomadPackRegistry}" 2>&1 || true\n`
-		: "\tnomad-pack registry add default github.com/hashicorp/nomad-pack-community-registry 2>&1 || true\n";
+		? `\tnomad-pack registry add ${registryName} "${nomadPackRegistry}"${refFlag} 2>&1 || true\n`
+		: `\tnomad-pack registry add default github.com/hashicorp/nomad-pack-community-registry${refFlag} 2>&1 || true\n`;
 	const registryFlag = nomadPackRegistry ? ` --registry ${registryName}` : "";
 	const varFlag = hasVars ? ` --var-file="${varFile}"` : "";
 	const writeVars = hasVars
@@ -460,7 +467,7 @@ set -e
 {
 	command -v nomad-pack >/dev/null 2>&1 || { echo "Error: nomad-pack is not installed on this host. Nomad Pack deploys run on the control plane — deploy this compose without a specific server, or install nomad-pack on the target."; exit 1; }
 	mkdir -p "${projectPath}"
-${writeVars}${addRegistry}	nomad-pack run ${nomadPack}${registryFlag}${varFlag} --name "${appName}" 2>&1
+${writeVars}${addRegistry}	nomad-pack run ${nomadPack}${registryFlag}${refFlag}${varFlag} --name "${appName}" 2>&1
 	echo "Nomad Pack deployed"
 ${healthCheckSnippet(appName, "pack")}} || {
 	echo "Error: Nomad Pack deployment failed"

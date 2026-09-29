@@ -62,6 +62,10 @@ export const compose = pgTable("compose", {
 	nomadPack: text("nomadPack"),
 	// Optional custom pack registry: a git URL added via `nomad-pack registry add`.
 	nomadPackRegistry: text("nomadPackRegistry"),
+	// Pinned registry git ref (SHA/tag) the pack deploys from — set on first
+	// deploy so redeploys are reproducible instead of always pulling latest.
+	// Bumped explicitly via the "Upgrade pack" action (with a rendered diff).
+	nomadPackRef: text("nomadPackRef"),
 	// Nomad node pool (autoscaling group) to run this compose's services in.
 	// Null/"default" = the built-in default pool. Emitted as the job's `node_pool`.
 	nodePool: text("nodePool"),

@@ -1,0 +1,1 @@
+ALTER TABLE "compose" ADD COLUMN "nomadPackRef" text;

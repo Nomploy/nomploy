@@ -285,6 +285,20 @@ export const deployCompose = async ({
 			}
 		}
 
+		// Pin the pack to a concrete registry ref on first deploy so redeploys are
+		// reproducible (else nomad-pack pulls the registry HEAD every time). Upgrades
+		// bump this explicitly via the upgradePack action (with a rendered diff).
+		if (compose.composeType === "nomad-pack" && !compose.nomadPackRef) {
+			const { resolvePackHeadRef } = await import(
+				"@nomploy/server/setup/pack-version"
+			);
+			const ref = await resolvePackHeadRef(compose).catch(() => null);
+			if (ref) {
+				await updateCompose(composeId, { nomadPackRef: ref });
+				entity.nomadPackRef = ref;
+			}
+		}
+
 		command = "set -e;";
 		if (compose.composeType === "nomad-pack") {
 			command += getBuildNomadPackCommand(entity);
