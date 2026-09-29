@@ -452,10 +452,18 @@ export const getBuildNomadPackCommand = (
 	// `nomad-pack run <pack>` fails with "Failed To Find Pack" on a fresh host
 	// (e.g. right after a panel roll). Both adds tolerate a non-zero exit so a
 	// re-deploy (registry already present) doesn't fail.
-	const registryName = "nomploy-custom";
-	const addRegistry = nomadPackRegistry
-		? `\tnomad-pack registry add ${registryName} "${nomadPackRegistry}"${refFlag} 2>&1 || true\n`
-		: `\tnomad-pack registry add default github.com/hashicorp/nomad-pack-community-registry${refFlag} 2>&1 || true\n`;
+	const registryName = nomadPackRegistry ? "nomploy-custom" : "default";
+	const registryUrl = nomadPackRegistry
+		? `"${nomadPackRegistry}"`
+		: "github.com/hashicorp/nomad-pack-community-registry";
+	const addCmd = `nomad-pack registry add ${registryName} ${registryUrl}${refFlag} 2>&1 || true`;
+	// When pinned to a ref, `registry add` clones the whole registry every deploy —
+	// skip it if that exact ref is already in the local pack cache (the cache dir is
+	// named by the full ref). Big win for a large registry; safe because the ref is
+	// immutable. Unpinned (fallback) always re-adds to pull latest.
+	const addRegistry = safeRef
+		? `\t[ -d "$HOME/.cache/nomad/packs/${registryName}/${safeRef}" ] && echo "Registry ${registryName}@${safeRef.slice(0, 8)} cached" || ${addCmd}\n`
+		: `\t${addCmd}\n`;
 	const registryFlag = nomadPackRegistry ? ` --registry ${registryName}` : "";
 	const varFlag = hasVars ? ` --var-file="${varFile}"` : "";
 	const writeVars = hasVars
