@@ -367,7 +367,7 @@ export const startPackDomainsLoop = (intervalSeconds = 60): NodeJS.Timeout => {
 	const tick = async () => {
 		try {
 			const rows = await db.query.compose.findMany({
-				where: eq(composeTable.composeType, "nomadPack"),
+				where: eq(composeTable.composeType, "nomad-pack"),
 				columns: { appName: true, serverId: true },
 				with: { domains: true },
 			});
