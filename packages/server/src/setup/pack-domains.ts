@@ -1,11 +1,20 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
+import { eq } from "drizzle-orm";
 import { stringify } from "yaml";
 import { paths } from "../constants";
-import type {
+import { db } from "../db";
+import {
 	compose as composeTable,
-	domains as domainsTable,
+	type domains as domainsTable,
 } from "../db/schema";
+import { getDefaultCertResolver } from "../services/cert-resolver";
 import { encodeBase64 } from "../utils/docker/utils";
 import { execAsyncRemote } from "../utils/process/execAsync";
 
@@ -118,20 +127,129 @@ export const loadPackServices = async (
 	);
 };
 
-const resolverFor = (d: Domain): string =>
+/**
+ * Live backend URLs for each of a pack's services, resolved from Nomad — the
+ * running alloc's host address:port. Works whether the pack registers its
+ * service in Consul or Nomad's native registry (unlike a `<svc>.service.consul`
+ * backend, which needs the service in Consul). Returns serviceName →
+ * ["http://addr:port", …], one per running alloc (active/active). Node addresses
+ * are the wg-mesh IPs Nomad reports, reachable by Traefik on any pool node.
+ */
+export const resolvePackBackends = async (
+	appName: string,
+): Promise<Map<string, string[]>> => {
+	const out = new Map<string, string[]>();
+	let jobs: { ID: string; Meta?: Record<string, string> }[] = [];
+	try {
+		jobs =
+			await nomadFetch<{ ID: string; Meta?: Record<string, string> }[]>(
+				"/jobs?meta=true",
+			);
+	} catch {
+		return out;
+	}
+	const ids = jobs
+		.filter((j) => j.Meta?.["pack.deployment_name"] === appName)
+		.map((j) => j.ID);
+	if (!ids.length) return out;
+
+	let nodes: { ID: string; Address?: string }[] = [];
+	try {
+		nodes = await nomadFetch<{ ID: string; Address?: string }[]>("/nodes");
+	} catch {}
+	const nodeAddr = new Map(nodes.map((n) => [n.ID, n.Address ?? ""]));
+
+	type NomadPort = { Label?: string; Value?: number; To?: number };
+	type NomadSvc = { Name?: string; PortLabel?: string };
+	type AllocPort = { Label?: string; Value?: number; HostIP?: string };
+	for (const id of ids) {
+		// serviceName → portLabel, and portLabel → the spec's static/dynamic port.
+		const svcPortLabel = new Map<string, string>();
+		const specPortByLabel = new Map<string, number>();
+		try {
+			const job = await nomadFetch<{
+				TaskGroups?: {
+					Networks?: {
+						DynamicPorts?: NomadPort[];
+						ReservedPorts?: NomadPort[];
+					}[];
+					Services?: NomadSvc[];
+					Tasks?: { Services?: NomadSvc[] }[];
+				}[];
+			}>(`/job/${encodeURIComponent(id)}`);
+			for (const tg of job.TaskGroups ?? []) {
+				for (const net of tg.Networks ?? []) {
+					for (const p of [
+						...(net.ReservedPorts ?? []),
+						...(net.DynamicPorts ?? []),
+					]) {
+						if (p.Label) specPortByLabel.set(p.Label, p.Value || p.To || 0);
+					}
+				}
+				const svcs = [
+					...(tg.Services ?? []),
+					...(tg.Tasks ?? []).flatMap((t) => t.Services ?? []),
+				];
+				for (const s of svcs) {
+					if (s.Name && s.PortLabel) svcPortLabel.set(s.Name, s.PortLabel);
+				}
+			}
+		} catch {
+			continue;
+		}
+
+		let allocs: {
+			NodeID?: string;
+			ClientStatus?: string;
+			AllocatedResources?: { Shared?: { Ports?: AllocPort[] } };
+		}[] = [];
+		try {
+			allocs = await nomadFetch(`/job/${encodeURIComponent(id)}/allocations`);
+		} catch {}
+		for (const a of allocs) {
+			if (a.ClientStatus !== "running") continue;
+			const addr = nodeAddr.get(a.NodeID ?? "") || "";
+			if (!addr) continue;
+			const allocPorts = a.AllocatedResources?.Shared?.Ports ?? [];
+			for (const [svc, label] of svcPortLabel) {
+				// Prefer the alloc's allocated host port (bridge/dynamic networking);
+				// fall back to the node address + the spec's static port (host net).
+				const ap = allocPorts.find((p) => p.Label === label);
+				const host = ap?.HostIP || addr;
+				const port = ap?.Value || specPortByLabel.get(label) || 0;
+				if (!port) continue;
+				const url = `http://${host}:${port}`;
+				const list = out.get(svc) ?? [];
+				if (!list.includes(url)) list.push(url);
+				out.set(svc, list);
+			}
+		}
+	}
+	return out;
+};
+
+// `defaultResolver` is DNS-01 (letsencrypt-dns) when a DNS provider is enabled —
+// HTTP-01 can't work behind the HA pool. See services/cert-resolver.
+const resolverFor = (d: Domain, defaultResolver: string): string =>
 	d.certificateType === "custom" && d.customCertResolver
 		? d.customCertResolver
-		: "letsencrypt";
+		: defaultResolver;
 
 /**
  * Build a Traefik file-provider dynamic config that routes each of the pack's
- * domains to its Consul service. The backend is `<service>.service.consul:<port>`
- * so Consul resolves it to the currently-healthy alloc(s) — robust across
- * reschedules. HTTPS domains get a LE cert resolver + an HTTP→HTTPS redirect.
+ * domains to its service. The backend is the running alloc's real host
+ * address:port (resolved from Nomad via {@link resolvePackBackends}) — this works
+ * whether the pack uses Consul or Nomad-native service registration. Falls back
+ * to `<service>.service.consul:<port>` only when no live alloc is found (a
+ * Consul-registered pack that's briefly between allocs). Multiple running allocs
+ * become multiple backends (active/active). A reconcile loop rewrites this as
+ * allocs move. HTTPS domains get a LE cert resolver + an HTTP→HTTPS redirect.
  */
 export const buildPackDomainConfig = (
 	compose: Pick<Compose, "appName">,
 	domains: Domain[],
+	backends?: Map<string, string[]>,
+	defaultResolver = "letsencrypt",
 ): string | null => {
 	const routers: Record<string, unknown> = {};
 	const services: Record<string, unknown> = {};
@@ -148,9 +266,13 @@ export const buildPackDomainConfig = (
 				: `Host(\`${d.host}\`)`;
 		const https = d.certificateType && d.certificateType !== "none";
 
+		const live = backends?.get(d.serviceName) ?? [];
+		const servers = live.length
+			? live.map((url) => ({ url }))
+			: [{ url: `http://${d.serviceName}.service.consul:${port}` }];
 		services[base] = {
 			loadBalancer: {
-				servers: [{ url: `http://${d.serviceName}.service.consul:${port}` }],
+				servers,
 				passHostHeader: true,
 			},
 		};
@@ -166,7 +288,7 @@ export const buildPackDomainConfig = (
 				rule,
 				entryPoints: ["websecure"],
 				service: base,
-				tls: { certResolver: resolverFor(d) },
+				tls: { certResolver: resolverFor(d, defaultResolver) },
 			};
 		} else {
 			routers[base] = { rule, entryPoints: ["web"], service: base };
@@ -188,7 +310,20 @@ export const applyPackDomains = async (
 	const { DYNAMIC_TRAEFIK_PATH } = paths(!!compose.serverId);
 	const fileName = `${compose.appName}-pack.yml`;
 	const filePath = join(DYNAMIC_TRAEFIK_PATH, fileName);
-	const yaml = buildPackDomainConfig(compose, compose.domains ?? []);
+	// Resolve live alloc backends so routing works for Nomad-native pack services.
+	const backends = await resolvePackBackends(compose.appName).catch(
+		() => undefined,
+	);
+	// HTTP-01 can't work behind the pool — use the DNS-01 resolver when configured.
+	const defaultResolver = await getDefaultCertResolver().catch(
+		() => "letsencrypt",
+	);
+	const yaml = buildPackDomainConfig(
+		compose,
+		compose.domains ?? [],
+		backends,
+		defaultResolver,
+	);
 
 	if (compose.serverId) {
 		if (!yaml) {
@@ -211,6 +346,40 @@ export const applyPackDomains = async (
 		if (existsSync(filePath)) rmSync(filePath);
 		return;
 	}
+	// Skip the write when unchanged so the reconcile loop doesn't churn the file
+	// and make Traefik's file provider hot-reload every tick.
+	if (existsSync(filePath)) {
+		try {
+			if (readFileSync(filePath, "utf8") === yaml) return;
+		} catch {}
+	}
 	mkdirSync(DYNAMIC_TRAEFIK_PATH, { recursive: true });
 	writeFileSync(filePath, yaml);
+};
+
+/**
+ * Periodically rewrite every Nomad-Pack compose's domain routing so it follows
+ * its alloc(s) after a reschedule (the backend is the alloc's host address, which
+ * changes when it moves). Change-aware (applyPackDomains skips unchanged files),
+ * so it's cheap. Control-plane only; a no-op when no pack has domains.
+ */
+export const startPackDomainsLoop = (intervalSeconds = 60): NodeJS.Timeout => {
+	const tick = async () => {
+		try {
+			const rows = await db.query.compose.findMany({
+				where: eq(composeTable.composeType, "nomadPack"),
+				columns: { appName: true, serverId: true },
+				with: { domains: true },
+			});
+			for (const c of rows) {
+				if (!c.domains?.length) continue;
+				await applyPackDomains(c).catch((e) =>
+					console.error(`pack-domains: ${c.appName} reconcile failed:`, e),
+				);
+			}
+		} catch (e) {
+			console.error("pack-domains: reconcile loop error:", e);
+		}
+	};
+	return setInterval(tick, intervalSeconds * 1000);
 };

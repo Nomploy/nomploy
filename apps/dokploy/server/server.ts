@@ -136,6 +136,13 @@ void (async () => {
 					// store every 5 min (change-aware, so it's a no-op when unchanged) —
 					// a freshly-issued cert reaches the pool within minutes, not hours.
 					startLoadBalancerCertSyncLoop(5);
+					// Keep Nomad-Pack domain routing pointed at each pack's live alloc
+					// address (packs may use Nomad-native service registration, invisible
+					// to Consul-catalog routing) and follow reschedules.
+					const { startPackDomainsLoop } = await import(
+						"@nomploy/server/setup/pack-domains"
+					);
+					startPackDomainsLoop(60);
 					// Evaluate user-defined metric alert rules and notify on transitions.
 					const { startAlertLoop } = await import(
 						"@nomploy/server/services/alerts"
