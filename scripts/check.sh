@@ -57,6 +57,6 @@ fi
 if [ "$fail" = 0 ]; then
   echo "✅ checks passed — safe to release"
 else
-  echo "❌ server prod build failed — fix before releasing (CI would fail too)"
+  echo "❌ checks failed (server build or tests) — fix before releasing (CI would fail too)"
   exit 1
 fi
