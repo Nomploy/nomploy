@@ -29,6 +29,19 @@ fi
 # Always restore dev exports, even if the build failed (switch:prod left dist mode).
 pnpm --filter @nomploy/server switch:dev >/dev/null 2>&1 || true
 
+# ── GATE: the vitest suite (486+ tests; ~15s). Run with --config explicitly —
+# there's no root vitest config, so a bare `vitest run` would skip the
+# @nomploy/server alias and fail to resolve. Tests use src (dev exports), so run
+# after switch:dev above.
+echo "▶ tests (vitest run)…"
+if (cd "$root/apps/dokploy" && pnpm exec vitest run --config __test__/vitest.config.ts) >/tmp/nomploy-check-test.log 2>&1; then
+  echo "  ✓ tests passed ($(sed -E 's/\x1b\[[0-9;]*m//g' /tmp/nomploy-check-test.log | grep -oE 'Tests +[0-9]+ passed' | tail -1))"
+else
+  echo "  ✗ tests FAILED:"
+  grep -iE "✗|×|FAIL |AssertionError|Error:|Tests +.*failed" /tmp/nomploy-check-test.log | head -20
+  fail=1
+fi
+
 # ── INFO: the app (Next.js) build has `typescript.ignoreBuildErrors: true`, so CI
 # does NOT type-check the app — these never fail a release. We still surface them
 # (use `pnpm exec tsc`, NOT `npx tsc`: from the repo root npx resolves a stray
