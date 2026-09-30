@@ -612,6 +612,74 @@ export const pointDomainAtLb = async (
 	});
 };
 
+export type DomainDnsState =
+	| "disabled" // no LB / auto-point off — DNS is entirely the user's job
+	| "unmanaged" // zone not on a connected DNS provider — set DNS manually
+	| "apex_manual" // zone root — nomploy never edits it; set A records yourself
+	| "pointed" // CNAME → LB is in place
+	| "pending" // no records yet; will be pointed on the next reconcile
+	| "conflict"; // user-managed records exist — nomploy refuses to overwrite them
+
+/**
+ * Read-only classification of a host's auto-point status, for the UI. Mirrors the
+ * decisions {@link pointDomainAtLb} makes so the panel can show WHY a domain is or
+ * isn't pointed — especially the "conflict" case where nomploy declines to clobber
+ * existing user records.
+ */
+export const getDomainDnsPointStatus = async (
+	organizationId: string,
+	host: string,
+): Promise<{ state: DomainDnsState; target?: string; detail?: string }> => {
+	const lb = await db.query.loadBalancer.findFirst({
+		where: eq(loadBalancer.organizationId, organizationId),
+	});
+	if (!lb?.hostname || !lb.autoPointDomains) return { state: "disabled" };
+	if (!host || host === lb.hostname) return { state: "pointed" };
+	const zone = await resolveZoneForHost(organizationId, host);
+	if (!zone) {
+		return {
+			state: "unmanaged",
+			target: lb.hostname,
+			detail:
+				"This zone isn't on a connected DNS provider, so point it manually.",
+		};
+	}
+	if (host === zone.zoneName) {
+		return {
+			state: "apex_manual",
+			target: lb.hostname,
+			detail:
+				"Zone apex — nomploy never edits the root; set A records to the LB IPs yourself.",
+		};
+	}
+	let existing: CfRecord[];
+	try {
+		existing = await cf<CfRecord[]>(
+			zone.token,
+			`/zones/${zone.zoneId}/dns_records?name=${encodeURIComponent(host)}&per_page=100`,
+		);
+	} catch {
+		return { state: "unmanaged", target: lb.hostname };
+	}
+	if (existing.some((r) => r.type === "CNAME" && r.content === lb.hostname)) {
+		return { state: "pointed", target: lb.hostname };
+	}
+	const isOurs = (r: CfRecord): boolean =>
+		r.comment === NOMPLOY_DNS_COMMENT ||
+		(r.type === "CNAME" && r.content === lb.hostname);
+	const conflicting = existing.filter(
+		(r) => ["A", "AAAA", "CNAME"].includes(r.type) && !isOurs(r),
+	);
+	if (conflicting.length > 0) {
+		return {
+			state: "conflict",
+			target: lb.hostname,
+			detail: conflicting.map((r) => `${r.type} → ${r.content}`).join(", "),
+		};
+	}
+	return { state: "pending", target: lb.hostname };
+};
+
 /** Remove the auto-created CNAME for a host (only if it points at the LB). */
 export const unpointDomain = async (
 	organizationId: string,

@@ -18,6 +18,7 @@ import {
 } from "@nomploy/server";
 import { checkServicePermissionAndAccess } from "@nomploy/server/services/permission";
 import {
+	getDomainDnsPointStatus,
 	pointDomainAtLb,
 	unpointDomain,
 } from "@nomploy/server/setup/loadbalancer-dns";
@@ -191,6 +192,21 @@ export const domainRouter = createTRPCRouter({
 		}
 		return domain;
 	}),
+	dnsStatus: protectedProcedure
+		.input(apiFindDomain)
+		.query(async ({ input, ctx }) => {
+			const domain = await findDomainById(input.domainId);
+			const serviceId = domain.applicationId || domain.composeId;
+			if (serviceId) {
+				await checkServicePermissionAndAccess(ctx, serviceId, {
+					domain: ["read"],
+				});
+			}
+			return getDomainDnsPointStatus(
+				ctx.session.activeOrganizationId,
+				domain.host,
+			);
+		}),
 	delete: protectedProcedure
 		.input(apiFindDomain)
 		.mutation(async ({ input, ctx }) => {

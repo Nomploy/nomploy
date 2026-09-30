@@ -10,6 +10,7 @@ import {
 	type VisibilityState,
 } from "@tanstack/react-table";
 import {
+	AlertTriangle,
 	CheckCircle2,
 	ChevronDown,
 	ExternalLink,
@@ -62,6 +63,61 @@ import { api } from "@/utils/api";
 import { createColumns } from "./columns";
 import { DnsHelperModal } from "./dns-helper-modal";
 import { AddDomain } from "./handle-domain";
+
+const DNS_BADGE: Record<string, { label: string; cls: string }> = {
+	pointed: {
+		label: "DNS → LB",
+		cls: "border-emerald-500/40 text-emerald-600 dark:text-emerald-400",
+	},
+	pending: {
+		label: "DNS pending",
+		cls: "border-amber-500/40 text-amber-600 dark:text-amber-400",
+	},
+	conflict: {
+		label: "DNS conflict",
+		cls: "border-destructive/40 text-destructive",
+	},
+	apex_manual: {
+		label: "Apex (manual)",
+		cls: "border-muted-foreground/30 text-muted-foreground",
+	},
+	unmanaged: {
+		label: "DNS: manual",
+		cls: "border-muted-foreground/30 text-muted-foreground",
+	},
+};
+
+/**
+ * Live LoadBalancer auto-point status for a domain — most importantly surfaces the
+ * "conflict" case where nomploy refuses to overwrite existing user DNS records
+ * (see getDomainDnsPointStatus / pointDomainAtLb).
+ */
+const DomainDnsBadge = ({
+	domainId,
+	host,
+}: {
+	domainId: string;
+	host: string;
+}) => {
+	const skip = host.includes("sslip.io");
+	const { data } = api.domain.dnsStatus.useQuery(
+		{ domainId },
+		{ enabled: !skip, refetchInterval: 30000 },
+	);
+	if (skip || !data || data.state === "disabled") return null;
+	const b = DNS_BADGE[data.state];
+	if (!b) return null;
+	const title =
+		data.state === "conflict"
+			? `Existing DNS records (${data.detail}) were not created by nomploy, so it won't overwrite them. Repoint the host to ${data.target} yourself.`
+			: data.detail;
+	return (
+		<Badge variant="outline" className={`w-fit ${b.cls}`} title={title}>
+			{data.state === "conflict" && <AlertTriangle className="size-3 mr-1" />}
+			{b.label}
+		</Badge>
+	);
+};
 
 export type ValidationState = {
 	isLoading: boolean;
@@ -418,12 +474,18 @@ export const ShowDomains = ({ id, type }: Props) => {
 											<div className="flex flex-col gap-4">
 												{/* Service & Domain Info */}
 												<div className="flex items-center justify-between flex-wrap gap-y-2">
-													{item.serviceName && (
-														<Badge variant="outline" className="w-fit">
-															<Server className="size-3 mr-1" />
-															{item.serviceName}
-														</Badge>
-													)}
+													<div className="flex items-center gap-2 flex-wrap">
+														{item.serviceName && (
+															<Badge variant="outline" className="w-fit">
+																<Server className="size-3 mr-1" />
+																{item.serviceName}
+															</Badge>
+														)}
+														<DomainDnsBadge
+															domainId={item.domainId}
+															host={item.host}
+														/>
+													</div>
 													<div className="flex gap-2 flex-wrap">
 														{!item.host.includes("sslip.io") && (
 															<DnsHelperModal
