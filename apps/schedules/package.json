@@ -13,7 +13,7 @@
 		"@hono/zod-validator": "0.7.6",
 		"bullmq": "5.67.3",
 		"dotenv": "^16.4.5",
-		"drizzle-orm": "0.45.1",
+		"drizzle-orm": "0.45.3",
 		"hono": "^4.11.7",
 		"ioredis": "5.4.1",
 		"pino": "9.4.0",

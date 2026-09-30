@@ -55,12 +55,32 @@ export const DockerTerminal: React.FC<Props> = ({
 		term.loadAddon(addonFit);
 		addonFit.fit();
 
+		// Minimal images (nginx, alpine, distroless-ish) often have no `bash`, so a
+		// default bash exec fails with "executable file not found". Detect that and
+		// transparently reconnect with /bin/sh instead of leaving the user staring at
+		// an error (they'd otherwise have to know to flip the toggle themselves).
+		let fellBack = false;
+		const sniffForMissingBash = async (ev: MessageEvent) => {
+			if (fellBack || activeWay !== "bash") return;
+			let text = "";
+			if (typeof ev.data === "string") text = ev.data;
+			else if (ev.data instanceof Blob) text = await ev.data.text();
+			else if (ev.data instanceof ArrayBuffer)
+				text = new TextDecoder().decode(ev.data);
+			if (/executable file not found|exec: "?bash/i.test(text)) {
+				fellBack = true;
+				setActiveWay("sh");
+			}
+		};
+		ws.addEventListener("message", sniffForMissingBash);
+
 		ws.onopen = () => {
 			const addonAttach = new AttachAddon(ws);
 			term.loadAddon(addonAttach);
 		};
 
 		return () => {
+			ws.removeEventListener("message", sniffForMissingBash);
 			ws.readyState === WebSocket.OPEN && ws.close();
 		};
 		// taskName/serverId/wsPath are part of the WS URL — without them here,
