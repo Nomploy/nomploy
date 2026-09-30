@@ -276,7 +276,13 @@ const Service = (
 												<TabsTrigger value="monitoring">Monitoring</TabsTrigger>
 											)}
 											{permissions?.service.create && (
-												<TabsTrigger value="advanced">Advanced</TabsTrigger>
+												<>
+													<TabsTrigger value="scaling">Scaling</TabsTrigger>
+													<TabsTrigger value="resources">Resources</TabsTrigger>
+													<TabsTrigger value="storage">Storage</TabsTrigger>
+													<TabsTrigger value="network">Network</TabsTrigger>
+													<TabsTrigger value="advanced">Advanced</TabsTrigger>
+												</>
 											)}
 										</TabsList>
 									</div>
@@ -412,43 +418,67 @@ const Service = (
 										</div>
 									</TabsContent>
 									{permissions?.service.create && (
-										<TabsContent value="advanced">
-											<div className="flex flex-col gap-4 pt-2.5">
-												<AddCommand applicationId={applicationId} />
-												<ShowClusterSettings
-													id={applicationId}
-													type="application"
-												/>
-												<ShowApplicationAutoscaling
-													applicationId={applicationId}
-												/>
-												<ShowNomadScaling
-													appName={data?.appName || ""}
-													serverId={data?.serverId || undefined}
-												/>
-												<ServiceMetricsGraph
-													appName={data?.appName || ""}
-													serverId={data?.serverId || undefined}
-												/>
-												<ScheduleScale id={applicationId} type="application" />
-												<ShowDeployStrategy
-													applicationId={applicationId}
-													appName={data?.appName || undefined}
-													serverId={data?.serverId || undefined}
-												/>
-												<ShowVersionHistory
-													appName={data?.appName || undefined}
-													serverId={data?.serverId || undefined}
-												/>
-												<ShowBuildServer applicationId={applicationId} />
-												<ShowResources id={applicationId} type="application" />
-												<ShowVolumes id={applicationId} type="application" />
-												<ShowRedirects applicationId={applicationId} />
-												<ShowSecurity applicationId={applicationId} />
-												<ShowPorts applicationId={applicationId} />
-												<ShowTraefikConfig applicationId={applicationId} />
-											</div>
-										</TabsContent>
+										<>
+											<TabsContent value="scaling">
+												<div className="flex flex-col gap-4 pt-2.5">
+													<ShowClusterSettings
+														id={applicationId}
+														type="application"
+													/>
+													<ShowApplicationAutoscaling
+														applicationId={applicationId}
+													/>
+													<ShowNomadScaling
+														appName={data?.appName || ""}
+														serverId={data?.serverId || undefined}
+													/>
+													<ScheduleScale
+														id={applicationId}
+														type="application"
+													/>
+												</div>
+											</TabsContent>
+											<TabsContent value="resources">
+												<div className="flex flex-col gap-4 pt-2.5">
+													<ShowResources
+														id={applicationId}
+														type="application"
+													/>
+													<ServiceMetricsGraph
+														appName={data?.appName || ""}
+														serverId={data?.serverId || undefined}
+													/>
+												</div>
+											</TabsContent>
+											<TabsContent value="storage">
+												<div className="flex flex-col gap-4 pt-2.5">
+													<ShowVolumes id={applicationId} type="application" />
+												</div>
+											</TabsContent>
+											<TabsContent value="network">
+												<div className="flex flex-col gap-4 pt-2.5">
+													<ShowPorts applicationId={applicationId} />
+													<ShowRedirects applicationId={applicationId} />
+													<ShowSecurity applicationId={applicationId} />
+													<ShowTraefikConfig applicationId={applicationId} />
+												</div>
+											</TabsContent>
+											<TabsContent value="advanced">
+												<div className="flex flex-col gap-4 pt-2.5">
+													<AddCommand applicationId={applicationId} />
+													<ShowDeployStrategy
+														applicationId={applicationId}
+														appName={data?.appName || undefined}
+														serverId={data?.serverId || undefined}
+													/>
+													<ShowVersionHistory
+														appName={data?.appName || undefined}
+														serverId={data?.serverId || undefined}
+													/>
+													<ShowBuildServer applicationId={applicationId} />
+												</div>
+											</TabsContent>
+										</>
 									)}
 								</Tabs>
 							)}
