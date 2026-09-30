@@ -9,6 +9,7 @@ import { getAdvancedStats } from "@nomploy/server/monitoring/utils";
 import { syncIntentionsForOrg } from "@nomploy/server/setup/nomad-connect";
 import { getBuildCommand } from "@nomploy/server/utils/builders";
 import {
+	assertBuiltImageRunnable,
 	getBuildNomadApplicationCommand,
 	NOMAD_APP_SERVICE_NAME,
 } from "@nomploy/server/utils/builders/nomad-application";
@@ -191,6 +192,7 @@ export const deployApplication = async ({
 	});
 
 	try {
+		assertBuiltImageRunnable(application);
 		let command = "set -e;";
 		if (application.sourceType === "github") {
 			command += await cloneGithubRepository(applicationEntity);
@@ -321,6 +323,7 @@ export const rebuildApplication = async ({
 	});
 
 	try {
+		assertBuiltImageRunnable(application);
 		let command = "set -e;";
 		// Check case for docker only
 		command += await getBuildCommand(application);

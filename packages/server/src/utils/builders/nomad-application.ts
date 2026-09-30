@@ -37,6 +37,37 @@ export const resolveApplicationImage = (
 };
 
 /**
+ * Guard a built-from-source deploy: without a registry the image is a bare local
+ * tag (`<appName>:latest`) that Nomad's docker driver tries to PULL by name and
+ * can't find ("pull access denied / repository does not exist") — even on the
+ * build node — so the alloc dies. Throw an actionable error up-front instead of
+ * building for minutes and failing silently at runtime. No-op for docker-source
+ * apps (already a remote image) and when any registry is set.
+ */
+export const assertBuiltImageRunnable = (application: {
+	name: string;
+	appName: string;
+	sourceType: string;
+	registryId?: string | null;
+	buildRegistryId?: string | null;
+}): void => {
+	if (
+		application.sourceType !== "docker" &&
+		!application.registryId &&
+		!application.buildRegistryId
+	) {
+		throw new Error(
+			`No container registry is configured for "${application.name}". ` +
+				`This app builds its image from source (${application.sourceType}), and Nomad ` +
+				"pulls images by name across the cluster — a locally-built image " +
+				`(${application.appName}:latest) can't be pulled, so the allocation would fail. ` +
+				`Add a registry in Settings → Registry and select it under the app's ` +
+				"Advanced → Registry, then redeploy.",
+		);
+	}
+};
+
+/**
  * Map an application (its Swarm-era fields) onto a single Nomad service spec,
  * reusing the compose builder's HCL generation.
  */
@@ -241,8 +272,17 @@ ${
 	echo "Image pushed to registry: ✅"
 `
 		: ""
-}	nomad job run "${jobFilePath}" 2>&1
-	echo "Nomad Job Deployed: ✅"
+}	# \`nomad job run\` (no -detach) monitors the deployment and exits non-zero if it
+	# fails (e.g. a progress-deadline timeout when allocs never turn healthy). Test its
+	# exit code explicitly: inside a \`{ } ||\` block \`set -e\` is suppressed, so a bare
+	# \`nomad job run\` followed by an unconditional success echo would report a FAILED
+	# deployment as "done". Gate the success echo on the real result instead.
+	if nomad job run "${jobFilePath}" 2>&1; then
+		echo "Nomad Job Deployed: ✅"
+	else
+		echo "Error: ❌ Nomad deployment did not become healthy (see the events above)"
+		exit 1
+	fi
 } || {
 	echo "Error: ❌ Nomad deployment failed"
 	exit 1
