@@ -1,6 +1,14 @@
 import { format } from "date-fns";
 import { BarChart3 } from "lucide-react";
-import { CartesianGrid, Line, LineChart, ReferenceLine, YAxis } from "recharts";
+import { useState } from "react";
+import {
+	CartesianGrid,
+	Line,
+	LineChart,
+	ReferenceLine,
+	XAxis,
+	YAxis,
+} from "recharts";
 import {
 	Card,
 	CardContent,
@@ -14,7 +22,29 @@ import {
 	ChartTooltip,
 	ChartTooltipContent,
 } from "@/components/ui/chart";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { api } from "@/utils/api";
+import { buildSeries, clipSeries, type Ev } from "./autoscaling-series";
+
+const MIN = 60_000;
+const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
+// Time windows for the instances-over-time charts. `null` = all reconstructed
+// history (no clipping).
+const RANGES: { label: string; ms: number | null }[] = [
+	{ label: "1h", ms: HOUR },
+	{ label: "6h", ms: 6 * HOUR },
+	{ label: "24h", ms: DAY },
+	{ label: "7d", ms: 7 * DAY },
+	{ label: "30d", ms: 30 * DAY },
+	{ label: "All", ms: null },
+];
 
 // tRPC inference for these nomad procedures degrades to `{}` (known quirk), so
 // cast to exactly what we read.
@@ -31,45 +61,9 @@ interface GroupConfig {
 	minNodes: number;
 	maxNodes: number;
 }
-interface Ev {
-	type: string;
-	createdAt: string;
-	groupId?: string | null;
-}
-
 const chartConfig = {
 	count: { label: "Running", color: "hsl(var(--chart-1))" },
 } satisfies ChartConfig;
-
-/**
- * Reconstruct a group's running-node count over time from the autoscaler event
- * log. recordEvent is the single chokepoint for every scale action, so walking
- * the scale_up/scale_down events backward from the current count yields an
- * accurate step timeline — no separate time-series store needed. (Manual/
- * provider-side changes outside the autoscaler aren't captured; a sampled series
- * is the more robust follow-up.)
- */
-const buildSeries = (
-	currentCount: number,
-	events: Ev[], // newest-first, already filtered to this group
-): Array<{ t: number; count: number }> => {
-	const scale = events.filter(
-		(e) => e.type === "scale_up" || e.type === "scale_down",
-	);
-	let count = currentCount;
-	const pts: Array<{ t: number; count: number }> = [{ t: Date.now(), count }];
-	for (const e of scale) {
-		const t = new Date(e.createdAt).getTime();
-		pts.push({ t, count: Math.max(0, count) });
-		// Value before this event (older interval).
-		count = e.type === "scale_up" ? count - 1 : count + 1;
-	}
-	if (scale.length > 0) {
-		const oldest = new Date(scale[scale.length - 1]!.createdAt).getTime();
-		pts.push({ t: oldest - 1000, count: Math.max(0, count) });
-	}
-	return pts.sort((a, b) => a.t - b.t);
-};
 
 export const ShowAutoscalingGraphs = () => {
 	const { data: statusRaw } = api.nomad.getAutoscalerStatus.useQuery(
@@ -82,11 +76,18 @@ export const ShowAutoscalingGraphs = () => {
 	// Graphs plot count-over-time, so fetch a wide window of history (not the
 	// paginated 10 the Activity feed uses).
 	const { data: eventsRaw } = api.nomad.getAutoscalerEvents.useQuery(
-		{ limit: 100 },
+		{ limit: 200 },
 		{
 			refetchInterval: 30000,
 		},
 	);
+
+	const [rangeLabel, setRangeLabel] = useState("7d");
+	const rangeMs = RANGES.find((r) => r.label === rangeLabel)?.ms ?? null;
+	const now = Date.now();
+	const from = rangeMs === null ? null : now - rangeMs;
+	// <=24h windows read as clock times; longer windows as calendar days.
+	const tickFmt = rangeMs !== null && rangeMs <= DAY ? "HH:mm" : "MMM d";
 
 	const status = (statusRaw ?? []) as GroupStatus[];
 	const groups = (groupsRaw ?? []) as GroupConfig[];
@@ -98,22 +99,42 @@ export const ShowAutoscalingGraphs = () => {
 	return (
 		<Card className="bg-background">
 			<CardHeader>
-				<CardTitle className="flex items-center gap-2 text-xl">
-					<BarChart3 className="size-5" />
-					Autoscaling — instances over time
-				</CardTitle>
-				<CardDescription>
-					Running nodes per autoscaling group, reconstructed from scale
-					activity, against each group's min/max bounds.
-				</CardDescription>
+				<div className="flex flex-wrap items-start justify-between gap-3">
+					<div className="space-y-1.5">
+						<CardTitle className="flex items-center gap-2 text-xl">
+							<BarChart3 className="size-5" />
+							Autoscaling — instances over time
+						</CardTitle>
+						<CardDescription>
+							Running nodes per autoscaling group, reconstructed from scale
+							activity, against each group's min/max bounds.
+						</CardDescription>
+					</div>
+					<Select value={rangeLabel} onValueChange={setRangeLabel}>
+						<SelectTrigger className="w-24" aria-label="Time range">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							{RANGES.map((r) => (
+								<SelectItem key={r.label} value={r.label}>
+									{r.label}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				</div>
 			</CardHeader>
 			<CardContent className="grid gap-6 lg:grid-cols-2">
 				{enabled.map((g) => {
 					const st = status.find((s) => s.groupId === g.groupId);
 					const current = st?.decision?.workerCount ?? st?.nodes?.length ?? 0;
-					const series = buildSeries(
-						current,
-						events.filter((e) => e.groupId === g.groupId),
+					const series = clipSeries(
+						buildSeries(
+							current,
+							events.filter((e) => e.groupId === g.groupId),
+						),
+						from,
+						now,
 					);
 					// Headroom above max so the max line isn't clipped at the top.
 					const yMax = Math.max(g.maxNodes, current) + 1;
@@ -131,6 +152,19 @@ export const ShowAutoscalingGraphs = () => {
 									margin={{ top: 6, right: 8, left: 0, bottom: 0 }}
 								>
 									<CartesianGrid vertical={false} />
+									<XAxis
+										dataKey="t"
+										type="number"
+										scale="time"
+										domain={
+											from === null ? ["dataMin", "dataMax"] : [from, now]
+										}
+										tickLine={false}
+										axisLine={false}
+										tickMargin={8}
+										minTickGap={40}
+										tickFormatter={(v) => format(new Date(v), tickFmt)}
+									/>
 									<YAxis
 										tickLine={false}
 										axisLine={false}
