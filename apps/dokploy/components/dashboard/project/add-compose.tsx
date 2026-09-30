@@ -46,9 +46,11 @@ import { api } from "@/utils/api";
 import { APP_NAME_MESSAGE, APP_NAME_REGEX } from "@/utils/schema";
 
 const AddComposeSchema = z.object({
-	composeType: z
-		.enum(["docker-compose", "stack", "nomad", "nomad-pack"])
-		.optional(),
+	// Only Nomad-native types are creatable. The "Nomad" type already accepts a
+	// docker-compose file (translated to a Nomad job), so the legacy host-level
+	// "docker-compose"/"stack" paths are not offered — the enum keeps them for
+	// any pre-existing services.
+	composeType: z.enum(["nomad", "nomad-pack"]).optional(),
 	name: z.string().min(1, {
 		message: "Name is required",
 	}),
@@ -288,10 +290,6 @@ export const AddCompose = ({ environmentId, projectName }: Props) => {
 												Nomad (compose or HCL jobspec) — recommended
 											</SelectItem>
 											<SelectItem value="nomad-pack">Nomad Pack</SelectItem>
-											<SelectItem value="docker-compose">
-												Docker Compose (legacy — runs on host, not scheduled by
-												Nomad, no HA)
-											</SelectItem>
 										</SelectContent>
 									</Select>
 									<FormMessage />
