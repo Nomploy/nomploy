@@ -45,7 +45,11 @@ export const generateZotConfig = (s3: ZotS3Config): string =>
 				dedupe: false,
 				storageDriver: {
 					name: "s3",
-					rootdirectory: s3.rootDirectory,
+					// The distribution S3 driver requires an ABSOLUTE key prefix
+					// ("invalid path" otherwise), so normalize a leading slash.
+					rootdirectory: s3.rootDirectory.startsWith("/")
+						? s3.rootDirectory
+						: `/${s3.rootDirectory}`,
 					region: s3.region,
 					regionendpoint: s3.endpoint,
 					bucket: s3.bucket,
