@@ -38,24 +38,40 @@ export const SelfHostedActions = ({
 	registryId: string;
 	url: string;
 }) => {
+	const utils = api.useUtils();
 	const [open, setOpen] = useState(false);
 	const { data: creds } = api.registry.selfHostedCredentials.useQuery(
 		{ registryId },
 		{ enabled: open },
 	);
 
+	// zot's UI uses htpasswd Basic auth — a plain link lands on a login prompt. Fetch
+	// the creds on click and open an auth-carrying URL so the user lands signed in.
+	const openUI = async () => {
+		try {
+			const c = await utils.registry.selfHostedCredentials.fetch({
+				registryId,
+			});
+			const auth = `${encodeURIComponent(c.username)}:${encodeURIComponent(c.password)}`;
+			window.open(`https://${auth}@${c.url}`, "_blank", "noopener,noreferrer");
+		} catch {
+			window.open(`https://${url}`, "_blank", "noopener,noreferrer");
+			toast.error(
+				"Couldn't fetch credentials — open the key icon to copy them",
+			);
+		}
+	};
+
 	return (
 		<>
-			<a
-				href={`https://${url}`}
-				target="_blank"
-				rel="noreferrer"
-				title="Open registry UI (browse images)"
+			<Button
+				variant="ghost"
+				size="icon"
+				onClick={openUI}
+				title="Open registry UI (signed in)"
 			>
-				<Button variant="ghost" size="icon">
-					<ExternalLink className="size-4 text-muted-foreground" />
-				</Button>
-			</a>
+				<ExternalLink className="size-4 text-muted-foreground" />
+			</Button>
 			<Dialog open={open} onOpenChange={setOpen}>
 				<DialogTrigger asChild>
 					<Button variant="ghost" size="icon" title="Registry credentials">
