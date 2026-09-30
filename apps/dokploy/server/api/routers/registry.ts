@@ -4,12 +4,14 @@ import {
 	execFileAsync,
 	findRegistryById,
 	IS_CLOUD,
+	provisionSelfHostedRegistry,
 	removeRegistry,
 	updateRegistry,
 } from "@nomploy/server";
 import { db } from "@nomploy/server/db";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { audit } from "@/server/api/utils/audit";
 import {
 	apiCreateRegistry,
@@ -31,6 +33,34 @@ export const registryRouter = createTRPCRouter({
 				resourceType: "registry",
 				resourceId: reg.registryId,
 				resourceName: reg.registryName,
+			});
+			return reg;
+		}),
+	createSelfHosted: withPermission("registry", "create")
+		.input(
+			z.object({
+				registryName: z.string().min(1),
+				// hostname[:port] — the registry's public TLS endpoint.
+				domain: z
+					.string()
+					.regex(
+						/^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?(:\d{1,5})?$/,
+						"Enter a valid hostname (e.g. registry.example.com)",
+					),
+				destinationId: z.string().min(1),
+				imagePrefix: z.string().nullish(),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			const reg = await provisionSelfHostedRegistry(
+				input,
+				ctx.session.activeOrganizationId,
+			);
+			await audit(ctx, {
+				action: "create",
+				resourceType: "registry",
+				resourceId: reg?.registryId ?? "",
+				resourceName: reg?.registryName ?? input.registryName,
 			});
 			return reg;
 		}),
