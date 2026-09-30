@@ -55,7 +55,17 @@ type CfResult<T> = {
 	errors?: { message: string }[];
 };
 type CfZone = { id: string; name: string };
-type CfRecord = { id: string; type: string; name: string; content: string };
+type CfRecord = {
+	id: string;
+	type: string;
+	name: string;
+	content: string;
+	comment?: string | null;
+};
+
+// Stamped on every DNS record nomploy creates, so auto-point only ever
+// replaces/removes its OWN records and never clobbers a user-managed one.
+const NOMPLOY_DNS_COMMENT = "managed-by-nomploy (LoadBalancer auto-point)";
 
 const cf = async <T>(
 	token: string,
@@ -563,12 +573,31 @@ export const pointDomainAtLb = async (
 	if (existing.some((r) => r.type === "CNAME" && r.content === lb.hostname)) {
 		return; // already pointed
 	}
-	for (const r of existing) {
-		if (["A", "AAAA", "CNAME"].includes(r.type)) {
-			await cf(zone.token, `/zones/${zone.zoneId}/dns_records/${r.id}`, {
-				method: "DELETE",
-			});
-		}
+	// A record is "ours" only if nomploy created it: our comment marker, or a CNAME
+	// already aimed at the LB (covers records made before the marker existed). Any
+	// OTHER A/AAAA/CNAME is user-managed — refuse to overwrite it (that's how a
+	// stray domain-add could wipe a live record for another site). Skip + warn
+	// instead; the user repoints it deliberately.
+	const isOurs = (r: CfRecord): boolean =>
+		r.comment === NOMPLOY_DNS_COMMENT ||
+		(r.type === "CNAME" && r.content === lb.hostname);
+	const conflicting = existing.filter(
+		(r) => ["A", "AAAA", "CNAME"].includes(r.type) && !isOurs(r),
+	);
+	if (conflicting.length > 0) {
+		console.warn(
+			`pointDomainAtLb: refusing to auto-point ${host} — it already has DNS ` +
+				`records not created by nomploy (${conflicting
+					.map((r) => `${r.type}→${r.content}`)
+					.join(", ")}). Repoint it manually to ${lb.hostname}.`,
+		);
+		return;
+	}
+	// Only our own leftovers get replaced.
+	for (const r of existing.filter(isOurs)) {
+		await cf(zone.token, `/zones/${zone.zoneId}/dns_records/${r.id}`, {
+			method: "DELETE",
+		});
 	}
 	await cf(zone.token, `/zones/${zone.zoneId}/dns_records`, {
 		method: "POST",
@@ -578,6 +607,7 @@ export const pointDomainAtLb = async (
 			content: lb.hostname,
 			ttl: 60,
 			proxied: false,
+			comment: NOMPLOY_DNS_COMMENT,
 		}),
 	});
 };
