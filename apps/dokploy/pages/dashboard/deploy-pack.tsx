@@ -64,14 +64,14 @@ const DeployPack = () => {
 
 	// Preselect when there's an obvious single choice.
 	useEffect(() => {
-		if (!projectId && projectList.length === 1) {
-			setProjectId(projectList[0].projectId);
+		const only = projectList.length === 1 ? projectList[0] : undefined;
+		if (!projectId && only) {
+			setProjectId(only.projectId);
 		}
 	}, [projectList, projectId]);
 	useEffect(() => {
-		setEnvironmentId(
-			environments.length === 1 ? environments[0].environmentId : "",
-		);
+		const only = environments.length === 1 ? environments[0] : undefined;
+		setEnvironmentId(only ? only.environmentId : "");
 		setMountKey(null);
 	}, [projectId]);
 
