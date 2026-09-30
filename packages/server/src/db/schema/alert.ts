@@ -4,6 +4,7 @@ import {
 	doublePrecision,
 	index,
 	integer,
+	jsonb,
 	pgTable,
 	text,
 	timestamp,
@@ -26,6 +27,13 @@ export type AlertMetric = (typeof ALERT_METRICS)[number];
 /** Whether a service-scoped metric needs a `target` (the Nomad job / appName). */
 export const metricNeedsTarget = (m: string): boolean =>
 	m.startsWith("service_");
+
+/**
+ * Sentinel `target` for a service-metric rule that watches EVERY service
+ * (SigNoz-style) — the loop fans out over all services and fires/resolves each
+ * independently, tracking per-service status in {@link alertRule.seriesState}.
+ */
+export const ALERT_ALL_TARGETS = "__all__";
 
 /**
  * A user-defined alert rule: watch a metric, and when it stays over/under a
@@ -51,7 +59,10 @@ export const alertRule = pgTable("alert_rule", {
 	severity: text("severity").notNull().default("warning"), // "critical" | "warning" | "info"
 	forMinutes: integer("forMinutes").notNull().default(5),
 	enabled: boolean("enabled").notNull().default(true),
-	state: text("state").notNull().default("ok"), // "ok" | "firing"
+	state: text("state").notNull().default("ok"), // "ok" | "firing" (aggregate for all-targets)
+	// Per-service firing/ok status for an "all services" rule (target=__all__),
+	// so each service transitions independently. Null for single-target rules.
+	seriesState: jsonb("seriesState").$type<Record<string, "firing" | "ok">>(),
 	lastValue: doublePrecision("lastValue"),
 	lastStateChangeAt: timestamp("lastStateChangeAt"),
 	createdAt: timestamp("createdAt").notNull().defaultNow(),

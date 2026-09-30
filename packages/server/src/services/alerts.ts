@@ -1,10 +1,12 @@
 import { and, desc, eq, gte } from "drizzle-orm";
 import { db } from "../db";
 import {
+	ALERT_ALL_TARGETS,
 	type AlertMetric,
 	type AlertRule,
 	alertEvent,
 	alertRule,
+	metricNeedsTarget,
 	projects,
 	serviceMetricSample,
 } from "../db/schema";
@@ -85,22 +87,32 @@ const computeValue = async (rule: AlertRule): Promise<number | null> => {
 		return null;
 	}
 
-	// Service metrics — scoped to a Nomad job id (appName).
-	if (!rule.target) return null;
+	// Service metrics — scoped to a Nomad job id (appName). "All services" rules
+	// are handled per-service in the loop, not here.
+	if (!rule.target || rule.target === ALERT_ALL_TARGETS) return null;
+	return computeServiceValueFor(rule.metric, rule.target, minutes);
+};
+
+/** A single service's CPU/mem %-of-reserved averaged over the window, or null. */
+const computeServiceValueFor = async (
+	metric: string,
+	target: string,
+	minutes: number,
+): Promise<number | null> => {
 	const since = new Date(Date.now() - minutes * 60_000).toISOString();
 	const rows = await db
 		.select()
 		.from(serviceMetricSample)
 		.where(
 			and(
-				eq(serviceMetricSample.appName, rule.target),
+				eq(serviceMetricSample.appName, target),
 				gte(serviceMetricSample.createdAt, since),
 			),
 		);
 	if (rows.length === 0) return null;
 	const pct = rows
 		.map((r) =>
-			rule.metric === "service_cpu_pct"
+			metric === "service_cpu_pct"
 				? r.cpuAllocMhz > 0
 					? (r.cpuUsedMhz / r.cpuAllocMhz) * 100
 					: null
@@ -174,12 +186,99 @@ export const getMetricHistory = async (
  * threshold breach, record an event and notify (via cluster-alert channels) only
  * on a state change. Rules with no data in-window are left unchanged.
  */
+/** Record an event + notify on a firing/resolved transition. `scope` names the
+ * service for an all-services rule (empty for single-target / pool rules). */
+const emitAlertTransition = async (
+	rule: AlertRule,
+	value: number,
+	firing: boolean,
+	scope: string,
+	now: Date,
+): Promise<void> => {
+	const unit = metricUnit(rule.metric);
+	const label = metricLabel(rule.metric);
+	const cmp = rule.comparator === "gt" ? ">" : "<";
+	await db.insert(alertEvent).values({
+		organizationId: rule.organizationId,
+		alertRuleId: rule.alertRuleId,
+		type: firing ? "fired" : "resolved",
+		value,
+		message: `${label}${scope} = ${value.toFixed(1)}${unit} (threshold ${cmp} ${rule.threshold}${unit})`,
+	});
+	await sendClusterAlertNotifications(rule.organizationId, {
+		EventType: firing
+			? rule.severity === "critical"
+				? "critical"
+				: "warning"
+			: "recovered",
+		Title: firing
+			? `Alert: ${rule.name}${scope}`
+			: `Resolved: ${rule.name}${scope}`,
+		Message: `${label}${scope} is ${value.toFixed(1)}${unit} (threshold ${cmp} ${rule.threshold}${unit}, sustained ${rule.forMinutes}m).`,
+		Timestamp: now.toISOString(),
+	}).catch((e) => console.error("alerts: notification failed:", e));
+};
+
+/** Evaluate an "all services" rule: fan out over every service, firing/resolving
+ * each independently and tracking per-service status in seriesState. */
+const evaluateAllServices = async (rule: AlertRule): Promise<void> => {
+	const services = await listAlertTargets(rule.organizationId);
+	const prev = (rule.seriesState ?? {}) as Record<string, "firing" | "ok">;
+	const next: Record<string, "firing" | "ok"> = {};
+	const now = new Date();
+	let anyFiring = false;
+	let lastValue: number | null = null;
+	for (const svc of services) {
+		const value = await computeServiceValueFor(
+			rule.metric,
+			svc.appName,
+			rule.forMinutes,
+		);
+		if (value === null) {
+			// No data in-window: keep the previous status, don't transition.
+			const p = prev[svc.appName];
+			if (p) next[svc.appName] = p;
+			continue;
+		}
+		lastValue = value;
+		const firing =
+			rule.comparator === "gt"
+				? value > rule.threshold
+				: value < rule.threshold;
+		next[svc.appName] = firing ? "firing" : "ok";
+		if (firing) anyFiring = true;
+		const wasFiring = prev[svc.appName] === "firing";
+		if (firing && !wasFiring)
+			await emitAlertTransition(rule, value, true, ` [${svc.appName}]`, now);
+		else if (!firing && wasFiring)
+			await emitAlertTransition(rule, value, false, ` [${svc.appName}]`, now);
+	}
+	await db
+		.update(alertRule)
+		.set({
+			seriesState: next,
+			state: anyFiring ? "firing" : "ok",
+			lastValue: lastValue ?? rule.lastValue,
+			lastStateChangeAt:
+				(anyFiring ? "firing" : "ok") !== rule.state
+					? now
+					: rule.lastStateChangeAt,
+		})
+		.where(eq(alertRule.alertRuleId, rule.alertRuleId));
+};
+
 export const runAlertEvaluations = async (): Promise<void> => {
 	const rules = await db.query.alertRule.findMany({
 		where: eq(alertRule.enabled, true),
 	});
 	for (const rule of rules) {
 		try {
+			// SigNoz-style "all services": evaluate + transition each service on its own.
+			if (metricNeedsTarget(rule.metric) && rule.target === ALERT_ALL_TARGETS) {
+				await evaluateAllServices(rule);
+				continue;
+			}
+
 			const value = await computeValue(rule);
 			if (value === null) continue;
 			const violates =
@@ -196,35 +295,18 @@ export const runAlertEvaluations = async (): Promise<void> => {
 				continue;
 			}
 
-			const unit = metricUnit(rule.metric);
-			const label = metricLabel(rule.metric);
-			const scope = rule.target ? ` [${rule.target}]` : "";
-			const cmp = rule.comparator === "gt" ? ">" : "<";
 			const now = new Date();
-
 			await db
 				.update(alertRule)
 				.set({ state: nextState, lastValue: value, lastStateChangeAt: now })
 				.where(eq(alertRule.alertRuleId, rule.alertRuleId));
-
-			await db.insert(alertEvent).values({
-				organizationId: rule.organizationId,
-				alertRuleId: rule.alertRuleId,
-				type: violates ? "fired" : "resolved",
+			await emitAlertTransition(
+				rule,
 				value,
-				message: `${label}${scope} = ${value.toFixed(1)}${unit} (threshold ${cmp} ${rule.threshold}${unit})`,
-			});
-
-			await sendClusterAlertNotifications(rule.organizationId, {
-				EventType: violates
-					? rule.severity === "critical"
-						? "critical"
-						: "warning"
-					: "recovered",
-				Title: violates ? `Alert: ${rule.name}` : `Resolved: ${rule.name}`,
-				Message: `${label}${scope} is ${value.toFixed(1)}${unit} (threshold ${cmp} ${rule.threshold}${unit}, sustained ${rule.forMinutes}m).`,
-				Timestamp: now.toISOString(),
-			}).catch((e) => console.error("alerts: notification failed:", e));
+				violates,
+				rule.target ? ` [${rule.target}]` : "",
+				now,
+			);
 		} catch (e) {
 			console.error(`alerts: rule ${rule.alertRuleId} eval failed:`, e);
 		}

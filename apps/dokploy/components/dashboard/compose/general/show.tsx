@@ -68,7 +68,8 @@ export const ShowGeneralCompose = ({ composeId }: Props) => {
 			{data?.composeType === "nomad" && (
 				<ShowComposeNodePool composeId={composeId} />
 			)}
-			{data?.composeType === "nomad" && (
+			{(data?.composeType === "nomad" ||
+				data?.composeType === "nomad-pack") && (
 				<ShowServiceScaling composeId={composeId} />
 			)}
 		</>

@@ -42,6 +42,17 @@ if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
   exit 1
 fi
 
+# Pre-flight: run the CI-equivalent prod build so a CI-only type failure can't
+# get tagged/pushed (a failed tag build wastes ~1.5 min of CI and leaves the
+# release image unpublished). Override with SKIP_CHECK=1 in a pinch.
+if [[ "${SKIP_CHECK:-0}" != "1" ]]; then
+  echo "Running pre-release checks (scripts/check.sh)…"
+  if ! bash "${root}/scripts/check.sh"; then
+    echo "error: pre-release checks failed — not releasing. (SKIP_CHECK=1 to override)" >&2
+    exit 1
+  fi
+fi
+
 # No version bump: the panel version is baked from this tag by CI
 # (--build-arg NOMPLOY_VERSION, see nomploy.yml + server/nomploy-version.ts).
 # Bumping package.json used to change the file COPY'd before `pnpm install`,

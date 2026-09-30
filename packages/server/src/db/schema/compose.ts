@@ -62,6 +62,10 @@ export const compose = pgTable("compose", {
 	nomadPack: text("nomadPack"),
 	// Optional custom pack registry: a git URL added via `nomad-pack registry add`.
 	nomadPackRegistry: text("nomadPackRegistry"),
+	// Pinned registry git ref (SHA/tag) the pack deploys from — set on first
+	// deploy so redeploys are reproducible instead of always pulling latest.
+	// Bumped explicitly via the "Upgrade pack" action (with a rendered diff).
+	nomadPackRef: text("nomadPackRef"),
 	// Nomad node pool (autoscaling group) to run this compose's services in.
 	// Null/"default" = the built-in default pool. Emitted as the job's `node_pool`.
 	nodePool: text("nodePool"),
@@ -122,6 +126,15 @@ export const compose = pgTable("compose", {
 						max: number;
 						cpuTarget?: number;
 						memoryTarget?: number;
+					};
+					// Per-service reserved-resource override (Nomad `resources`): cpu in
+					// MHz, memory in MB (the reservation Nomad schedules on), memoryMax in
+					// MB (burst limit). Merged over the parsed compose values (UI wins).
+					// Applies in BOTH shared and independent mode (per-task).
+					resources?: {
+						cpu?: number;
+						memory?: number;
+						memoryMax?: number;
 					};
 				}
 			>
@@ -282,6 +295,13 @@ const createSchema = createInsertSchema(compose, {
 						max: z.number().int().min(1),
 						cpuTarget: z.number().int().min(1).max(100).optional(),
 						memoryTarget: z.number().int().min(1).max(100).optional(),
+					})
+					.optional(),
+				resources: z
+					.object({
+						cpu: z.number().int().min(1).optional(),
+						memory: z.number().int().min(1).optional(),
+						memoryMax: z.number().int().min(1).optional(),
 					})
 					.optional(),
 			}),

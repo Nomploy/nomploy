@@ -132,8 +132,10 @@ void (async () => {
 					startLoadBalancerDnsLoop(30);
 					// Sample the pool's Traefik metrics into a rolling series for graphs.
 					startLoadBalancerMetricsSampler(60);
-					// Re-seed renewed certs from the hub into the pool's shared KV store.
-					startLoadBalancerCertSyncLoop(6);
+					// Re-seed issued/renewed certs from the hub into the pool's shared KV
+					// store every 5 min (change-aware, so it's a no-op when unchanged) —
+					// a freshly-issued cert reaches the pool within minutes, not hours.
+					startLoadBalancerCertSyncLoop(5);
 					// Evaluate user-defined metric alert rules and notify on transitions.
 					const { startAlertLoop } = await import(
 						"@nomploy/server/services/alerts"

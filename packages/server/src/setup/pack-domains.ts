@@ -1,30 +1,24 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { stringify } from "yaml";
-import { paths } from "../constants";
 import type {
 	compose as composeTable,
 	domains as domainsTable,
 } from "../db/schema";
-import { encodeBase64 } from "../utils/docker/utils";
-import { execAsyncRemote } from "../utils/process/execAsync";
+import {
+	applyDefaultCertResolver,
+	getDefaultCertResolver,
+} from "../services/cert-resolver";
+import { generateConsulTags } from "../utils/builders/nomad";
+import {
+	getPackJobIds,
+	type NomadJob,
+	nomadFetch,
+	patchPackJobs,
+} from "./pack-nomad";
+import type { PackScalingCompose } from "./pack-scaling";
 
 type Compose = typeof composeTable.$inferSelect;
 type Domain = typeof domainsTable.$inferSelect;
 
-// Nomad reads always go to the control plane (not a resource's serverId).
-const nomadFetch = async <T>(path: string): Promise<T> => {
-	const addr = process.env.NOMAD_ADDRESS || "http://127.0.0.1:4646";
-	const token = process.env.NOMAD_TOKEN || "";
-	const res = await fetch(`${addr.replace(/\/$/, "")}/v1${path}`, {
-		headers: token ? { "X-Nomad-Token": token } : {},
-	});
-	if (!res.ok) throw new Error(`Nomad ${res.status} on ${path}`);
-	return res.json() as Promise<T>;
-};
-
-// The port a Consul service is reachable on (its registered ServicePort) — this
-// is exactly the port a domain's `<name>.service.consul:<port>` backend needs.
+// The port a Consul service is reachable on (its registered ServicePort).
 const consulServicePort = async (name: string): Promise<number | null> => {
 	try {
 		const token = process.env.CONSUL_TOKEN || "";
@@ -43,31 +37,16 @@ const consulServicePort = async (name: string): Promise<number | null> => {
 export type PackService = { name: string; port: number | null };
 
 /**
- * The Consul services a Nomad Pack deployment registers, with their reachable
- * ports. A pack's jobs are named after the pack, not the appName, so we find them
- * by the `pack.deployment_name == appName` meta, read each job's service stanzas,
- * then look up each service's registered port in Consul. A domain routes to one of
- * these via `<name>.service.consul:<port>`.
+ * The services a Nomad Pack deployment registers, with their reachable ports —
+ * for the domain-config dropdown (pick which service a domain routes to). A
+ * pack's jobs are named after the pack, not the appName, so we find them by the
+ * `pack.deployment_name == appName` meta and read each job's service stanzas.
  */
 export const loadPackServices = async (
 	appName: string,
 ): Promise<PackService[]> => {
-	let jobs: { ID: string; Meta?: Record<string, string> }[] = [];
-	try {
-		jobs =
-			await nomadFetch<{ ID: string; Meta?: Record<string, string> }[]>(
-				"/jobs?meta=true",
-			);
-	} catch {
-		return [];
-	}
-	const ids = jobs
-		.filter((j) => j.Meta?.["pack.deployment_name"] === appName)
-		.map((j) => j.ID);
+	const ids = await getPackJobIds(appName);
 
-	// Resolve each service's port from the job spec: PortLabel → the group's
-	// network port (prefer the host-mapped Value, else the container `To`). This is
-	// deterministic and doesn't depend on the Consul name matching.
 	type NomadPort = { Label?: string; Value?: number; To?: number };
 	type NomadSvc = { Name?: string; PortLabel?: string };
 	const jobPortByName = new Map<string, number>();
@@ -112,105 +91,88 @@ export const loadPackServices = async (
 	return Promise.all(
 		[...names].map(async (name) => ({
 			name,
-			// Prefer the job-spec port; fall back to the Consul-registered port.
 			port: jobPortByName.get(name) ?? (await consulServicePort(name)),
 		})),
 	);
 };
 
-const resolverFor = (d: Domain): string =>
-	d.certificateType === "custom" && d.customCertResolver
-		? d.customCertResolver
-		: "letsencrypt";
-
 /**
- * Build a Traefik file-provider dynamic config that routes each of the pack's
- * domains to its Consul service. The backend is `<service>.service.consul:<port>`
- * so Consul resolves it to the currently-healthy alloc(s) — robust across
- * reschedules. HTTPS domains get a LE cert resolver + an HTTP→HTTPS redirect.
+ * Patch one pack job's service stanzas for ingress: set each service's
+ * `Provider = "consul"` and inject the Traefik router tags for the domains that
+ * target it (the SAME tags a compose service gets, via {@link generateConsulTags}).
+ * Returns whether the job changed. Routes packs through the existing
+ * `consulCatalog` provider — which BOTH the hub and the HA pool already read,
+ * health-aware and following alloc moves — so there's no file-provider config,
+ * no Consul-KV mirror and no reconcile loop. Idempotent; empty domains clears the
+ * tags. `domains` must already carry the default cert resolver.
  */
-export const buildPackDomainConfig = (
-	compose: Pick<Compose, "appName">,
+export const applyDomainsToJob = (
+	job: NomadJob,
+	appName: string,
 	domains: Domain[],
-): string | null => {
-	const routers: Record<string, unknown> = {};
-	const services: Record<string, unknown> = {};
-	let any = false;
-
-	for (const d of domains) {
-		if (!d.serviceName || !d.host) continue;
-		any = true;
-		const base = `${compose.appName}-${d.domainId}`;
-		const port = d.port ?? 80;
-		const rule =
-			d.path && d.path !== "/"
-				? `Host(\`${d.host}\`) && PathPrefix(\`${d.path}\`)`
-				: `Host(\`${d.host}\`)`;
-		const https = d.certificateType && d.certificateType !== "none";
-
-		services[base] = {
-			loadBalancer: {
-				servers: [{ url: `http://${d.serviceName}.service.consul:${port}` }],
-				passHostHeader: true,
-			},
-		};
-
-		if (https) {
-			routers[`${base}-web`] = {
-				rule,
-				entryPoints: ["web"],
-				service: base,
-				middlewares: ["redirect-to-https"],
-			};
-			routers[`${base}-secure`] = {
-				rule,
-				entryPoints: ["websecure"],
-				service: base,
-				tls: { certResolver: resolverFor(d) },
-			};
-		} else {
-			routers[base] = { rule, entryPoints: ["web"], service: base };
+): boolean => {
+	let changed = false;
+	for (const tg of job.TaskGroups ?? []) {
+		const svcs = [
+			...(tg.Services ?? []),
+			...(tg.Tasks ?? []).flatMap((t: NomadJob) => t.Services ?? []),
+		];
+		for (const s of svcs) {
+			if (!s.Name) continue;
+			const svcDomains = domains.filter(
+				(d) => d.serviceName === s.Name && d.host,
+			);
+			// consulCatalog routes this once it's a Consul service with the tags.
+			s.Provider = "consul";
+			s.Tags = generateConsulTags(appName, s.Name, svcDomains);
+			changed = true;
 		}
 	}
-
-	if (!any) return null;
-	return stringify({ http: { routers, services } });
+	return changed;
 };
 
 /**
- * Write (or remove) the pack's domain routing into Traefik's dynamic dir. Called
- * after a pack deploy/reload; idempotent. Handles the hub (local fs) and remote
- * servers (base64 over SSH).
+ * Wire a Nomad-Pack deployment's domains into nomploy's ingress by patching the
+ * deployed pack job(s) and re-registering. Packs default their service to
+ * Nomad-native registration (invisible to consulCatalog); this makes them
+ * first-class like compose apps. Re-run on every deploy (nomad-pack run
+ * re-creates the job from the template, which resets Provider/Tags). Domains use
+ * the DNS-01 resolver when configured (HTTP-01 can't work behind the pool).
+ *
+ * Prefer {@link applyPackJobPatches} on the deploy path — it applies domains AND
+ * scaling in a single re-registration. This standalone form stays for the
+ * stop/clear path (domains: []).
  */
 export const applyPackDomains = async (
-	compose: Pick<Compose, "appName" | "serverId"> & { domains?: Domain[] },
+	compose: Pick<Compose, "appName"> & { domains?: Domain[] },
 ): Promise<void> => {
-	const { DYNAMIC_TRAEFIK_PATH } = paths(!!compose.serverId);
-	const fileName = `${compose.appName}-pack.yml`;
-	const filePath = join(DYNAMIC_TRAEFIK_PATH, fileName);
-	const yaml = buildPackDomainConfig(compose, compose.domains ?? []);
+	const domains = applyDefaultCertResolver(
+		compose.domains ?? [],
+		await getDefaultCertResolver().catch(() => "letsencrypt"),
+	);
+	await patchPackJobs(compose.appName, (job) =>
+		applyDomainsToJob(job, compose.appName, domains),
+	);
+};
 
-	if (compose.serverId) {
-		if (!yaml) {
-			await execAsyncRemote(
-				compose.serverId,
-				`rm -f "${filePath}" 2>/dev/null || true`,
-			);
-			return;
-		}
-		const encoded = encodeBase64(yaml);
-		await execAsyncRemote(
-			compose.serverId,
-			`mkdir -p "${DYNAMIC_TRAEFIK_PATH}" && echo "${encoded}" | base64 -d > "${filePath}"`,
-		);
-		return;
-	}
-
-	// Local (hub / control plane).
-	if (!yaml) {
-		if (existsSync(filePath)) rmSync(filePath);
-		return;
-	}
-	mkdirSync(DYNAMIC_TRAEFIK_PATH, { recursive: true });
-	writeFileSync(filePath, yaml);
+/**
+ * Apply BOTH the domain tags and the panel's scaling overrides (count / reserved
+ * resources / autoscaling) to a pack deployment's jobs in a SINGLE
+ * re-registration — the deploy path's entry point. Splitting these into two
+ * passes would re-register (and reschedule) the pack twice.
+ */
+export const applyPackJobPatches = async (
+	compose: Pick<Compose, "appName" | "serviceScaling"> &
+		PackScalingCompose & { domains?: Domain[] },
+): Promise<void> => {
+	const domains = applyDefaultCertResolver(
+		compose.domains ?? [],
+		await getDefaultCertResolver().catch(() => "letsencrypt"),
+	);
+	const { applyScalingToJob } = await import("./pack-scaling");
+	await patchPackJobs(compose.appName, (job) => {
+		const d = applyDomainsToJob(job, compose.appName, domains);
+		const s = applyScalingToJob(job, compose);
+		return d || s;
+	});
 };

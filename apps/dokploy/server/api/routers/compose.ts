@@ -368,6 +368,117 @@ export const composeRouter = createTRPCRouter({
 			);
 			return await loadPackServices(composeRow.appName);
 		}),
+	// Nomad Pack version: the pinned registry ref vs the registry's current HEAD,
+	// so the UI can show "upgrade available".
+	getPackVersion: protectedProcedure
+		.input(apiFindCompose)
+		.query(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.composeId, {
+				service: ["read"],
+			});
+			const compose = await findComposeById(input.composeId);
+			if (compose.composeType !== "nomad-pack") {
+				return {
+					isPack: false,
+					pinnedRef: null,
+					latestRef: null,
+					upgradeAvailable: false,
+				};
+			}
+			const { resolvePackHeadRef } = await import(
+				"@nomploy/server/setup/pack-version"
+			);
+			const latestRef = await resolvePackHeadRef(compose).catch(() => null);
+			const pinnedRef = compose.nomadPackRef ?? null;
+			return {
+				isPack: true,
+				pinnedRef,
+				latestRef,
+				upgradeAvailable: !!(pinnedRef && latestRef && pinnedRef !== latestRef),
+			};
+		}),
+	// Preview an upgrade: a unified diff of the pack's rendered job between the
+	// pinned ref and the registry HEAD.
+	previewPackUpgrade: protectedProcedure
+		.input(apiFindCompose)
+		.mutation(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.composeId, {
+				deployment: ["create"],
+			});
+			const compose = await findComposeById(input.composeId);
+			if (compose.composeType !== "nomad-pack") {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Not a Nomad Pack",
+				});
+			}
+			const { resolvePackHeadRef, renderPackDiff } = await import(
+				"@nomploy/server/setup/pack-version"
+			);
+			const toRef = await resolvePackHeadRef(compose).catch(() => null);
+			const fromRef = compose.nomadPackRef ?? null;
+			if (!fromRef || !toRef || fromRef === toRef) {
+				return { diff: "", fromRef, toRef, upgradeAvailable: false };
+			}
+			const diff = await renderPackDiff(compose, fromRef, toRef).catch(
+				(e) =>
+					`# could not render diff: ${e instanceof Error ? e.message : String(e)}`,
+			);
+			return { diff, fromRef, toRef, upgradeAvailable: true };
+		}),
+	// Apply an upgrade: pin the registry HEAD and redeploy at the new ref.
+	upgradePack: protectedProcedure
+		.input(apiFindCompose)
+		.mutation(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.composeId, {
+				deployment: ["create"],
+			});
+			const compose = await findComposeById(input.composeId);
+			if (compose.composeType !== "nomad-pack") {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Not a Nomad Pack",
+				});
+			}
+			const { resolvePackHeadRef } = await import(
+				"@nomploy/server/setup/pack-version"
+			);
+			const latestRef = await resolvePackHeadRef(compose).catch(() => null);
+			if (!latestRef) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Could not resolve the latest pack ref",
+				});
+			}
+			await updateCompose(input.composeId, { nomadPackRef: latestRef });
+			const jobData: DeploymentJob = {
+				composeId: input.composeId,
+				titleLog: `Upgrade pack to ${latestRef.slice(0, 7)}`,
+				type: "deploy",
+				applicationType: "compose",
+				descriptionLog: "",
+				server: !!compose.serverId,
+			};
+			if (IS_CLOUD && compose.serverId) {
+				jobData.serverId = compose.serverId;
+				deploy(jobData).catch((error) =>
+					console.error("Background deployment failed:", error),
+				);
+			} else {
+				await myQueue.add(
+					"deployments",
+					{ ...jobData },
+					{ removeOnComplete: true, removeOnFail: true },
+				);
+			}
+			await audit(ctx, {
+				action: "deploy",
+				resourceType: "compose",
+				resourceId: input.composeId,
+				resourceName: compose.name,
+			});
+			return { success: true, ref: latestRef };
+		}),
 	loadMountsByService: protectedProcedure
 		.input(
 			z.object({

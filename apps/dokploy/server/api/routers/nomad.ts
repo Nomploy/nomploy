@@ -628,17 +628,47 @@ export const nomadRouter = createTRPCRouter({
 		);
 		addrs.add(cfg.address.replace(/^https?:\/\//, "").replace(/\/$/, ""));
 
-		const cpuLine =
-			/nomad_client_allocs_cpu_total_percent\{([^}]*)\}\s+([0-9.e+-]+)/g;
-		const memLine =
-			/nomad_client_allocs_memory_usage\{([^}]*)\}\s+([0-9.e+-]+)/g;
 		const label = (labels: string, key: string) =>
 			labels.match(new RegExp(`${key}="([^"]*)"`))?.[1] ?? "";
 		// Nomad Pack jobs are labelled by the pack's job id, not the appName; map
 		// them back so a pack service's usage lands under its appName.
 		const packMap = await resolvePackJobMap(cfg);
-		// job (= appName) → { cpu%, memBytes }
-		const byJob: Record<string, { cpu: number; mem: number }> = {};
+		// job (= appName) → used cpu% (for the sparkline) + used/reserved raw sums,
+		// so a card can show "used of reserved" (cpu MHz, mem bytes) not just used.
+		type JobM = {
+			cpu: number;
+			mem: number;
+			cpuUsedMhz: number;
+			cpuAllocMhz: number;
+			memAllocBytes: number;
+		};
+		const byJob: Record<string, JobM> = {};
+		const zeroJob = (): JobM => ({
+			cpu: 0,
+			mem: 0,
+			cpuUsedMhz: 0,
+			cpuAllocMhz: 0,
+			memAllocBytes: 0,
+		});
+		const fields: [RegExp, keyof JobM][] = [
+			[
+				/nomad_client_allocs_cpu_total_percent\{([^}]*)\}\s+([0-9.eE+-]+)/g,
+				"cpu",
+			],
+			[/nomad_client_allocs_memory_usage\{([^}]*)\}\s+([0-9.eE+-]+)/g, "mem"],
+			[
+				/nomad_client_allocs_cpu_total_ticks\{([^}]*)\}\s+([0-9.eE+-]+)/g,
+				"cpuUsedMhz",
+			],
+			[
+				/nomad_client_allocs_cpu_allocated\{([^}]*)\}\s+([0-9.eE+-]+)/g,
+				"cpuAllocMhz",
+			],
+			[
+				/nomad_client_allocs_memory_allocated\{([^}]*)\}\s+([0-9.eE+-]+)/g,
+				"memAllocBytes",
+			],
+		];
 		const scrape = async (addr: string) => {
 			try {
 				const ctl = new AbortController();
@@ -650,21 +680,15 @@ export const nomadRouter = createTRPCRouter({
 				clearTimeout(t);
 				if (!res.ok) return;
 				const text = await res.text();
-				for (const m of text.matchAll(cpuLine)) {
-					const jobLabel = label(m[1] ?? "", "job");
-					if (!jobLabel) continue;
-					const job = packMap.get(jobLabel) ?? jobLabel;
-					const cur = byJob[job] ?? { cpu: 0, mem: 0 };
-					cur.cpu += Number(m[2]) || 0;
-					byJob[job] = cur;
-				}
-				for (const m of text.matchAll(memLine)) {
-					const jobLabel = label(m[1] ?? "", "job");
-					if (!jobLabel) continue;
-					const job = packMap.get(jobLabel) ?? jobLabel;
-					const cur = byJob[job] ?? { cpu: 0, mem: 0 };
-					cur.mem += Number(m[2]) || 0;
-					byJob[job] = cur;
+				for (const [re, field] of fields) {
+					for (const m of text.matchAll(re)) {
+						const jobLabel = label(m[1] ?? "", "job");
+						if (!jobLabel) continue;
+						const job = packMap.get(jobLabel) ?? jobLabel;
+						const cur = byJob[job] ?? zeroJob();
+						cur[field] += Number(m[2]) || 0;
+						byJob[job] = cur;
+					}
 				}
 			} catch {}
 		};
@@ -693,9 +717,9 @@ export const nomadRouter = createTRPCRouter({
 				},
 			},
 		});
-		const out: Record<string, { cpu: number; mem: number }> = {};
+		const out: Record<string, JobM> = {};
 		for (const p of rows) {
-			const agg = out[p.projectId] ?? { cpu: 0, mem: 0 };
+			const agg = out[p.projectId] ?? zeroJob();
 			out[p.projectId] = agg;
 			for (const env of p.environments) {
 				const svc = [
@@ -713,6 +737,9 @@ export const nomadRouter = createTRPCRouter({
 					if (m) {
 						agg.cpu += m.cpu;
 						agg.mem += m.mem;
+						agg.cpuUsedMhz += m.cpuUsedMhz;
+						agg.cpuAllocMhz += m.cpuAllocMhz;
+						agg.memAllocBytes += m.memAllocBytes;
 					}
 				}
 			}
@@ -723,6 +750,11 @@ export const nomadRouter = createTRPCRouter({
 				projectId,
 				cpuPercent: Math.round(v.cpu * 10) / 10,
 				memoryMb: Math.round(v.mem / (1024 * 1024)),
+				// Reserved (allocated) alongside used, so a card can show "used of
+				// reserved" for both CPU (MHz) and memory (MB).
+				cpuUsedMhz: Math.round(v.cpuUsedMhz),
+				cpuReservedMhz: Math.round(v.cpuAllocMhz),
+				memReservedMb: Math.round(v.memAllocBytes / (1024 * 1024)),
 			})),
 		};
 	}),
@@ -940,7 +972,7 @@ export const nomadRouter = createTRPCRouter({
 	// after cert renewals so the pool picks up fresh certs (file provider reloads).
 	syncLoadBalancerCerts: withPermission("server", "create").mutation(
 		async () => {
-			const { certCount } = await syncTraefikCertsToConsulKV();
+			const { certCount } = await syncTraefikCertsToConsulKV({ force: true });
 			return { certCount };
 		},
 	),

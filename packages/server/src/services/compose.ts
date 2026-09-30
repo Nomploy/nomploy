@@ -285,6 +285,20 @@ export const deployCompose = async ({
 			}
 		}
 
+		// Pin the pack to a concrete registry ref on first deploy so redeploys are
+		// reproducible (else nomad-pack pulls the registry HEAD every time). Upgrades
+		// bump this explicitly via the upgradePack action (with a rendered diff).
+		if (compose.composeType === "nomad-pack" && !compose.nomadPackRef) {
+			const { resolvePackHeadRef } = await import(
+				"@nomploy/server/setup/pack-version"
+			);
+			const ref = await resolvePackHeadRef(compose).catch(() => null);
+			if (ref) {
+				await updateCompose(composeId, { nomadPackRef: ref });
+				entity.nomadPackRef = ref;
+			}
+		}
+
 		command = "set -e;";
 		if (compose.composeType === "nomad-pack") {
 			command += getBuildNomadPackCommand(entity);
@@ -301,6 +315,19 @@ export const deployCompose = async ({
 		}
 
 		await updateDeploymentStatus(deployment.deploymentId, "done");
+		// Nomad-Pack: patch the just-deployed job's service(s) to provider=consul
+		// + Traefik tags so nomploy's consulCatalog routes the pack's domains
+		// pool-wide (packs default to Nomad-native registration, invisible to
+		// consulCatalog). See setup/pack-domains.
+		if (compose.composeType === "nomad-pack") {
+			const { applyPackJobPatches } = await import(
+				"@nomploy/server/setup/pack-domains"
+			);
+			// Domains + scaling (count/resources/autoscaling) in one re-registration.
+			await applyPackJobPatches(compose).catch((e) =>
+				console.error("pack job patches failed:", e),
+			);
+		}
 		// Phase B: refresh Connect intentions so this project's mesh services
 		// (isolated) get their allow-rules; no-op for non-isolated orgs.
 		if (compose.environment.project.isolated) {
@@ -428,6 +455,19 @@ export const rebuildCompose = async ({
 		}
 
 		await updateDeploymentStatus(deployment.deploymentId, "done");
+		// Nomad-Pack: patch the just-deployed job's service(s) to provider=consul
+		// + Traefik tags so nomploy's consulCatalog routes the pack's domains
+		// pool-wide (packs default to Nomad-native registration, invisible to
+		// consulCatalog). See setup/pack-domains.
+		if (compose.composeType === "nomad-pack") {
+			const { applyPackJobPatches } = await import(
+				"@nomploy/server/setup/pack-domains"
+			);
+			// Domains + scaling (count/resources/autoscaling) in one re-registration.
+			await applyPackJobPatches(compose).catch((e) =>
+				console.error("pack job patches failed:", e),
+			);
+		}
 		// Phase B: refresh Connect intentions so this project's mesh services
 		// (isolated) get their allow-rules; no-op for non-isolated orgs.
 		if (compose.environment.project.isolated) {
@@ -559,11 +599,12 @@ export const startCompose = async (composeId: string) => {
 				await execAsync(cmd);
 			}
 			// Route the pack's domains via a Traefik file-provider config.
-			const { applyPackDomains } = await import(
+			const { applyPackJobPatches } = await import(
 				"@nomploy/server/setup/pack-domains"
 			);
-			await applyPackDomains(compose).catch((e) =>
-				console.error("pack domains apply failed:", e),
+			// Domains + scaling (count/resources/autoscaling) in one re-registration.
+			await applyPackJobPatches(compose).catch((e) =>
+				console.error("pack job patches failed:", e),
 			);
 		}
 

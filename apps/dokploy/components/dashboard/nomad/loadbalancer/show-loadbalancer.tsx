@@ -196,7 +196,7 @@ const PoolCard = ({ canManage }: { canManage: boolean }) => {
 };
 
 /** Certificates the pool serves + expiry. Auto-renewed on the hub, resynced to
- * the pool's Consul KV every 6h. */
+ * the pool's Consul KV every ~5 min (only when they change). */
 const CertificatesCard = ({ canManage }: { canManage: boolean }) => {
 	const { data: certs } = api.nomad.getLoadBalancerCerts.useQuery(undefined, {
 		refetchInterval: 60000,
@@ -219,7 +219,11 @@ const CertificatesCard = ({ canManage }: { canManage: boolean }) => {
 					</CardTitle>
 					<CardDescription>
 						TLS certs the pool serves, shared via Consul KV. Issued/renewed on
-						the hub and resynced to the pool every 6h.
+						the hub via <strong>DNS-01</strong> (Cloudflare) — HTTP-01 can't
+						work behind the pool — and resynced to the pool every ~5 min when
+						they change. A new domain gets its cert a few minutes after its app
+						is <strong>redeployed</strong> (redeploy re-tags the router onto the
+						DNS-01 resolver); use “Sync now” to push it to the pool immediately.
 					</CardDescription>
 				</div>
 				{canManage && (
@@ -831,6 +835,72 @@ const latencyChartConfig = {
 	latencyMs: { label: "Latency (ms)", color: "hsl(var(--chart-1))" },
 } satisfies ChartConfig;
 
+/**
+ * A single-series rate chart with its OWN y-axis, so a low-volume error class
+ * (4xx/5xx) is readable on its own scale instead of being flattened under the
+ * dominant 2xx line in the combined chart.
+ */
+const SingleRateChart = ({
+	points,
+	dataKey,
+	title,
+	color,
+	span,
+}: {
+	// biome-ignore lint/suspicious/noExplicitAny: recharts row shape
+	points: any[];
+	dataKey: string;
+	title: string;
+	color: string;
+	span: string;
+}) => (
+	<div className="flex flex-col gap-2">
+		<span className="font-medium text-sm">{title}</span>
+		<ChartContainer
+			config={{ [dataKey]: { label: title, color } } as ChartConfig}
+			className="h-[9rem] w-full"
+		>
+			<LineChart
+				data={points}
+				margin={{ top: 6, right: 8, left: 0, bottom: 0 }}
+			>
+				<CartesianGrid vertical={false} />
+				<XAxis
+					dataKey="ts"
+					tickLine={false}
+					axisLine={false}
+					tickMargin={8}
+					minTickGap={32}
+					tickFormatter={(t) => format(new Date(t), span)}
+				/>
+				<YAxis
+					tickLine={false}
+					axisLine={false}
+					width={30}
+					allowDecimals={false}
+				/>
+				<ChartTooltip
+					content={
+						<ChartTooltipContent
+							labelFormatter={(_, p) => {
+								const t = p?.[0]?.payload?.ts;
+								return t ? format(new Date(t), "PPpp") : "";
+							}}
+						/>
+					}
+				/>
+				<Line
+					type="monotone"
+					dataKey={dataKey}
+					stroke={`var(--color-${dataKey})`}
+					strokeWidth={2}
+					dot={false}
+				/>
+			</LineChart>
+		</ChartContainer>
+	</div>
+);
+
 /** Time-range graphs of pool-wide throughput + latency from sampled history. */
 const MetricsChartsCard = () => {
 	const [minutes, setMinutes] = useState(360);
@@ -931,6 +1001,24 @@ const MetricsChartsCard = () => {
 									))}
 								</LineChart>
 							</ChartContainer>
+						</div>
+						{/* Dedicated error-rate charts — own y-axis each, so 4xx/5xx
+						    spikes are visible even when 2xx dwarfs them above. */}
+						<div className="grid gap-6 sm:grid-cols-2">
+							<SingleRateChart
+								points={points}
+								dataKey="req4xxPerSec"
+								title="4xx / sec"
+								color="hsl(38 92% 50%)"
+								span={span}
+							/>
+							<SingleRateChart
+								points={points}
+								dataKey="req5xxPerSec"
+								title="5xx / sec"
+								color="hsl(0 84% 60%)"
+								span={span}
+							/>
 						</div>
 						<div className="flex flex-col gap-2">
 							<span className="font-medium text-sm">Avg latency (ms)</span>

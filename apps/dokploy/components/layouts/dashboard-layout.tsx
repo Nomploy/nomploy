@@ -1,6 +1,7 @@
 import { api } from "@/utils/api";
 import { ImpersonationBar } from "../dashboard/impersonation/impersonation-bar";
 import { UpdateBanner } from "../dashboard/settings/web-server/update-banner";
+import { StaleBundleBanner } from "../dashboard/stale-bundle-banner";
 import { HubSpotWidget } from "../shared/HubSpotWidget";
 import Page from "./side";
 
@@ -23,6 +24,7 @@ export const DashboardLayout = ({ children }: Props) => {
 
 	return (
 		<>
+			<StaleBundleBanner />
 			<Page>{children}</Page>
 			{isChatEnabled && (
 				<>

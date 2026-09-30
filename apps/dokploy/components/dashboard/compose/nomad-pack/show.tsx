@@ -1,6 +1,7 @@
-import { Box, Loader2, Save } from "lucide-react";
+import { ArrowUpCircle, Box, Loader2, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -9,6 +10,14 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -33,6 +42,34 @@ interface Props {
 export const ShowNomadPackForm = ({ composeId }: Props) => {
 	const { data, refetch } = api.compose.one.useQuery({ composeId });
 	const update = api.compose.update.useMutation();
+	// Pinned pack version vs the registry's latest, + the upgrade preview/apply.
+	const { data: version, refetch: refetchVersion } =
+		api.compose.getPackVersion.useQuery(
+			{ composeId },
+			{ enabled: !!composeId, refetchInterval: 60000 },
+		);
+	const preview = api.compose.previewPackUpgrade.useMutation();
+	const upgrade = api.compose.upgradePack.useMutation();
+	const [upgradeOpen, setUpgradeOpen] = useState(false);
+
+	const openUpgrade = async () => {
+		setUpgradeOpen(true);
+		await preview
+			.mutateAsync({ composeId })
+			.catch((e) =>
+				toast.error(e instanceof Error ? e.message : "Failed to render diff"),
+			);
+	};
+	const applyUpgrade = async () => {
+		try {
+			const r = await upgrade.mutateAsync({ composeId });
+			toast.success(`Upgrading pack to ${r.ref.slice(0, 7)} — redeploying`);
+			setUpgradeOpen(false);
+			await Promise.all([refetch(), refetchVersion()]);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : "Upgrade failed");
+		}
+	};
 
 	const [nomadPack, setNomadPack] = useState("");
 	const [nomadPackRegistry, setNomadPackRegistry] = useState("");
@@ -98,6 +135,52 @@ export const ShowNomadPackForm = ({ composeId }: Props) => {
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
+				{version?.isPack && version.pinnedRef && (
+					<div className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3">
+						<div className="flex flex-col gap-0.5">
+							<span className="text-sm">
+								Pinned version{" "}
+								<code className="rounded bg-muted px-1 font-mono text-xs">
+									{version.pinnedRef.slice(0, 7)}
+								</code>
+								{version.upgradeAvailable && version.latestRef && (
+									<>
+										{" → "}
+										<code className="rounded bg-muted px-1 font-mono text-xs">
+											{version.latestRef.slice(0, 7)}
+										</code>
+									</>
+								)}
+							</span>
+							<span className="text-muted-foreground text-xs">
+								Deploys use this exact ref (reproducible). Upgrade to pull the
+								registry's latest.
+							</span>
+						</div>
+						<div className="flex items-center gap-2">
+							{version.upgradeAvailable ? (
+								<>
+									<Badge
+										variant="outline"
+										className="border-amber-500/40 text-amber-600 dark:text-amber-400"
+									>
+										Upgrade available
+									</Badge>
+									<Button size="sm" variant="outline" onClick={openUpgrade}>
+										<ArrowUpCircle className="mr-2 h-4 w-4" /> Upgrade
+									</Button>
+								</>
+							) : (
+								<Badge
+									variant="outline"
+									className="border-emerald-500/40 text-emerald-500"
+								>
+									Up to date
+								</Badge>
+							)}
+						</div>
+					</div>
+				)}
 				<div className="grid gap-4 sm:grid-cols-2">
 					<div className="space-y-1.5">
 						<Label>Pack</Label>
@@ -172,6 +255,63 @@ export const ShowNomadPackForm = ({ composeId }: Props) => {
 					</Button>
 				</div>
 			</CardContent>
+
+			<Dialog open={upgradeOpen} onOpenChange={setUpgradeOpen}>
+				<DialogContent className="max-h-[85vh] max-w-3xl overflow-hidden">
+					<DialogHeader>
+						<DialogTitle>Upgrade pack</DialogTitle>
+						<DialogDescription>
+							{preview.data?.fromRef && preview.data?.toRef ? (
+								<>
+									Changes to the rendered Nomad job from{" "}
+									<code className="font-mono">
+										{preview.data.fromRef.slice(0, 7)}
+									</code>{" "}
+									to{" "}
+									<code className="font-mono">
+										{preview.data.toRef.slice(0, 7)}
+									</code>
+									. Review before applying — Apply pins the new ref and
+									redeploys.
+								</>
+							) : (
+								"Rendering the diff between the pinned version and the registry's latest…"
+							)}
+						</DialogDescription>
+					</DialogHeader>
+					<div className="max-h-[55vh] overflow-auto rounded-md border bg-muted/40">
+						{preview.isPending ? (
+							<div className="flex items-center gap-2 p-4 text-muted-foreground text-sm">
+								<Loader2 className="h-4 w-4 animate-spin" /> Rendering diff…
+							</div>
+						) : preview.data?.diff ? (
+							<pre className="whitespace-pre p-3 font-mono text-xs leading-relaxed">
+								{preview.data.diff}
+							</pre>
+						) : (
+							<p className="p-4 text-muted-foreground text-sm">
+								No differences in the rendered job between the two versions.
+							</p>
+						)}
+					</div>
+					<DialogFooter>
+						<Button variant="ghost" onClick={() => setUpgradeOpen(false)}>
+							Cancel
+						</Button>
+						<Button
+							onClick={applyUpgrade}
+							disabled={upgrade.isPending || preview.isPending}
+						>
+							{upgrade.isPending ? (
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+							) : (
+								<ArrowUpCircle className="mr-2 h-4 w-4" />
+							)}
+							{upgrade.isPending ? "Upgrading…" : "Apply & redeploy"}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</Card>
 	);
 };

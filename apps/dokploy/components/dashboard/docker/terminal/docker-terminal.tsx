@@ -42,9 +42,10 @@ export const DockerTerminal: React.FC<Props> = ({
 		const addonFit = new FitAddon();
 		const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 
-		const wsUrl = wsPath === "/nomad-terminal"
-			? `${protocol}//${window.location.host}/nomad-terminal?allocId=${containerId}&taskName=${taskName}&activeWay=${activeWay}`
-			: `${protocol}//${window.location.host}/docker-container-terminal?containerId=${containerId}&activeWay=${activeWay}${serverId ? `&serverId=${serverId}` : ""}`;
+		const wsUrl =
+			wsPath === "/nomad-terminal"
+				? `${protocol}//${window.location.host}/nomad-terminal?allocId=${containerId}&taskName=${taskName}&activeWay=${activeWay}`
+				: `${protocol}//${window.location.host}/docker-container-terminal?containerId=${containerId}&activeWay=${activeWay}${serverId ? `&serverId=${serverId}` : ""}`;
 
 		const ws = new WebSocket(wsUrl);
 
@@ -62,7 +63,9 @@ export const DockerTerminal: React.FC<Props> = ({
 		return () => {
 			ws.readyState === WebSocket.OPEN && ws.close();
 		};
-	}, [containerId, activeWay, id]);
+		// taskName/serverId/wsPath are part of the WS URL — without them here,
+		// switching the task (or server) never reconnects the shell to the new one.
+	}, [containerId, activeWay, id, taskName, serverId, wsPath]);
 
 	return (
 		<div className="flex flex-col gap-4">

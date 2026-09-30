@@ -199,6 +199,17 @@ export const applyServiceScalingOverrides = (
 	for (const service of services) {
 		const o = overrides[service.name];
 		if (!o) continue;
+		// Reserved-resource override (applies in both modes — resources are per-task).
+		if (o.resources) {
+			service.resources = {
+				...service.resources,
+				...(o.resources.cpu != null ? { cpu: o.resources.cpu } : {}),
+				...(o.resources.memory != null ? { memory: o.resources.memory } : {}),
+				...(o.resources.memoryMax != null
+					? { memoryMax: o.resources.memoryMax }
+					: {}),
+			};
+		}
 		if (o.replicas != null) service.replicas = o.replicas;
 		if (o.autoscaling?.enabled) {
 			const min = Math.max(1, o.autoscaling.min);
@@ -418,13 +429,20 @@ export const getBuildNomadPackCommand = (
 	compose: NomadComposeNested,
 ): string => {
 	const { COMPOSE_PATH } = paths(!!compose.serverId);
-	const { appName, composeFile, nomadPack, nomadPackRegistry } = compose;
+	const { appName, composeFile, nomadPack, nomadPackRegistry, nomadPackRef } =
+		compose;
 	const projectPath = join(COMPOSE_PATH, appName, "code");
 	const varFile = join(projectPath, `${appName}.vars.hcl`);
 
 	if (!nomadPack || !nomadPack.trim()) {
 		return 'echo "Error: no Nomad Pack specified"; exit 1';
 	}
+
+	// Pin the registry to a git ref (SHA/tag) so redeploys are reproducible —
+	// otherwise nomad-pack pulls the registry HEAD every time. Sanitized (git
+	// refs are [A-Za-z0-9._/-]); empty ref = latest (first deploy pins it).
+	const safeRef = (nomadPackRef ?? "").replace(/[^A-Za-z0-9._/-]/g, "");
+	const refFlag = safeRef ? ` --ref ${safeRef}` : "";
 
 	const hasVars = !!composeFile && composeFile.trim().length > 0;
 	const encodedVars = encodeBase64(composeFile || "");
@@ -434,10 +452,18 @@ export const getBuildNomadPackCommand = (
 	// `nomad-pack run <pack>` fails with "Failed To Find Pack" on a fresh host
 	// (e.g. right after a panel roll). Both adds tolerate a non-zero exit so a
 	// re-deploy (registry already present) doesn't fail.
-	const registryName = "nomploy-custom";
-	const addRegistry = nomadPackRegistry
-		? `\tnomad-pack registry add ${registryName} "${nomadPackRegistry}" 2>&1 || true\n`
-		: "\tnomad-pack registry add default github.com/hashicorp/nomad-pack-community-registry 2>&1 || true\n";
+	const registryName = nomadPackRegistry ? "nomploy-custom" : "default";
+	const registryUrl = nomadPackRegistry
+		? `"${nomadPackRegistry}"`
+		: "github.com/hashicorp/nomad-pack-community-registry";
+	const addCmd = `nomad-pack registry add ${registryName} ${registryUrl}${refFlag} 2>&1 || true`;
+	// When pinned to a ref, `registry add` clones the whole registry every deploy —
+	// skip it if that exact ref is already in the local pack cache (the cache dir is
+	// named by the full ref). Big win for a large registry; safe because the ref is
+	// immutable. Unpinned (fallback) always re-adds to pull latest.
+	const addRegistry = safeRef
+		? `\t[ -d "$HOME/.cache/nomad/packs/${registryName}/${safeRef}" ] && echo "Registry ${registryName}@${safeRef.slice(0, 8)} cached" || ${addCmd}\n`
+		: `\t${addCmd}\n`;
 	const registryFlag = nomadPackRegistry ? ` --registry ${registryName}` : "";
 	const varFlag = hasVars ? ` --var-file="${varFile}"` : "";
 	const writeVars = hasVars
@@ -449,7 +475,7 @@ set -e
 {
 	command -v nomad-pack >/dev/null 2>&1 || { echo "Error: nomad-pack is not installed on this host. Nomad Pack deploys run on the control plane — deploy this compose without a specific server, or install nomad-pack on the target."; exit 1; }
 	mkdir -p "${projectPath}"
-${writeVars}${addRegistry}	nomad-pack run ${nomadPack}${registryFlag}${varFlag} --name "${appName}" 2>&1
+${writeVars}${addRegistry}	nomad-pack run ${nomadPack}${registryFlag}${refFlag}${varFlag} --name "${appName}" 2>&1
 	echo "Nomad Pack deployed"
 ${healthCheckSnippet(appName, "pack")}} || {
 	echo "Error: Nomad Pack deployment failed"
@@ -1576,7 +1602,7 @@ const generateConsulServices = (
 /**
  * Generate Traefik-compatible Consul tags for a specific port's domains
  */
-const generateConsulTags = (
+export const generateConsulTags = (
 	appName: string,
 	serviceName: string,
 	domains: Domain[],
