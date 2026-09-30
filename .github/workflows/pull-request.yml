@@ -7,12 +7,16 @@ on:
 permissions:
   contents: read
 
+# Gate PRs on the SAME checks a release runs (scripts/check.sh): the server prod
+# build (the real hard-tsc gate) + the vitest suite. The app's Next build has
+# `typescript.ignoreBuildErrors: true`, so app `tsc` is informational only — check.sh
+# reports it but does not fail on it, matching what the release image actually enforces.
+# (The upstream Dokploy workflow hard-typechecked the whole monorepo and spun up Docker
+# Swarm for integration tests; the fork replaced Swarm with Nomad and ignores app TS
+# errors in prod, so both of those only produced false reds here.)
 jobs:
   pr-check:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        job: [build, test, typecheck]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -20,32 +24,6 @@ jobs:
         with:
           node-version: 24.4.0
           cache: "pnpm"
-      
-      - name: Install Nixpacks
-        if: matrix.job == 'test'
-        run:  |
-          export NIXPACKS_VERSION=1.41.0
-          curl -sSL https://nixpacks.com/install.sh | bash
-          echo "Nixpacks installed $NIXPACKS_VERSION"
-
-      - name: Install Railpack
-        if: matrix.job == 'test'
-        run:  |
-          export RAILPACK_VERSION=0.15.4
-          curl -sSL https://railpack.com/install.sh | bash
-          echo "Railpack installed $RAILPACK_VERSION"
-      
-      - name: Add build tools to PATH
-        if: matrix.job == 'test'
-        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
-      
-      - name: Initialize Docker Swarm
-        if: matrix.job == 'test'
-        run: |
-          docker swarm init
-          docker network create --driver overlay nomploy-network || true
-          echo "✅ Docker Swarm initialized"
-      
       - run: pnpm install --frozen-lockfile
-      - run: pnpm server:build
-      - run: pnpm ${{ matrix.job }}
+      - name: Release gate (server prod build + tests)
+        run: bash scripts/check.sh
