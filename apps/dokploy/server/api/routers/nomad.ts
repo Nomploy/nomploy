@@ -3869,7 +3869,9 @@ fi`;
 			z
 				.object({
 					groupId: z.string().optional(),
-					limit: z.number().int().min(1).max(100).optional(),
+					// Up to 500 so the instances-over-time charts can reconstruct a wide
+					// window; the paginated Activity feed still asks for ~10.
+					limit: z.number().int().min(1).max(500).optional(),
 					offset: z.number().int().min(0).optional(),
 				})
 				.optional(),

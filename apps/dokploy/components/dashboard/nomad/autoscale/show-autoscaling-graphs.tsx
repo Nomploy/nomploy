@@ -74,9 +74,9 @@ export const ShowAutoscalingGraphs = () => {
 	);
 	const { data: groupsRaw } = api.nomad.listAutoscalingGroups.useQuery();
 	// Graphs plot count-over-time, so fetch a wide window of history (not the
-	// paginated 10 the Activity feed uses).
+	// paginated 10 the Activity feed uses). Capped at 500 server-side.
 	const { data: eventsRaw } = api.nomad.getAutoscalerEvents.useQuery(
-		{ limit: 200 },
+		{ limit: 500 },
 		{
 			refetchInterval: 30000,
 		},
@@ -85,9 +85,9 @@ export const ShowAutoscalingGraphs = () => {
 	const [rangeLabel, setRangeLabel] = useState("7d");
 	const rangeMs = RANGES.find((r) => r.label === rangeLabel)?.ms ?? null;
 	const now = Date.now();
+	// `null` for "All" — the effective left bound is then derived per group from
+	// its own oldest reconstructed point (see below).
 	const from = rangeMs === null ? null : now - rangeMs;
-	// <=24h windows read as clock times; longer windows as calendar days.
-	const tickFmt = rangeMs !== null && rangeMs <= DAY ? "HH:mm" : "MMM d";
 
 	const status = (statusRaw ?? []) as GroupStatus[];
 	const groups = (groupsRaw ?? []) as GroupConfig[];
@@ -128,14 +128,17 @@ export const ShowAutoscalingGraphs = () => {
 				{enabled.map((g) => {
 					const st = status.find((s) => s.groupId === g.groupId);
 					const current = st?.decision?.workerCount ?? st?.nodes?.length ?? 0;
-					const series = clipSeries(
-						buildSeries(
-							current,
-							events.filter((e) => e.groupId === g.groupId),
-						),
-						from,
-						now,
+					const raw = buildSeries(
+						current,
+						events.filter((e) => e.groupId === g.groupId),
 					);
+					// "All" spans from this group's oldest reconstructed point; clamp to a
+					// ≥1h window so a group with no scale history still renders a baseline
+					// instead of collapsing to a single dot.
+					const effFrom = from ?? Math.min(raw[0]?.t ?? now, now - HOUR);
+					const series = clipSeries(raw, effFrom, now);
+					// <=24h windows read as clock times; longer windows as calendar days.
+					const fmt = now - effFrom <= DAY ? "HH:mm" : "MMM d";
 					// Headroom above max so the max line isn't clipped at the top.
 					const yMax = Math.max(g.maxNodes, current) + 1;
 					return (
@@ -156,14 +159,12 @@ export const ShowAutoscalingGraphs = () => {
 										dataKey="t"
 										type="number"
 										scale="time"
-										domain={
-											from === null ? ["dataMin", "dataMax"] : [from, now]
-										}
+										domain={[effFrom, now]}
 										tickLine={false}
 										axisLine={false}
 										tickMargin={8}
 										minTickGap={40}
-										tickFormatter={(v) => format(new Date(v), tickFmt)}
+										tickFormatter={(v) => format(new Date(v), fmt)}
 									/>
 									<YAxis
 										tickLine={false}
