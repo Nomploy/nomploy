@@ -162,7 +162,7 @@
 		"use-resize-observer": "9.1.0",
 		"ws": "8.22.0",
 		"xterm-addon-fit": "^0.8.0",
-		"yaml": "2.8.1",
+		"yaml": "2.8.3",
 		"zod": "^4.3.6",
 		"zod-form-data": "^3.0.1"
 	},
