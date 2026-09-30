@@ -139,6 +139,12 @@ export const ShowAutoscalingGraphs = () => {
 					const series = clipSeries(raw, effFrom, now);
 					// <=24h windows read as clock times; longer windows as calendar days.
 					const fmt = now - effFrom <= DAY ? "HH:mm" : "MMM d";
+					// Explicit, evenly-spaced ticks inset from the edges — deterministic
+					// spacing (no auto-tick crowding at the left) and no edge clipping.
+					const span = now - effFrom;
+					const xTicks = [0.02, 0.35, 0.68, 0.98].map((f) =>
+						Math.round(effFrom + span * f),
+					);
 					// Headroom above max so the max line isn't clipped at the top.
 					const yMax = Math.max(g.maxNodes, current) + 1;
 					return (
@@ -163,8 +169,8 @@ export const ShowAutoscalingGraphs = () => {
 										tickLine={false}
 										axisLine={false}
 										tickMargin={8}
-										minTickGap={56}
-										interval="preserveStartEnd"
+										ticks={xTicks}
+										interval={0}
 										tickFormatter={(v) => format(new Date(v), fmt)}
 									/>
 									<YAxis
