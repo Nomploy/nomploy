@@ -15,6 +15,7 @@ import { and, eq } from "drizzle-orm";
 import type { z } from "zod";
 import { IS_CLOUD } from "../constants";
 import { pointDomainAtLb } from "../setup/loadbalancer-dns";
+import { nomadFetch } from "../setup/pack-nomad";
 import { syncRegistryAuthToConsul } from "../setup/registry-auth";
 import { generateZotRegistryJob } from "../utils/builders/nomad-registry";
 import { encodeBase64 } from "../utils/docker/utils";
@@ -330,3 +331,68 @@ export const registryJobName = (registryId: string): string =>
 		.toLowerCase()
 		.replace(/[^a-z0-9]/g, "")
 		.slice(0, 12)}`;
+
+export type SelfHostedRegistryState =
+	| "provisioning"
+	| "healthy"
+	| "failed"
+	| "not_found"
+	| "unknown";
+
+/**
+ * Health of a self-hosted registry's zot Nomad job, for the UI. Resolves the job
+ * (derived from the registryId), reads its allocations, and reports a state plus a
+ * short message drawn from the latest task event when it's failing — so a bad
+ * config (crash loop) is visible in the panel instead of only via the Nomad API.
+ */
+export const getSelfHostedRegistryStatus = async (
+	registryId: string,
+	organizationId: string,
+): Promise<{ state: SelfHostedRegistryState; message?: string }> => {
+	const reg = await db.query.registry.findFirst({
+		where: and(
+			eq(registry.registryId, registryId),
+			eq(registry.organizationId, organizationId),
+		),
+	});
+	if (!reg || reg.registryType !== "selfHosted") return { state: "unknown" };
+
+	const jobName = registryJobName(registryId);
+	try {
+		const allocs = await nomadFetch<
+			{
+				JobVersion?: number;
+				ClientStatus?: string;
+				TaskStates?: {
+					zot?: { Events?: { DisplayMessage?: string }[] };
+				};
+			}[]
+		>(`/job/${encodeURIComponent(jobName)}/allocations`);
+		if (!allocs || allocs.length === 0) {
+			const job = await nomadFetch(`/job/${encodeURIComponent(jobName)}`).catch(
+				() => null,
+			);
+			return { state: job ? "provisioning" : "not_found" };
+		}
+		const latest = Math.max(...allocs.map((a) => a.JobVersion ?? 0));
+		const cur = allocs.filter((a) => (a.JobVersion ?? 0) === latest);
+		if (cur.some((a) => a.ClientStatus === "running"))
+			return { state: "healthy" };
+		if (
+			cur.length > 0 &&
+			cur.every((a) => a.ClientStatus === "failed" || a.ClientStatus === "lost")
+		) {
+			const events = cur[0]?.TaskStates?.zot?.Events ?? [];
+			const msg = [...events]
+				.reverse()
+				.find(
+					(e: { DisplayMessage?: string }) =>
+						e.DisplayMessage && /error|exit|fail/i.test(e.DisplayMessage),
+				)?.DisplayMessage;
+			return { state: "failed", message: msg };
+		}
+		return { state: "provisioning" };
+	} catch {
+		return { state: "unknown" };
+	}
+};

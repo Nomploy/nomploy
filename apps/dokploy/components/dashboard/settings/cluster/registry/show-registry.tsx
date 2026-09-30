@@ -1,6 +1,7 @@
 import { Loader2, Package, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { DialogAction } from "@/components/shared/dialog-action";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -12,6 +13,50 @@ import {
 import { api } from "@/utils/api";
 import { HandleRegistry } from "./handle-registry";
 import { HandleSelfHostedRegistry } from "./handle-self-hosted-registry";
+
+const STATUS_STYLE: Record<string, { label: string; className: string }> = {
+	provisioning: {
+		label: "Provisioning…",
+		className: "border-amber-500/40 text-amber-600 dark:text-amber-400",
+	},
+	healthy: {
+		label: "Healthy",
+		className: "border-emerald-500/40 text-emerald-600 dark:text-emerald-400",
+	},
+	failed: {
+		label: "Failed",
+		className: "border-destructive/40 text-destructive",
+	},
+	not_found: {
+		label: "No job",
+		className: "border-muted-foreground/30 text-muted-foreground",
+	},
+	unknown: {
+		label: "Unknown",
+		className: "border-muted-foreground/30 text-muted-foreground",
+	},
+};
+
+/** Live health badge for a self-hosted (zot) registry — polls the zot job's state. */
+const SelfHostedStatus = ({ registryId }: { registryId: string }) => {
+	const { data } = api.registry.selfHostedStatus.useQuery(
+		{ registryId },
+		{ refetchInterval: 8000 },
+	);
+	const style = STATUS_STYLE[data?.state ?? "unknown"] ?? STATUS_STYLE.unknown;
+	return (
+		<Badge
+			variant="outline"
+			className={style?.className}
+			title={data?.message || undefined}
+		>
+			{data?.state === "provisioning" && (
+				<Loader2 className="mr-1 size-3 animate-spin" />
+			)}
+			{style?.label}
+		</Badge>
+	);
+};
 
 export const ShowRegistry = () => {
 	const { mutateAsync, isPending: isRemoving } =
@@ -64,8 +109,20 @@ export const ShowRegistry = () => {
 													<div className="flex items-center justify-between p-3.5 rounded-lg bg-background border  w-full">
 														<div className="flex items-center justify-between">
 															<div className="flex gap-2 flex-col">
-																<span className="text-sm font-medium">
+																<span className="flex items-center gap-2 text-sm font-medium">
 																	{index + 1}. {registry.registryName}
+																	{registry.registryType === "selfHosted" ? (
+																		<>
+																			<Badge variant="secondary">
+																				Self-hosted · zot
+																			</Badge>
+																			<SelfHostedStatus
+																				registryId={registry.registryId}
+																			/>
+																		</>
+																	) : (
+																		<Badge variant="outline">External</Badge>
+																	)}
 																</span>
 																{registry.registryUrl && (
 																	<div className="text-xs text-muted-foreground">
@@ -76,9 +133,11 @@ export const ShowRegistry = () => {
 														</div>
 
 														<div className="flex flex-row gap-1">
-															<HandleRegistry
-																registryId={registry.registryId}
-															/>
+															{registry.registryType !== "selfHosted" && (
+																<HandleRegistry
+																	registryId={registry.registryId}
+																/>
+															)}
 
 															{permissions?.registry.delete && (
 																<DialogAction
