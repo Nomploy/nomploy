@@ -163,7 +163,8 @@ export const ShowAutoscalingGraphs = () => {
 										tickLine={false}
 										axisLine={false}
 										tickMargin={8}
-										minTickGap={40}
+										minTickGap={56}
+										interval="preserveStartEnd"
 										tickFormatter={(v) => format(new Date(v), fmt)}
 									/>
 									<YAxis
