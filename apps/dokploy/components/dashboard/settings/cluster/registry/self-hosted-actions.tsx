@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { api } from "@/utils/api";
+import { SelfHostedSettings } from "./self-hosted-settings";
 
 const copy = (v: string) => {
 	navigator.clipboard?.writeText(v);
@@ -74,6 +75,7 @@ export const SelfHostedActions = ({
 			>
 				<ExternalLink className="size-4 text-muted-foreground" />
 			</Button>
+			<SelfHostedSettings registryId={registryId} />
 			<Dialog open={open} onOpenChange={setOpen}>
 				<DialogTrigger asChild>
 					<Button variant="ghost" size="icon" title="Registry credentials">

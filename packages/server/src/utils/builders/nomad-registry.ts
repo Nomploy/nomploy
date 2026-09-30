@@ -15,13 +15,35 @@ export interface ZotS3Config {
 	rootDirectory: string; // key prefix inside the bucket, e.g. "/zot"
 }
 
+export interface ZotRetention {
+	keepTags?: number; // most-recently-pushed tags to keep per repo (default 20)
+	deleteUntagged?: boolean; // drop untagged manifests (default true)
+	gcIntervalHours?: number; // GC sweep interval (default 24)
+}
+
 export interface ZotRegistryJobOptions {
 	appName: string; // Nomad job id == the Nomad Variable path nomad/jobs/<appName>
 	domain: string; // registry.spertulo.sk
 	s3: ZotS3Config; // non-secret S3 params; creds come from the Nomad Variable
 	certResolver: string; // "letsencrypt-dns" behind the HA pool, else "letsencrypt"
 	deployedAt: string; // ISO stamp → forces a fresh alloc on every apply
+	retention?: ZotRetention;
+	configOverride?: Record<string, unknown>; // advanced: deep-merged into the config
 }
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+	v != null && typeof v === "object" && !Array.isArray(v);
+
+/** Deep-merge `src` onto `dst` (objects recurse; arrays/scalars replace). */
+const deepMerge = (dst: unknown, src: unknown): unknown => {
+	if (!isPlainObject(dst) || !isPlainObject(src)) return src ?? dst;
+	const out = { ...dst };
+	for (const [k, v] of Object.entries(src)) {
+		out[k] =
+			isPlainObject(v) && isPlainObject(out[k]) ? deepMerge(out[k], v) : v;
+	}
+	return out;
+};
 
 // A consul-template reference to a key in the job's Nomad Variable. Backtick-quote
 // the path so JSON.stringify (below) doesn't escape the quotes and break the
@@ -38,60 +60,72 @@ const varRef = (appName: string, key: string): string =>
  * The S3 driver is the docker/distribution one; R2/MinIO need path-style
  * addressing and an absolute rootdirectory.
  */
-export const generateZotConfig = (appName: string, s3: ZotS3Config): string =>
-	JSON.stringify(
-		{
-			distSpecVersion: "1.1.1",
-			storage: {
-				rootDirectory: "/tmp/zot",
-				// dedupe needs a remote cache DB (DynamoDB) with remote (S3) storage;
-				// we don't run one, so turn it off (zot otherwise refuses to start).
-				dedupe: false,
-				// Garbage-collect blobs left unreferenced by the retention policy.
-				gc: true,
-				gcDelay: "1h",
-				gcInterval: "24h",
-				retention: {
-					// Keep the 20 most-recently-pushed tags per repo and drop untagged
-					// manifests. Sensible default; tune per deployment later.
-					policies: [
-						{
-							repositories: ["**"],
-							deleteUntagged: true,
-							keepTags: [{ mostRecentlyPushedCount: 20 }],
-						},
-					],
-				},
-				storageDriver: {
-					name: "s3",
-					// Absolute key prefix (the driver errors on a relative "invalid path").
-					rootdirectory: s3.rootDirectory.startsWith("/")
-						? s3.rootDirectory
-						: `/${s3.rootDirectory}`,
-					region: s3.region,
-					regionendpoint: s3.endpoint,
-					bucket: s3.bucket,
-					accesskey: varRef(appName, "s3_accesskey"),
-					secretkey: varRef(appName, "s3_secretkey"),
-					secure: true,
-					forcepathstyle: true,
-				},
+export const generateZotConfig = (
+	appName: string,
+	s3: ZotS3Config,
+	retention?: ZotRetention,
+	configOverride?: Record<string, unknown>,
+): string => {
+	const keepTags = retention?.keepTags ?? 20;
+	const deleteUntagged = retention?.deleteUntagged ?? true;
+	const gcHours = retention?.gcIntervalHours ?? 24;
+
+	const base = {
+		distSpecVersion: "1.1.1",
+		storage: {
+			rootDirectory: "/tmp/zot",
+			// dedupe needs a remote cache DB (DynamoDB) with remote (S3) storage;
+			// we don't run one, so turn it off (zot otherwise refuses to start).
+			dedupe: false,
+			// Garbage-collect blobs left unreferenced by the retention policy.
+			gc: true,
+			gcDelay: "1h",
+			gcInterval: `${gcHours}h`,
+			retention: {
+				policies: [
+					{
+						repositories: ["**"],
+						deleteUntagged,
+						keepTags: [{ mostRecentlyPushedCount: keepTags }],
+					},
+				],
 			},
-			http: {
-				address: "0.0.0.0",
-				port: String(ZOT_PORT),
-				auth: { htpasswd: { path: "/etc/zot/htpasswd" } },
+			storageDriver: {
+				name: "s3",
+				// Absolute key prefix (the driver errors on a relative "invalid path").
+				rootdirectory: s3.rootDirectory.startsWith("/")
+					? s3.rootDirectory
+					: `/${s3.rootDirectory}`,
+				region: s3.region,
+				regionendpoint: s3.endpoint,
+				bucket: s3.bucket,
+				accesskey: varRef(appName, "s3_accesskey"),
+				secretkey: varRef(appName, "s3_secretkey"),
+				secure: true,
+				forcepathstyle: true,
 			},
-			// The web UI + search extension: browse repositories/tags at the domain.
-			extensions: {
-				search: { enable: true },
-				ui: { enable: true },
-			},
-			log: { level: "info" },
 		},
-		null,
-		2,
-	);
+		http: {
+			address: "0.0.0.0",
+			port: String(ZOT_PORT),
+			auth: { htpasswd: { path: "/etc/zot/htpasswd" } },
+		},
+		// The web UI + search extension: browse repositories/tags at the domain.
+		extensions: {
+			search: { enable: true },
+			ui: { enable: true },
+		},
+		log: { level: "info" },
+	};
+
+	// Apply the advanced override, then FORCE the secret-carrying fields back so an
+	// override can't remove the Nomad-Variable refs or the htpasswd path.
+	const merged = deepMerge(base, configOverride ?? {}) as typeof base;
+	merged.storage.storageDriver.accesskey = varRef(appName, "s3_accesskey");
+	merged.storage.storageDriver.secretkey = varRef(appName, "s3_secretkey");
+	merged.http.auth = { htpasswd: { path: "/etc/zot/htpasswd" } };
+	return JSON.stringify(merged, null, 2);
+};
 
 /**
  * A Nomad job running zot as nomploy's container registry: S3-backed (stateless,
@@ -107,6 +141,12 @@ export const generateZotConfig = (appName: string, s3: ZotS3Config): string =>
  */
 export const generateZotRegistryJob = (opts: ZotRegistryJobOptions): string => {
 	const { appName, domain, s3, certResolver, deployedAt } = opts;
+	const config = generateZotConfig(
+		appName,
+		s3,
+		opts.retention,
+		opts.configOverride,
+	);
 	const domainObj = {
 		host: domain,
 		https: true,
@@ -117,7 +157,6 @@ export const generateZotRegistryJob = (opts: ZotRegistryJobOptions): string => {
 	const tags = generateConsulTags(appName, "registry", [domainObj])
 		.map((t) => `        "${t.replace(/"/g, '\\"')}",`)
 		.join("\n");
-	const config = generateZotConfig(appName, s3);
 	const htpasswdRef = varRef(appName, "htpasswd");
 
 	return `job "${appName}" {

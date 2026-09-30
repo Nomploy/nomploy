@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { pgEnum, pgTable, text } from "drizzle-orm/pg-core";
+import { jsonb, pgEnum, pgTable, text } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -27,6 +27,16 @@ export const registry = pgTable("registry", {
 		.notNull()
 		.$defaultFn(() => new Date().toISOString()),
 	registryType: registryType("selfHosted").notNull().default("cloud"),
+	// Self-hosted (zot) only: the S3 destination backing it (so its zot job can be
+	// re-rendered when settings change), the retention policy, and a free-form
+	// config override deep-merged into the generated zot config for advanced tweaks.
+	destinationId: text("destinationId"),
+	retention: jsonb("retention").$type<{
+		keepTags?: number;
+		deleteUntagged?: boolean;
+		gcIntervalHours?: number;
+	}>(),
+	configOverride: jsonb("configOverride").$type<Record<string, unknown>>(),
 	organizationId: text("organizationId")
 		.notNull()
 		.references(() => organization.id, { onDelete: "cascade" }),
@@ -116,10 +126,15 @@ export const apiFindOneRegistry = z.object({
 	registryId: z.string().min(1),
 });
 
-export const apiUpdateRegistry = createSchema.partial().extend({
-	registryId: z.string().min(1),
-	serverId: z.string().optional(),
-});
+export const apiUpdateRegistry = createSchema
+	.partial()
+	// These are managed by the self-hosted provisioning / config endpoints, not the
+	// generic update.
+	.omit({ destinationId: true, retention: true, configOverride: true })
+	.extend({
+		registryId: z.string().min(1),
+		serverId: z.string().optional(),
+	});
 
 export const apiEnableSelfHostedRegistry = createSchema
 	.pick({

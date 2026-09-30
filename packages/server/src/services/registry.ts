@@ -17,7 +17,11 @@ import { IS_CLOUD } from "../constants";
 import { pointDomainAtLb } from "../setup/loadbalancer-dns";
 import { nomadDelete, nomadFetch, nomadPut } from "../setup/pack-nomad";
 import { syncRegistryAuthToConsul } from "../setup/registry-auth";
-import { generateZotRegistryJob } from "../utils/builders/nomad-registry";
+import {
+	generateZotConfig,
+	generateZotRegistryJob,
+	type ZotRetention,
+} from "../utils/builders/nomad-registry";
 import { encodeBase64 } from "../utils/docker/utils";
 import { getDefaultCertResolver } from "./cert-resolver";
 
@@ -247,6 +251,8 @@ export const provisionSelfHostedRegistry = async (
 			registryUrl: input.domain,
 			registryType: "selfHosted",
 			imagePrefix: input.imagePrefix ?? null,
+			destinationId: input.destinationId,
+			retention: DEFAULT_RETENTION,
 			organizationId,
 		})
 		.returning();
@@ -257,24 +263,6 @@ export const provisionSelfHostedRegistry = async (
 		});
 	}
 	const appName = registryJobName(row.registryId);
-
-	const certResolver = await getDefaultCertResolver().catch(
-		() => "letsencrypt",
-	);
-	const job = generateZotRegistryJob({
-		appName,
-		domain: input.domain,
-		s3: {
-			endpoint: dest.endpoint,
-			region: dest.region,
-			bucket: dest.bucket,
-			// Key prefix inside the bucket — keeps registry blobs separate from any
-			// other content (e.g. DB backups) in the same bucket.
-			rootDirectory: "/zot",
-		},
-		certResolver,
-		deployedAt: new Date().toISOString(),
-	});
 
 	// Put the secrets in the job's Nomad Variable (the task reads them at render
 	// time via its workload identity) so they never appear in the job spec. Must
@@ -303,14 +291,10 @@ export const provisionSelfHostedRegistry = async (
 	}
 
 	// Deploy the job (control plane). A service job with no update{} stanza returns
-	// at registration, so this is quick. Roll it back if registration fails so a
-	// dead row isn't left behind.
-	const jobFile = `/etc/nomploy/registry/${appName}.nomad.hcl`;
-	const encoded = encodeBase64(job);
+	// at registration, so this is quick. Roll it back if it fails so a dead row
+	// isn't left behind.
 	try {
-		await execAsync(
-			`set -e; mkdir -p /etc/nomploy/registry; echo "${encoded}" | base64 -d > "${jobFile}"; nomad job run "${jobFile}" 2>&1`,
-		);
+		await renderAndRunZotJob(row, dest);
 	} catch (error) {
 		await db
 			.delete(registry)
@@ -444,4 +428,131 @@ export const getSelfHostedRegistryCredentials = async (
 		password: reg.password,
 		url: reg.registryUrl,
 	};
+};
+
+type Destination = typeof destinations.$inferSelect;
+
+export const DEFAULT_RETENTION: ZotRetention = {
+	keepTags: 20,
+	deleteUntagged: true,
+	gcIntervalHours: 24,
+};
+
+// The non-secret S3 params zot needs, drawn from a destination. Blobs live under a
+// fixed "/zot" key prefix (separate from anything else in the bucket).
+const zotS3 = (dest: Destination) => ({
+	endpoint: dest.endpoint,
+	region: dest.region,
+	bucket: dest.bucket,
+	rootDirectory: "/zot",
+});
+
+/** Render the zot job for a self-hosted registry row + its S3 destination and run
+ * it (re-running re-renders the config template → zot restarts with the changes). */
+const renderAndRunZotJob = async (
+	reg: Registry,
+	dest: Destination,
+): Promise<void> => {
+	const appName = registryJobName(reg.registryId);
+	const certResolver = await getDefaultCertResolver().catch(
+		() => "letsencrypt",
+	);
+	const job = generateZotRegistryJob({
+		appName,
+		domain: reg.registryUrl,
+		s3: zotS3(dest),
+		certResolver,
+		deployedAt: new Date().toISOString(),
+		retention: reg.retention ?? DEFAULT_RETENTION,
+		configOverride: reg.configOverride ?? undefined,
+	});
+	const jobFile = `/etc/nomploy/registry/${appName}.nomad.hcl`;
+	const encoded = encodeBase64(job);
+	await execAsync(
+		`set -e; mkdir -p /etc/nomploy/registry; echo "${encoded}" | base64 -d > "${jobFile}"; nomad job run "${jobFile}" 2>&1`,
+	);
+};
+
+const findSelfHosted = async (registryId: string, organizationId: string) => {
+	const reg = await db.query.registry.findFirst({
+		where: and(
+			eq(registry.registryId, registryId),
+			eq(registry.organizationId, organizationId),
+		),
+	});
+	if (!reg || reg.registryType !== "selfHosted") {
+		throw new TRPCError({ code: "NOT_FOUND", message: "Registry not found" });
+	}
+	return reg;
+};
+
+/** Current retention + config override + the EFFECTIVE rendered zot config (with
+ * secrets as Nomad-Variable refs, safe to display). */
+export const getSelfHostedRegistryConfig = async (
+	registryId: string,
+	organizationId: string,
+) => {
+	const reg = await findSelfHosted(registryId, organizationId);
+	const dest = reg.destinationId
+		? await db.query.destinations.findFirst({
+				where: eq(destinations.destinationId, reg.destinationId),
+			})
+		: null;
+	const rendered = dest
+		? generateZotConfig(
+				registryJobName(reg.registryId),
+				zotS3(dest),
+				reg.retention ?? DEFAULT_RETENTION,
+				reg.configOverride ?? undefined,
+			)
+		: null;
+	return {
+		retention: reg.retention ?? DEFAULT_RETENTION,
+		configOverride: reg.configOverride ?? null,
+		rendered,
+	};
+};
+
+/** Update a self-hosted registry's retention / config override and re-apply the
+ * zot job (which restarts it with the new config). */
+export const updateSelfHostedRegistryConfig = async (
+	registryId: string,
+	organizationId: string,
+	patch: {
+		retention?: ZotRetention;
+		configOverride?: Record<string, unknown> | null;
+	},
+) => {
+	const reg = await findSelfHosted(registryId, organizationId);
+	if (!reg.destinationId) {
+		throw new TRPCError({
+			code: "BAD_REQUEST",
+			message: "Registry has no S3 destination recorded; re-create it.",
+		});
+	}
+	const dest = await db.query.destinations.findFirst({
+		where: eq(destinations.destinationId, reg.destinationId),
+	});
+	if (!dest) {
+		throw new TRPCError({
+			code: "BAD_REQUEST",
+			message: "The S3 destination for this registry no longer exists.",
+		});
+	}
+	const [updated] = await db
+		.update(registry)
+		.set({
+			retention: patch.retention ?? reg.retention,
+			configOverride:
+				patch.configOverride === undefined
+					? reg.configOverride
+					: patch.configOverride,
+		})
+		.where(eq(registry.registryId, registryId))
+		.returning();
+	if (!updated) {
+		throw new TRPCError({ code: "BAD_REQUEST", message: "Update failed" });
+	}
+	await renderAndRunZotJob(updated, dest);
+	return updated;
 };

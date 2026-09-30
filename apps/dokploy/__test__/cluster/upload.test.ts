@@ -15,6 +15,9 @@ describe("getRegistryTag", () => {
 			imagePrefix: null,
 			createdAt: new Date().toISOString(),
 			organizationId: "test-org-id",
+			destinationId: null,
+			retention: null,
+			configOverride: null,
 			...overrides,
 		};
 	};

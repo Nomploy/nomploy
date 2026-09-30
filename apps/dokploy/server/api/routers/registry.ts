@@ -3,12 +3,14 @@ import {
 	execAsyncRemote,
 	execFileAsync,
 	findRegistryById,
+	getSelfHostedRegistryConfig,
 	getSelfHostedRegistryCredentials,
 	getSelfHostedRegistryStatus,
 	IS_CLOUD,
 	provisionSelfHostedRegistry,
 	removeRegistry,
 	updateRegistry,
+	updateSelfHostedRegistryConfig,
 } from "@nomploy/server";
 import { db } from "@nomploy/server/db";
 import { TRPCError } from "@trpc/server";
@@ -52,6 +54,35 @@ export const registryRouter = createTRPCRouter({
 			return getSelfHostedRegistryCredentials(
 				input.registryId,
 				ctx.session.activeOrganizationId,
+			);
+		}),
+	selfHostedConfig: withPermission("registry", "create")
+		.input(z.object({ registryId: z.string().min(1) }))
+		.query(async ({ ctx, input }) => {
+			return getSelfHostedRegistryConfig(
+				input.registryId,
+				ctx.session.activeOrganizationId,
+			);
+		}),
+	updateSelfHostedConfig: withPermission("registry", "create")
+		.input(
+			z.object({
+				registryId: z.string().min(1),
+				retention: z
+					.object({
+						keepTags: z.number().int().min(1).max(10000).optional(),
+						deleteUntagged: z.boolean().optional(),
+						gcIntervalHours: z.number().int().min(1).max(8760).optional(),
+					})
+					.optional(),
+				configOverride: z.record(z.string(), z.unknown()).nullable().optional(),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			return updateSelfHostedRegistryConfig(
+				input.registryId,
+				ctx.session.activeOrganizationId,
+				{ retention: input.retention, configOverride: input.configOverride },
 			);
 		}),
 	createSelfHosted: withPermission("registry", "create")
