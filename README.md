@@ -4,15 +4,59 @@
 
 # nomploy
 
-**Self-hostable PaaS on a HashiCorp Nomad cluster** — deploy apps & databases,
-HA clusters, autoscaling and load balancing, from a familiar UI.
+**The self-hosted PaaS that grows past one server.**<br/>
+Heroku-style deploys from a UI, running on a real HashiCorp Nomad cluster:
+HA, autoscaling and load balancing included.
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Orchestrator: Nomad](https://img.shields.io/badge/orchestrator-Nomad-00CA8E?logo=hashicorp&logoColor=white)](https://www.nomadproject.io/)
 [![Fork of Dokploy](https://img.shields.io/badge/fork%20of-Dokploy-8B5CF6)](https://github.com/dokploy/dokploy)
 [![Packs: packs.nomploy.com](https://img.shields.io/badge/packs-packs.nomploy.com-2DD4BF)](https://packs.nomploy.com)
+[![GitHub stars](https://img.shields.io/github/stars/Nomploy/nomploy?style=social)](https://github.com/Nomploy/nomploy)
+
+[Quick start](#-getting-started) · [Docs](docs/README.md) · [Features](#-features) · [vs. Dokploy](#-how-nomploy-differs-from-dokploy)
 
 </div>
+
+<!-- TODO: add a 60–90s demo GIF here: deploy an app → add a node → watch it scale.
+<p align="center"><img src="docs/assets/demo.gif" alt="nomploy demo" width="900" /></p>
+-->
+
+```bash
+curl -sSL https://nomploy.com/install.sh | sh
+```
+
+One command on a fresh Debian/Ubuntu VPS gives you a working panel. Start on a
+single €5 box, then add nodes from the UI when you need them.
+
+## Why nomploy?
+
+Tools like Dokploy and Coolify make self-hosting easy, until you need a second
+server. Kubernetes solves that, but it's a lot to run for a handful of apps.
+nomploy sits in between: the same push-to-deploy experience, on
+**[Nomad](https://www.nomadproject.io/)**, a scheduler that's simple enough for
+one person to run.
+
+- **Start small, grow to a cluster.** Go from one node to an HA Nomad + Consul
+  control plane from the **Cluster** tab, over an encrypted WireGuard mesh.
+- **Autoscaling at every level.** Apps scale on CPU/memory, and autoscaling
+  groups create and remove cloud VMs (Hetzner) based on cluster pressure.
+- **No single point of failure at the edge.** An active/active Traefik pool with
+  health-checked DNS and shared certificates.
+- **Bring what you have.** Deploy Docker Compose files (translated to Nomad),
+  native Nomad jobs, or Nomad Packs.
+- **Fully open source.** AGPL-3.0, with no source-available "enterprise" modules
+  and no paid feature gates.
+
+| | Single-server PaaS<br/>(Dokploy, Coolify) | **nomploy** | Kubernetes |
+|---|:---:|:---:|:---:|
+| Deploy from a UI, git push, SSL | ✅ | ✅ | add-ons |
+| Multi-node HA cluster | limited | ✅ | ✅ |
+| Node (VM) autoscaling | — | ✅ | ✅ |
+| HA ingress / load balancer | — | ✅ | ✅ |
+| Easy for one person to run | ✅ | ✅ | — |
+
+## What is it?
 
 **nomploy** is a free, self-hostable Platform as a Service (PaaS) that deploys and
 manages your applications and databases on a **[HashiCorp Nomad](https://www.nomadproject.io/)**
@@ -97,7 +141,7 @@ whole is licensed under the **GNU AGPL-3.0**; the upstream enterprise
 On a fresh Linux VPS (Debian/Ubuntu or RHEL family), run:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Nomploy/nomploy/main/install.sh | sh
+curl -sSL https://nomploy.com/install.sh | sh
 ```
 
 This installs Docker, Consul, Nomad, the CNI plugins, Traefik, Postgres, Redis

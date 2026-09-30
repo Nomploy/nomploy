@@ -1,7 +1,7 @@
 #!/bin/sh
 # nomploy installer — sets up the nomploy control plane on a fresh Linux server.
 #
-#   curl -sSL https://raw.githubusercontent.com/Nomploy/nomploy/main/install.sh | sh
+#   curl -sSL https://nomploy.com/install.sh | sh
 #
 # Installs: Docker, Consul, Nomad, CNI plugins, then runs Postgres, Redis,
 # Traefik and the nomploy app. Idempotent — safe to re-run.

@@ -18,7 +18,7 @@ This guide takes you from a bare Linux server to your first running app.
 On the server, run:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Nomploy/nomploy/main/install.sh | sh
+curl -sSL https://nomploy.com/install.sh | sh
 ```
 
 This installs Docker, Consul, Nomad, the CNI plugins, Traefik, Postgres, Redis

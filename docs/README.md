@@ -21,7 +21,7 @@ the topic you need.
 
 ## Quick reference
 
-- **Install:** `curl -sSL https://raw.githubusercontent.com/Nomploy/nomploy/main/install.sh | sh`
+- **Install:** `curl -sSL https://nomploy.com/install.sh | sh`
 - **Image:** `ghcr.io/nomploy/nomploy` (override with `NOMPLOY_IMAGE=…`)
 - **License:** AGPL-3.0 (portions Apache-2.0). See [`../LICENSING.md`](../LICENSING.md).
 
