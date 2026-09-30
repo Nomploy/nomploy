@@ -12,49 +12,67 @@ export interface ZotS3Config {
 	endpoint: string; // e.g. https://<acct>.r2.cloudflarestorage.com
 	region: string; // R2: "auto"
 	bucket: string;
-	accessKey: string;
-	secretKey: string;
-	rootDirectory: string; // key prefix inside the bucket, e.g. "registry"
+	rootDirectory: string; // key prefix inside the bucket, e.g. "/zot"
 }
 
 export interface ZotRegistryJobOptions {
-	appName: string; // Nomad job id, e.g. "nomploy-registry"
+	appName: string; // Nomad job id == the Nomad Variable path nomad/jobs/<appName>
 	domain: string; // registry.spertulo.sk
-	htpasswd: string; // one "user:$2b$…" line
-	s3: ZotS3Config;
+	s3: ZotS3Config; // non-secret S3 params; creds come from the Nomad Variable
 	certResolver: string; // "letsencrypt-dns" behind the HA pool, else "letsencrypt"
 	deployedAt: string; // ISO stamp → forces a fresh alloc on every apply
 }
 
+// A consul-template reference to a key in the job's Nomad Variable. Backtick-quote
+// the path so JSON.stringify (below) doesn't escape the quotes and break the
+// template expression once it's embedded in config.json.
+const varRef = (appName: string, key: string): string =>
+	`{{ with nomadVar \`nomad/jobs/${appName}\` }}{{ .${key}.Value }}{{ end }}`;
+
 /**
- * zot's config.json for an S3-backed, htpasswd-protected registry. The S3 driver
- * is the docker/distribution one; R2/MinIO need path-style addressing. Credentials
- * live in the rendered config (via a Nomad template stanza) — acceptable on this
- * single-tenant cluster; a follow-up can move them to Nomad Variables.
+ * zot's config.json for an S3-backed, htpasswd-protected registry, rendered as a
+ * consul-template so the S3 credentials come from the job's Nomad Variable at
+ * render time and never appear in the job spec. Also enables the built-in web UI +
+ * search (browse images at the domain) and a retention/GC policy.
+ *
+ * The S3 driver is the docker/distribution one; R2/MinIO need path-style
+ * addressing and an absolute rootdirectory.
  */
-export const generateZotConfig = (s3: ZotS3Config): string =>
+export const generateZotConfig = (appName: string, s3: ZotS3Config): string =>
 	JSON.stringify(
 		{
 			distSpecVersion: "1.1.1",
 			storage: {
 				rootDirectory: "/tmp/zot",
-				// dedupe needs a remote cache DB (DynamoDB) when storage is remote (S3);
-				// we don't run one, so turn it off — zot keeps a local boltdb cache and
-				// stores blobs in S3. Without this zot refuses to start ("dedupe set to
-				// true with remote storage … but no remote database configured").
+				// dedupe needs a remote cache DB (DynamoDB) with remote (S3) storage;
+				// we don't run one, so turn it off (zot otherwise refuses to start).
 				dedupe: false,
+				// Garbage-collect blobs left unreferenced by the retention policy.
+				gc: true,
+				gcDelay: "1h",
+				gcInterval: "24h",
+				retention: {
+					// Keep the 20 most-recently-pushed tags per repo and drop untagged
+					// manifests. Sensible default; tune per deployment later.
+					policies: [
+						{
+							repositories: ["**"],
+							deleteUntagged: true,
+							keepTags: [{ mostRecentlyPushedCount: 20 }],
+						},
+					],
+				},
 				storageDriver: {
 					name: "s3",
-					// The distribution S3 driver requires an ABSOLUTE key prefix
-					// ("invalid path" otherwise), so normalize a leading slash.
+					// Absolute key prefix (the driver errors on a relative "invalid path").
 					rootdirectory: s3.rootDirectory.startsWith("/")
 						? s3.rootDirectory
 						: `/${s3.rootDirectory}`,
 					region: s3.region,
 					regionendpoint: s3.endpoint,
 					bucket: s3.bucket,
-					accesskey: s3.accessKey,
-					secretkey: s3.secretKey,
+					accesskey: varRef(appName, "s3_accesskey"),
+					secretkey: varRef(appName, "s3_secretkey"),
 					secure: true,
 					forcepathstyle: true,
 				},
@@ -64,6 +82,11 @@ export const generateZotConfig = (s3: ZotS3Config): string =>
 				port: String(ZOT_PORT),
 				auth: { htpasswd: { path: "/etc/zot/htpasswd" } },
 			},
+			// The web UI + search extension: browse repositories/tags at the domain.
+			extensions: {
+				search: { enable: true },
+				ui: { enable: true },
+			},
 			log: { level: "info" },
 		},
 		null,
@@ -72,13 +95,18 @@ export const generateZotConfig = (s3: ZotS3Config): string =>
 
 /**
  * A Nomad job running zot as nomploy's container registry: S3-backed (stateless,
- * so it reschedules freely), htpasswd-protected, and exposed through the existing
+ * so it reschedules freely), htpasswd-protected, exposed through the existing
  * Traefik/consulCatalog ingress on `domain` with TLS — so cluster nodes pull over
- * a valid cert with no per-node `insecure-registries` daemon config. The config
- * and htpasswd render via template stanzas and bind into the container.
+ * a valid cert with no per-node `insecure-registries` daemon config.
+ *
+ * Secrets (S3 creds + htpasswd) are NOT in this spec: they live in the job's Nomad
+ * Variable (nomad/jobs/<appName>) and are pulled in at render time via consul-
+ * template (the task's workload identity can read its own job variable). The
+ * caller must PUT that variable (keys s3_accesskey, s3_secretkey, htpasswd) before
+ * running the job.
  */
 export const generateZotRegistryJob = (opts: ZotRegistryJobOptions): string => {
-	const { appName, domain, htpasswd, s3, certResolver, deployedAt } = opts;
+	const { appName, domain, s3, certResolver, deployedAt } = opts;
 	const domainObj = {
 		host: domain,
 		https: true,
@@ -89,7 +117,8 @@ export const generateZotRegistryJob = (opts: ZotRegistryJobOptions): string => {
 	const tags = generateConsulTags(appName, "registry", [domainObj])
 		.map((t) => `        "${t.replace(/"/g, '\\"')}",`)
 		.join("\n");
-	const config = generateZotConfig(s3);
+	const config = generateZotConfig(appName, s3);
+	const htpasswdRef = varRef(appName, "htpasswd");
 
 	return `job "${appName}" {
   datacenters = ["*"]
@@ -157,7 +186,7 @@ EOZOT
         destination = "local/htpasswd"
         change_mode = "restart"
         data        = <<EOHTP
-${htpasswd}
+${htpasswdRef}
 EOHTP
       }
 

@@ -33,6 +33,30 @@ export const nomadPost = async (path: string, body: unknown): Promise<void> => {
 	}
 };
 
+export const nomadPut = async (path: string, body: unknown): Promise<void> => {
+	const res = await fetch(`${NOMAD}/v1${path}`, {
+		method: "PUT",
+		headers: { "Content-Type": "application/json", ...nomadHeaders() },
+		body: JSON.stringify(body),
+	});
+	if (!res.ok) {
+		throw new Error(
+			`Nomad PUT ${res.status} on ${path}: ${await res.text().catch(() => "")}`,
+		);
+	}
+};
+
+/** DELETE a path (e.g. a Nomad Variable); a 404 is treated as success. */
+export const nomadDelete = async (path: string): Promise<void> => {
+	const res = await fetch(`${NOMAD}/v1${path}`, {
+		method: "DELETE",
+		headers: nomadHeaders(),
+	});
+	if (!res.ok && res.status !== 404) {
+		throw new Error(`Nomad DELETE ${res.status} on ${path}`);
+	}
+};
+
 // Free-form Nomad job JSON we read and patch in place.
 export type NomadJob = any;
 

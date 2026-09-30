@@ -13,6 +13,7 @@ import {
 import { api } from "@/utils/api";
 import { HandleRegistry } from "./handle-registry";
 import { HandleSelfHostedRegistry } from "./handle-self-hosted-registry";
+import { SelfHostedActions } from "./self-hosted-actions";
 
 const STATUS_STYLE: Record<string, { label: string; className: string }> = {
 	provisioning: {
@@ -133,7 +134,12 @@ export const ShowRegistry = () => {
 														</div>
 
 														<div className="flex flex-row gap-1">
-															{registry.registryType !== "selfHosted" && (
+															{registry.registryType === "selfHosted" ? (
+																<SelfHostedActions
+																	registryId={registry.registryId}
+																	url={registry.registryUrl}
+																/>
+															) : (
 																<HandleRegistry
 																	registryId={registry.registryId}
 																/>

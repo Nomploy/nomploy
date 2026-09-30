@@ -3,6 +3,7 @@ import {
 	execAsyncRemote,
 	execFileAsync,
 	findRegistryById,
+	getSelfHostedRegistryCredentials,
 	getSelfHostedRegistryStatus,
 	IS_CLOUD,
 	provisionSelfHostedRegistry,
@@ -41,6 +42,14 @@ export const registryRouter = createTRPCRouter({
 		.input(z.object({ registryId: z.string().min(1) }))
 		.query(async ({ ctx, input }) => {
 			return getSelfHostedRegistryStatus(
+				input.registryId,
+				ctx.session.activeOrganizationId,
+			);
+		}),
+	selfHostedCredentials: withPermission("registry", "create")
+		.input(z.object({ registryId: z.string().min(1) }))
+		.query(async ({ ctx, input }) => {
+			return getSelfHostedRegistryCredentials(
 				input.registryId,
 				ctx.session.activeOrganizationId,
 			);

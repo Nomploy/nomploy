@@ -15,7 +15,7 @@ import { and, eq } from "drizzle-orm";
 import type { z } from "zod";
 import { IS_CLOUD } from "../constants";
 import { pointDomainAtLb } from "../setup/loadbalancer-dns";
-import { nomadFetch } from "../setup/pack-nomad";
+import { nomadDelete, nomadFetch, nomadPut } from "../setup/pack-nomad";
 import { syncRegistryAuthToConsul } from "../setup/registry-auth";
 import { generateZotRegistryJob } from "../utils/builders/nomad-registry";
 import { encodeBase64 } from "../utils/docker/utils";
@@ -104,12 +104,13 @@ export const removeRegistry = async (registryId: string) => {
 			await execAsync(`docker logout ${shEscape(response.registryUrl)}`);
 		}
 
-		// A self-hosted registry owns a zot Nomad job — purge it on delete.
+		// A self-hosted registry owns a zot Nomad job + a secrets Variable — purge both.
 		if (response.registryType === "selfHosted") {
 			const job = registryJobName(response.registryId);
 			await execAsync(
 				`nomad job stop -purge ${shEscape(job)} 2>&1 || true`,
 			).catch(() => {});
+			await nomadDelete(`/var/nomad/jobs/${job}`).catch(() => {});
 		}
 
 		await syncRegistryAuthToConsul().catch(() => {});
@@ -263,20 +264,43 @@ export const provisionSelfHostedRegistry = async (
 	const job = generateZotRegistryJob({
 		appName,
 		domain: input.domain,
-		htpasswd,
 		s3: {
 			endpoint: dest.endpoint,
 			region: dest.region,
 			bucket: dest.bucket,
-			accessKey: dest.accessKey,
-			secretKey: dest.secretAccessKey,
 			// Key prefix inside the bucket — keeps registry blobs separate from any
 			// other content (e.g. DB backups) in the same bucket.
-			rootDirectory: "zot",
+			rootDirectory: "/zot",
 		},
 		certResolver,
 		deployedAt: new Date().toISOString(),
 	});
+
+	// Put the secrets in the job's Nomad Variable (the task reads them at render
+	// time via its workload identity) so they never appear in the job spec. Must
+	// exist BEFORE the job runs, or zot's config template renders empty creds.
+	const varPath = `/var/nomad/jobs/${appName}`;
+	try {
+		await nomadPut(varPath, {
+			Path: `nomad/jobs/${appName}`,
+			Items: {
+				s3_accesskey: dest.accessKey,
+				s3_secretkey: dest.secretAccessKey,
+				htpasswd,
+			},
+		});
+	} catch (error) {
+		await db
+			.delete(registry)
+			.where(eq(registry.registryId, row.registryId))
+			.catch(() => {});
+		throw new TRPCError({
+			code: "BAD_REQUEST",
+			message: `Failed to store registry secrets: ${
+				error instanceof Error ? error.message : String(error)
+			}`,
+		});
+	}
 
 	// Deploy the job (control plane). A service job with no update{} stanza returns
 	// at registration, so this is quick. Roll it back if registration fails so a
@@ -292,6 +316,7 @@ export const provisionSelfHostedRegistry = async (
 			.delete(registry)
 			.where(eq(registry.registryId, row.registryId))
 			.catch(() => {});
+		await nomadDelete(varPath).catch(() => {});
 		throw new TRPCError({
 			code: "BAD_REQUEST",
 			message: `Failed to deploy the registry job: ${
@@ -395,4 +420,28 @@ export const getSelfHostedRegistryStatus = async (
 	} catch {
 		return { state: "unknown" };
 	}
+};
+
+/**
+ * The login credentials for a self-hosted registry (the user's own), so they can
+ * sign into the zot web UI or `docker login` by hand. Org-scoped; self-hosted only.
+ */
+export const getSelfHostedRegistryCredentials = async (
+	registryId: string,
+	organizationId: string,
+): Promise<{ username: string; password: string; url: string }> => {
+	const reg = await db.query.registry.findFirst({
+		where: and(
+			eq(registry.registryId, registryId),
+			eq(registry.organizationId, organizationId),
+		),
+	});
+	if (!reg || reg.registryType !== "selfHosted") {
+		throw new TRPCError({ code: "NOT_FOUND", message: "Registry not found" });
+	}
+	return {
+		username: reg.username,
+		password: reg.password,
+		url: reg.registryUrl,
+	};
 };
