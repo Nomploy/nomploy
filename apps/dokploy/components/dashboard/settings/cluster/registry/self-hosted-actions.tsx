@@ -45,20 +45,22 @@ export const SelfHostedActions = ({
 		{ enabled: open },
 	);
 
-	// zot's UI uses htpasswd Basic auth — a plain link lands on a login prompt. Fetch
-	// the creds on click and open an auth-carrying URL so the user lands signed in.
+	// zot's UI uses htpasswd Basic auth. Browsers block `user:pass@` in the URL, so
+	// open the UI and copy the password to the clipboard — the user pastes it at
+	// zot's login prompt. Open the tab synchronously (in the gesture) to dodge the
+	// popup blocker, then fetch + copy.
 	const openUI = async () => {
+		window.open(`https://${url}`, "_blank", "noopener,noreferrer");
 		try {
 			const c = await utils.registry.selfHostedCredentials.fetch({
 				registryId,
 			});
-			const auth = `${encodeURIComponent(c.username)}:${encodeURIComponent(c.password)}`;
-			window.open(`https://${auth}@${c.url}`, "_blank", "noopener,noreferrer");
-		} catch {
-			window.open(`https://${url}`, "_blank", "noopener,noreferrer");
-			toast.error(
-				"Couldn't fetch credentials — open the key icon to copy them",
+			await navigator.clipboard?.writeText(c.password);
+			toast.success(
+				`Opening zot — sign in as "${c.username}"; password copied to clipboard.`,
 			);
+		} catch {
+			toast.message("Open the key icon for the login credentials.");
 		}
 	};
 
