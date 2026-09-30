@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/card";
 import { api } from "@/utils/api";
 import { HandleRegistry } from "./handle-registry";
+import { HandleSelfHostedRegistry } from "./handle-self-hosted-registry";
 
 export const ShowRegistry = () => {
 	const { mutateAsync, isPending: isRemoving } =
@@ -45,7 +46,12 @@ export const ShowRegistry = () => {
 										<span className="text-base text-muted-foreground text-center">
 											You don't have any registry configurations
 										</span>
-										{permissions?.registry.create && <HandleRegistry />}
+										{permissions?.registry.create && (
+											<div className="flex flex-row flex-wrap gap-2 justify-center">
+												<HandleRegistry />
+												<HandleSelfHostedRegistry />
+											</div>
+										)}
 									</div>
 								) : (
 									<div className="flex flex-col gap-4  min-h-[25vh]">
@@ -114,6 +120,7 @@ export const ShowRegistry = () => {
 
 										{permissions?.registry.create && (
 											<div className="flex flex-row gap-2 flex-wrap w-full justify-end mr-4">
+												<HandleSelfHostedRegistry />
 												<HandleRegistry />
 											</div>
 										)}

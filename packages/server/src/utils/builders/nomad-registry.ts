@@ -38,6 +38,11 @@ export const generateZotConfig = (s3: ZotS3Config): string =>
 			distSpecVersion: "1.1.1",
 			storage: {
 				rootDirectory: "/tmp/zot",
+				// dedupe needs a remote cache DB (DynamoDB) when storage is remote (S3);
+				// we don't run one, so turn it off — zot keeps a local boltdb cache and
+				// stores blobs in S3. Without this zot refuses to start ("dedupe set to
+				// true with remote storage … but no remote database configured").
+				dedupe: false,
 				storageDriver: {
 					name: "s3",
 					rootdirectory: s3.rootDirectory,

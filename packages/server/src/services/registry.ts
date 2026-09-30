@@ -2,7 +2,6 @@ import { randomBytes } from "node:crypto";
 import { db } from "@nomploy/server/db";
 import {
 	type apiCreateRegistry,
-	buildAppName,
 	destinations,
 	registry,
 } from "@nomploy/server/db/schema";
@@ -102,6 +101,14 @@ export const removeRegistry = async (registryId: string) => {
 
 		if (!IS_CLOUD) {
 			await execAsync(`docker logout ${shEscape(response.registryUrl)}`);
+		}
+
+		// A self-hosted registry owns a zot Nomad job — purge it on delete.
+		if (response.registryType === "selfHosted") {
+			const job = registryJobName(response.registryId);
+			await execAsync(
+				`nomad job stop -purge ${shEscape(job)} 2>&1 || true`,
+			).catch(() => {});
 		}
 
 		await syncRegistryAuthToConsul().catch(() => {});
@@ -221,15 +228,37 @@ export const provisionSelfHostedRegistry = async (
 		});
 	}
 
-	const appName = buildAppName("registry", input.registryName);
 	const username = "nomploy";
 	// A strong random password; stored (like every registry) so builds can log in.
 	const password = randomBytes(24).toString("base64url");
 	const htpasswd = `${username}:${bcrypt.hashSync(password, 10)}`;
+
+	// Insert the row FIRST so the mutation returns immediately (the DNS + login
+	// steps below are slow — the Cloudflare API call was timing out the request).
+	// The zot job name is derived from the registryId so teardown can recompute it.
+	const [row] = await db
+		.insert(registry)
+		.values({
+			registryName: input.registryName,
+			username,
+			password,
+			registryUrl: input.domain,
+			registryType: "selfHosted",
+			imagePrefix: input.imagePrefix ?? null,
+			organizationId,
+		})
+		.returning();
+	if (!row) {
+		throw new TRPCError({
+			code: "BAD_REQUEST",
+			message: "Error creating the registry",
+		});
+	}
+	const appName = registryJobName(row.registryId);
+
 	const certResolver = await getDefaultCertResolver().catch(
 		() => "letsencrypt",
 	);
-
 	const job = generateZotRegistryJob({
 		appName,
 		domain: input.domain,
@@ -249,39 +278,37 @@ export const provisionSelfHostedRegistry = async (
 	});
 
 	// Deploy the job (control plane). A service job with no update{} stanza returns
-	// at registration, so this doesn't block on a rollout.
+	// at registration, so this is quick. Roll it back if registration fails so a
+	// dead row isn't left behind.
 	const jobFile = `/etc/nomploy/registry/${appName}.nomad.hcl`;
 	const encoded = encodeBase64(job);
-	await execAsync(
-		`set -e; mkdir -p /etc/nomploy/registry; echo "${encoded}" | base64 -d > "${jobFile}"; nomad job run "${jobFile}" 2>&1`,
-	);
+	try {
+		await execAsync(
+			`set -e; mkdir -p /etc/nomploy/registry; echo "${encoded}" | base64 -d > "${jobFile}"; nomad job run "${jobFile}" 2>&1`,
+		);
+	} catch (error) {
+		await db
+			.delete(registry)
+			.where(eq(registry.registryId, row.registryId))
+			.catch(() => {});
+		throw new TRPCError({
+			code: "BAD_REQUEST",
+			message: `Failed to deploy the registry job: ${
+				error instanceof Error ? error.message : String(error)
+			}`,
+		});
+	}
 
-	// Point the domain at the LB (grey-cloud A/CNAME), same as an app domain.
-	await pointDomainAtLb(organizationId, input.domain).catch((e) =>
-		console.error("registry DNS point failed:", e),
-	);
-
-	const [row] = await db
-		.insert(registry)
-		.values({
-			registryName: input.registryName,
-			username,
-			password,
-			registryUrl: input.domain,
-			registryType: "selfHosted",
-			imagePrefix: input.imagePrefix ?? null,
-			organizationId,
-		})
-		.returning();
-
-	// Share pull credentials cluster-wide so every node can pull the built image.
-	await syncRegistryAuthToConsul().catch(() => {});
-
-	// Best-effort `docker login` with retries — the TLS cert can take a minute to
-	// issue (DNS-01), so don't fail provisioning if the first attempts don't connect.
+	// The rest is slow (Cloudflare DNS + cert wait) — run it in the background so
+	// the mutation returns now; the UI can poll the registry job's health.
 	void (async () => {
+		await pointDomainAtLb(organizationId, input.domain).catch((e) =>
+			console.error("registry DNS point failed:", e),
+		);
+		await syncRegistryAuthToConsul().catch(() => {});
+		// Best-effort `docker login` with retries — the DNS-01 cert can take a minute.
 		const cmd = safeDockerLoginCommand(input.domain, username, password);
-		for (let i = 0; i < 10; i++) {
+		for (let i = 0; i < 15; i++) {
 			try {
 				await execAsync(cmd);
 				return;
@@ -290,9 +317,16 @@ export const provisionSelfHostedRegistry = async (
 			}
 		}
 		console.error(
-			`registry: docker login to ${input.domain} did not succeed yet; it will be retried on the first push`,
+			`registry: docker login to ${input.domain} not yet succeeded; retried on first push`,
 		);
 	})();
 
 	return row;
 };
+
+/** Deterministic Nomad job id for a self-hosted registry (derivable for teardown). */
+export const registryJobName = (registryId: string): string =>
+	`nomploy-reg-${registryId
+		.toLowerCase()
+		.replace(/[^a-z0-9]/g, "")
+		.slice(0, 12)}`;
