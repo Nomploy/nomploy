@@ -1,82 +1,96 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock the exec layer: the monitor runs the rollout probe via execAsync /
-// execAsyncRemote; its exit code (resolve vs reject) drives onSuccess/onFailure.
-const execAsync = vi.fn();
-const execAsyncRemote = vi.fn();
+// The monitor reads Nomad over HTTP via nomadFetch and appends to the log via the
+// exec layer. Mock both: nomadFetch drives the rollout outcome; exec is a no-op.
+const nomadFetch = vi.fn();
+vi.mock("@nomploy/server/setup/pack-nomad", () => ({
+	nomadFetch: (path: string) => nomadFetch(path),
+}));
 vi.mock("@nomploy/server/utils/process/execAsync", () => ({
-	execAsync: (...args: unknown[]) => execAsync(...args),
-	execAsyncRemote: (...args: unknown[]) => execAsyncRemote(...args),
+	execAsync: vi.fn(async () => ({ stdout: "", stderr: "" })),
+	execAsyncRemote: vi.fn(async () => ({ stdout: "", stderr: "" })),
 }));
 
 import { monitorNomadRollout } from "@nomploy/server/setup/deploy-monitor";
 
-// The monitor is fire-and-forget. Resolve a promise from the finalizer so the test
-// can await the async outcome deterministically.
-const runAndAwait = (opts: {
-	serverId?: string | null;
-	execImpl: () => Promise<unknown>;
-	remoteImpl?: () => Promise<unknown>;
-}) =>
+// The monitor is fire-and-forget; resolve a promise from the finalizer so the test
+// awaits the async outcome deterministically.
+const runAndAwait = (mode: "job" | "pack" = "job") =>
 	new Promise<{ outcome: "success" | "failure"; reason?: string }>(
 		(resolve) => {
-			execAsync.mockImplementation(opts.execImpl);
-			execAsyncRemote.mockImplementation(opts.remoteImpl ?? opts.execImpl);
 			monitorNomadRollout({
 				appName: "myapp",
-				mode: "job",
-				serverId: opts.serverId,
+				mode,
 				logPath: "/tmp/deploy.log",
-				deadlineSec: 1,
+				deadlineMs: 2000,
 				onSuccess: async () => resolve({ outcome: "success" }),
 				onFailure: async (reason) => resolve({ outcome: "failure", reason }),
 			});
 		},
 	);
 
-describe("monitorNomadRollout", () => {
+describe("monitorNomadRollout (HTTP-polled, health-aware)", () => {
 	beforeEach(() => {
-		execAsync.mockReset();
-		execAsyncRemote.mockReset();
+		nomadFetch.mockReset();
 	});
 
-	it("calls onSuccess when the probe exits 0 (resolves)", async () => {
-		const res = await runAndAwait({ execImpl: async () => ({ stdout: "" }) });
-		expect(res.outcome).toBe("success");
-		expect(execAsync).toHaveBeenCalledTimes(1);
-		expect(execAsyncRemote).not.toHaveBeenCalled();
-	});
-
-	it("calls onFailure when the probe exits non-zero (rejects)", async () => {
-		const res = await runAndAwait({
-			execImpl: async () => {
-				throw new Error("probe exit 1");
-			},
+	it("onSuccess when the job's deployment is successful", async () => {
+		nomadFetch.mockImplementation(async (path: string) => {
+			if (path.endsWith("/deployment")) return { Status: "successful" };
+			return [];
 		});
+		const res = await runAndAwait();
+		expect(res.outcome).toBe("success");
+	});
+
+	it("onFailure when the job's deployment failed", async () => {
+		nomadFetch.mockImplementation(async (path: string) => {
+			if (path.endsWith("/deployment")) return { Status: "failed" };
+			return [];
+		});
+		const res = await runAndAwait();
 		expect(res.outcome).toBe("failure");
 		expect(res.reason).toMatch(/healthy/i);
 	});
 
-	it("uses execAsyncRemote when a serverId is given", async () => {
-		const res = await runAndAwait({
-			serverId: "srv-1",
-			execImpl: async () => ({ stdout: "" }),
+	it("falls back to allocations when there is no deployment (404)", async () => {
+		nomadFetch.mockImplementation(async (path: string) => {
+			if (path.endsWith("/deployment")) throw new Error("Nomad 404");
+			if (path.includes("/allocations"))
+				return [{ ClientStatus: "running", JobVersion: 1 }];
+			return {};
 		});
+		const res = await runAndAwait();
 		expect(res.outcome).toBe("success");
-		expect(execAsyncRemote).toHaveBeenCalledTimes(1);
-		expect(execAsync).not.toHaveBeenCalled();
 	});
 
-	it("runs the base64'd python rollout probe against the app + log path", async () => {
-		let captured = "";
-		await runAndAwait({
-			execImpl: async (cmd?: unknown) => {
-				captured = String(cmd);
-				return { stdout: "" };
-			},
+	it("fails when the only current-version allocs are failed/lost", async () => {
+		nomadFetch.mockImplementation(async (path: string) => {
+			if (path.endsWith("/deployment")) throw new Error("Nomad 404");
+			if (path.includes("/allocations"))
+				return [{ ClientStatus: "failed", JobVersion: 2 }];
+			return {};
 		});
-		expect(captured).toContain("base64 -d | python3 -");
-		expect(captured).toContain('"myapp" "job"');
-		expect(captured).toContain(">> /tmp/deploy.log");
+		const res = await runAndAwait();
+		expect(res.outcome).toBe("failure");
+	});
+
+	it("pack mode resolves job ids via the deployment_name meta", async () => {
+		const seen: string[] = [];
+		nomadFetch.mockImplementation(async (path: string) => {
+			seen.push(path);
+			if (path.startsWith("/jobs"))
+				return [
+					{ ID: "pack-xyz", Meta: { "pack.deployment_name": "myapp" } },
+					{ ID: "other", Meta: {} },
+				];
+			if (path.endsWith("/deployment")) return { Status: "successful" };
+			return [];
+		});
+		const res = await runAndAwait("pack");
+		expect(res.outcome).toBe("success");
+		expect(seen.some((p) => p.startsWith("/jobs"))).toBe(true);
+		// It should query the resolved pack job id, not the appName.
+		expect(seen.some((p) => p.includes("pack-xyz"))).toBe(true);
 	});
 });
