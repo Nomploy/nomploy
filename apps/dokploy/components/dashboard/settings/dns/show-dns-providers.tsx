@@ -22,31 +22,89 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { api } from "@/utils/api";
+
+// Supported DNS-01 providers (display). Keep in sync with DNS01_PROVIDERS in
+// services/settings.ts. Only Cloudflare also supports domain auto-pointing +
+// connection test; the rest are DNS-01 cert issuance only (manage DNS yourself).
+const DNS_PROVIDERS: {
+	id: string;
+	label: string;
+	tokenLabel: string;
+	help: string;
+}[] = [
+	{
+		id: "cloudflare",
+		label: "Cloudflare",
+		tokenLabel: "API token",
+		help: "Token with Zone · DNS · Edit. Also enables domain auto-pointing.",
+	},
+	{
+		id: "digitalocean",
+		label: "DigitalOcean",
+		tokenLabel: "API token",
+		help: "Personal access token with write scope. Certs only — point DNS yourself.",
+	},
+	{
+		id: "linode",
+		label: "Linode",
+		tokenLabel: "API token",
+		help: "Certs only — point DNS yourself.",
+	},
+	{
+		id: "vultr",
+		label: "Vultr",
+		tokenLabel: "API key",
+		help: "Certs only — point DNS yourself.",
+	},
+	{
+		id: "hetzner",
+		label: "Hetzner DNS",
+		tokenLabel: "API token",
+		help: "Hetzner DNS Console token (NOT Hetzner Cloud). Certs only — point DNS yourself.",
+	},
+	{
+		id: "gandi",
+		label: "Gandi",
+		tokenLabel: "Personal access token",
+		help: "Certs only — point DNS yourself.",
+	},
+];
 
 // Create/edit dialog. On edit the token is left blank (masked) and only
 // overwritten when a new one is typed.
 const HandleDnsProvider = ({
 	dnsProviderId,
 	name: initialName,
+	provider: initialProvider,
 	onDone,
 }: {
 	dnsProviderId?: string;
 	name?: string;
+	provider?: string;
 	onDone: () => void;
 }) => {
 	const [open, setOpen] = useState(false);
 	const [name, setName] = useState(initialName ?? "");
+	const [provider, setProvider] = useState(initialProvider ?? "cloudflare");
 	const [token, setToken] = useState("");
 	const create = api.dnsProvider.create.useMutation();
 	const update = api.dnsProvider.update.useMutation();
 	const test = api.dnsProvider.testConnection.useMutation();
 	const isEdit = !!dnsProviderId;
+	const spec = DNS_PROVIDERS.find((p) => p.id === provider) ?? DNS_PROVIDERS[0];
 
 	const onTest = async () => {
 		try {
 			const res = await test.mutateAsync({
-				provider: "cloudflare",
+				provider,
 				token: token || undefined,
 				dnsProviderId,
 			});
@@ -62,13 +120,13 @@ const HandleDnsProvider = ({
 				await update.mutateAsync({
 					dnsProviderId,
 					name: name.trim(),
-					provider: "cloudflare",
+					provider,
 					token: token || undefined,
 				});
 			} else {
 				await create.mutateAsync({
 					name: name.trim(),
-					provider: "cloudflare",
+					provider,
 					token,
 				});
 			}
@@ -101,8 +159,8 @@ const HandleDnsProvider = ({
 						{isEdit ? "Edit DNS provider" : "Add DNS provider"}
 					</DialogTitle>
 					<DialogDescription>
-						A Cloudflare API token (Zone · DNS · Edit) used for ACME DNS-01
-						certificate issuance.
+						A DNS provider API token used for ACME DNS-01 certificate issuance
+						(needed behind the HA LoadBalancer, where HTTP-01 can't work).
 					</DialogDescription>
 				</DialogHeader>
 				<div className="flex flex-col gap-3">
@@ -117,21 +175,32 @@ const HandleDnsProvider = ({
 					</div>
 					<div className="flex flex-col gap-1.5">
 						<Label>Provider</Label>
-						<Badge variant="secondary" className="w-fit">
-							Cloudflare
-						</Badge>
+						<Select value={provider} onValueChange={setProvider}>
+							<SelectTrigger>
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								{DNS_PROVIDERS.map((p) => (
+									<SelectItem key={p.id} value={p.id}>
+										{p.label}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
 					</div>
 					<div className="flex flex-col gap-1.5">
 						<Label htmlFor="dns-token">
-							API token{isEdit ? " (leave blank to keep current)" : ""}
+							{spec?.tokenLabel ?? "API token"}
+							{isEdit ? " (leave blank to keep current)" : ""}
 						</Label>
 						<Input
 							id="dns-token"
 							type="password"
-							placeholder="cloudflare API token"
+							placeholder={`${spec?.label ?? ""} ${spec?.tokenLabel?.toLowerCase() ?? "token"}`}
 							value={token}
 							onChange={(e) => setToken(e.target.value)}
 						/>
+						<p className="text-muted-foreground text-xs">{spec?.help}</p>
 					</div>
 				</div>
 				<DialogFooter className="gap-2">
@@ -139,7 +208,12 @@ const HandleDnsProvider = ({
 						variant="outline"
 						onClick={onTest}
 						isLoading={test.isPending}
-						disabled={!token && !isEdit}
+						disabled={(!token && !isEdit) || provider !== "cloudflare"}
+						title={
+							provider !== "cloudflare"
+								? "Connection test is Cloudflare-only"
+								: undefined
+						}
 					>
 						Test
 					</Button>
@@ -286,6 +360,7 @@ export const ShowDnsProviders = () => {
 														<HandleDnsProvider
 															dnsProviderId={provider.dnsProviderId}
 															name={provider.name}
+															provider={provider.provider}
 															onDone={refetch}
 														/>
 														<DialogAction

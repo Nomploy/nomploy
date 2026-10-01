@@ -559,6 +559,26 @@ export const checkPortInUse = async (
 	}
 };
 
+/**
+ * Single-token ACME DNS-01 providers supported for the "letsencrypt-dns" resolver.
+ * `lego` is Traefik/lego's provider id (may differ from ours, e.g. gandiv5); `env`
+ * are the env vars lego reads — the one stored token fills them all. Multi-secret
+ * providers (e.g. route53) would need a credentials map + are intentionally omitted
+ * for now. Keep in sync with the UI list in show-dns-providers.tsx.
+ */
+export const DNS01_PROVIDERS: Record<string, { lego: string; env: string[] }> =
+	{
+		cloudflare: {
+			lego: "cloudflare",
+			env: ["CF_DNS_API_TOKEN", "CLOUDFLARE_DNS_API_TOKEN"],
+		},
+		digitalocean: { lego: "digitalocean", env: ["DO_AUTH_TOKEN"] },
+		linode: { lego: "linode", env: ["LINODE_TOKEN"] },
+		vultr: { lego: "vultr", env: ["VULTR_API_KEY"] },
+		hetzner: { lego: "hetzner", env: ["HETZNER_API_KEY"] },
+		gandi: { lego: "gandiv5", env: ["GANDIV5_PERSONAL_ACCESS_TOKEN"] },
+	};
+
 export const writeTraefikSetup = async (input: TraefikOptions) => {
 	const resourceType = await getDockerResourceType(
 		"nomploy-traefik",
@@ -579,13 +599,12 @@ export const writeTraefikSetup = async (input: TraefikOptions) => {
 		where: eq(dnsProvider.enabled, true),
 		columns: { provider: true, token: true },
 	});
-	if (
-		activeDns?.provider === "cloudflare" &&
-		activeDns.token &&
-		!env.some((e) => e.startsWith("CF_DNS_API_TOKEN="))
-	) {
-		env.push(`CF_DNS_API_TOKEN=${activeDns.token}`);
-		env.push(`CLOUDFLARE_DNS_API_TOKEN=${activeDns.token}`);
+	const dnsSpec = activeDns ? DNS01_PROVIDERS[activeDns.provider] : undefined;
+	if (dnsSpec && activeDns?.token) {
+		for (const key of dnsSpec.env) {
+			if (!env.some((e) => e.startsWith(`${key}=`)))
+				env.push(`${key}=${activeDns.token}`);
+		}
 	}
 	await initializeStandaloneTraefik({
 		env,
@@ -622,7 +641,8 @@ export const reconfigureTraefikForDns = async (serverId?: string) => {
 		const cfg = (parse(readFileSync(ymlPath, "utf8")) ?? {}) as any;
 		cfg.certificatesResolvers = cfg.certificatesResolvers ?? {};
 		// NOTE: never modify the default "letsencrypt" (HTTP-01) resolver here.
-		if (active?.provider === "cloudflare") {
+		const spec = active ? DNS01_PROVIDERS[active.provider] : undefined;
+		if (spec) {
 			const email =
 				cfg.certificatesResolvers.letsencrypt?.acme?.email ??
 				"office@localhost";
@@ -632,7 +652,8 @@ export const reconfigureTraefikForDns = async (serverId?: string) => {
 					// Same store as HTTP-01; Traefik keys certs per resolver name.
 					storage: "/etc/traefik/acme.json",
 					dnsChallenge: {
-						provider: "cloudflare",
+						// lego provider id (may differ from our provider id, e.g. gandiv5).
+						provider: spec.lego,
 						resolvers: ["1.1.1.1:53", "8.8.8.8:53"],
 					},
 				},
