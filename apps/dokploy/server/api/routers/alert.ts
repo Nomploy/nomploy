@@ -1,13 +1,16 @@
 import { db } from "@nomploy/server/db";
 import {
 	alertRule,
+	alertSilence,
 	apiCreateAlertRule,
+	apiCreateAlertSilence,
 	apiUpdateAlertRule,
 } from "@nomploy/server/db/schema";
 import {
 	AVAILABLE_METRICS,
 	getMetricHistory,
 	listAlertEvents,
+	listAlertSilences,
 	listAlertTargets,
 } from "@nomploy/server/services/alerts";
 import { TRPCError } from "@trpc/server";
@@ -125,6 +128,65 @@ export const alertRouter = createTRPCRouter({
 						eq(alertRule.organizationId, ctx.session.activeOrganizationId),
 					),
 				);
+			return true;
+		}),
+
+	// ── Silences / maintenance windows ─────────────────────────────────────────
+	// Suppress alert NOTIFICATIONS for a time window (rules still evaluate).
+	silences: withPermission("monitoring", "read").query(async ({ ctx }) =>
+		listAlertSilences(ctx.session.activeOrganizationId),
+	),
+
+	createSilence: withPermission("server", "create")
+		.input(apiCreateAlertSilence)
+		.mutation(async ({ ctx, input }) => {
+			const startsAt = input.startsAt ? new Date(input.startsAt) : new Date();
+			const endsAt = new Date(input.endsAt);
+			if (endsAt <= startsAt)
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "The silence must end after it starts.",
+				});
+			// A rule-scoped silence must belong to this org.
+			if (input.alertRuleId) {
+				const rule = await db.query.alertRule.findFirst({
+					where: and(
+						eq(alertRule.alertRuleId, input.alertRuleId),
+						eq(alertRule.organizationId, ctx.session.activeOrganizationId),
+					),
+				});
+				if (!rule)
+					throw new TRPCError({ code: "NOT_FOUND", message: "Rule not found" });
+			}
+			const [row] = await db
+				.insert(alertSilence)
+				.values({
+					organizationId: ctx.session.activeOrganizationId,
+					comment: input.comment,
+					startsAt,
+					endsAt,
+					alertRuleId: input.alertRuleId ?? null,
+					target: input.target ?? null,
+					severity: input.severity ?? null,
+					createdBy: ctx.user?.email ?? null,
+				})
+				.returning();
+			return row;
+		}),
+
+	// Delete a scheduled/active silence, or end an active one early (endsAt=now).
+	deleteSilence: withPermission("server", "create")
+		.input(z.object({ silenceId: z.string(), endNow: z.boolean().optional() }))
+		.mutation(async ({ ctx, input }) => {
+			const where = and(
+				eq(alertSilence.silenceId, input.silenceId),
+				eq(alertSilence.organizationId, ctx.session.activeOrganizationId),
+			);
+			if (input.endNow) {
+				await db.update(alertSilence).set({ endsAt: new Date() }).where(where);
+			} else {
+				await db.delete(alertSilence).where(where);
+			}
 			return true;
 		}),
 });

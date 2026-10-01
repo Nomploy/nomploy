@@ -1,6 +1,7 @@
 import {
 	AlertTriangle,
 	Bell,
+	BellOff,
 	ChevronDown,
 	Pencil,
 	Plus,
@@ -559,6 +560,366 @@ const RuleRow = ({
 	);
 };
 
+type Silence = {
+	silenceId: string;
+	comment: string;
+	// tRPC/superjson deserializes timestamps as Date.
+	startsAt: string | Date;
+	endsAt: string | Date;
+	alertRuleId: string | null;
+	target: string | null;
+	severity: string | null;
+	createdBy: string | null;
+	status: "active" | "scheduled" | "expired";
+};
+
+// Local <input type="datetime-local"> value for a Date (no seconds, local tz).
+const toLocalInput = (d: Date): string => {
+	const p = (n: number) => String(n).padStart(2, "0");
+	return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+
+const describeSilenceScope = (
+	s: Pick<Silence, "alertRuleId" | "target" | "severity">,
+	ruleName?: string,
+): string => {
+	const parts: string[] = [];
+	if (s.alertRuleId) parts.push(`rule "${ruleName ?? s.alertRuleId}"`);
+	if (s.target) parts.push(`service ${s.target}`);
+	if (s.severity) parts.push(`${s.severity} severity`);
+	return parts.length ? parts.join(" · ") : "All alerts";
+};
+
+const SilenceDialog = ({
+	rules,
+	onDone,
+}: {
+	rules: Rule[];
+	onDone: () => void;
+}) => {
+	const [open, setOpen] = useState(false);
+	const [scope, setScope] = useState<"all" | "rule" | "service">("all");
+	const [alertRuleId, setAlertRuleId] = useState("");
+	const [target, setTarget] = useState("");
+	const [severity, setSeverity] = useState("any");
+	const [comment, setComment] = useState("");
+	const now = new Date();
+	const [start, setStart] = useState(toLocalInput(now));
+	const [end, setEnd] = useState(
+		toLocalInput(new Date(now.getTime() + 3600_000)),
+	);
+	const { data: targets } = api.alert.targets.useQuery(undefined, {
+		enabled: open,
+	});
+	const create = api.alert.createSilence.useMutation();
+
+	const setDuration = (hours: number) => {
+		const s = start ? new Date(start) : new Date();
+		setEnd(toLocalInput(new Date(s.getTime() + hours * 3600_000)));
+	};
+
+	const submit = async () => {
+		try {
+			await create.mutateAsync({
+				comment: comment.trim(),
+				startsAt: new Date(start).toISOString(),
+				endsAt: new Date(end).toISOString(),
+				alertRuleId: scope === "rule" ? alertRuleId || null : null,
+				target: scope === "service" ? target || null : null,
+				severity:
+					severity === "any"
+						? null
+						: (severity as "critical" | "warning" | "info"),
+			});
+			toast.success("Silence created");
+			setOpen(false);
+			setComment("");
+			setScope("all");
+			setSeverity("any");
+			onDone();
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : "Failed to create silence");
+		}
+	};
+
+	const valid =
+		comment.trim().length > 0 &&
+		new Date(end) > new Date(start) &&
+		(scope !== "rule" || !!alertRuleId) &&
+		(scope !== "service" || !!target);
+
+	return (
+		<Dialog open={open} onOpenChange={setOpen}>
+			<DialogTrigger asChild>
+				<Button size="sm" variant="outline">
+					<BellOff className="mr-1 size-4" /> New silence
+				</Button>
+			</DialogTrigger>
+			<DialogContent className="sm:max-w-lg">
+				<DialogHeader>
+					<DialogTitle>Silence alerts</DialogTitle>
+					<DialogDescription>
+						Suppress alert notifications for a window (e.g. during maintenance).
+						Rules keep evaluating — only the notifications are muted.
+					</DialogDescription>
+				</DialogHeader>
+				<div className="flex flex-col gap-3">
+					<div className="flex flex-col gap-1.5">
+						<Label>Scope</Label>
+						<Select
+							value={scope}
+							onValueChange={(v) => setScope(v as typeof scope)}
+						>
+							<SelectTrigger>
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="all">
+									All alerts (maintenance window)
+								</SelectItem>
+								<SelectItem value="rule">A specific rule</SelectItem>
+								<SelectItem value="service">A service</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+					{scope === "rule" && (
+						<div className="flex flex-col gap-1.5">
+							<Label>Rule</Label>
+							<Select value={alertRuleId} onValueChange={setAlertRuleId}>
+								<SelectTrigger>
+									<SelectValue placeholder="Pick a rule" />
+								</SelectTrigger>
+								<SelectContent>
+									{rules.map((r) => (
+										<SelectItem key={r.alertRuleId} value={r.alertRuleId}>
+											{r.name}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</div>
+					)}
+					{scope === "service" && (
+						<div className="flex flex-col gap-1.5">
+							<Label>Service</Label>
+							<Select value={target} onValueChange={setTarget}>
+								<SelectTrigger>
+									<SelectValue placeholder="Pick a service" />
+								</SelectTrigger>
+								<SelectContent>
+									{(targets ?? []).map((t) => (
+										<SelectItem key={t.appName} value={t.appName}>
+											{t.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</div>
+					)}
+					<div className="flex flex-col gap-1.5">
+						<Label>Severity (optional)</Label>
+						<Select value={severity} onValueChange={setSeverity}>
+							<SelectTrigger>
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="any">Any severity</SelectItem>
+								{SEVERITIES.map((s) => (
+									<SelectItem key={s.value} value={s.value}>
+										{s.label}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					</div>
+					<div className="grid grid-cols-2 gap-3">
+						<div className="flex flex-col gap-1.5">
+							<Label>Starts</Label>
+							<Input
+								type="datetime-local"
+								value={start}
+								onChange={(e) => setStart(e.target.value)}
+							/>
+						</div>
+						<div className="flex flex-col gap-1.5">
+							<Label>Ends</Label>
+							<Input
+								type="datetime-local"
+								value={end}
+								onChange={(e) => setEnd(e.target.value)}
+							/>
+						</div>
+					</div>
+					<div className="flex flex-wrap gap-1.5">
+						{[1, 4, 12, 24].map((h) => (
+							<Button
+								key={h}
+								type="button"
+								size="sm"
+								variant="secondary"
+								onClick={() => setDuration(h)}
+							>
+								{h}h
+							</Button>
+						))}
+					</div>
+					<div className="flex flex-col gap-1.5">
+						<Label>Reason</Label>
+						<Input
+							placeholder="e.g. DB migration, planned upgrade"
+							value={comment}
+							onChange={(e) => setComment(e.target.value)}
+						/>
+					</div>
+				</div>
+				<DialogFooter>
+					<Button
+						onClick={submit}
+						disabled={!valid}
+						isLoading={create.isPending}
+					>
+						Create silence
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
+	);
+};
+
+const SilencesCard = ({
+	rules,
+	canManage,
+}: {
+	rules: Rule[];
+	canManage: boolean;
+}) => {
+	const { data: silences, refetch } = api.alert.silences.useQuery(undefined, {
+		refetchInterval: 20000,
+	});
+	const del = api.alert.deleteSilence.useMutation();
+	const ruleName = (id: string | null) =>
+		id ? rules.find((r) => r.alertRuleId === id)?.name : undefined;
+	const list = (silences ?? []) as Silence[];
+	const active = list.filter((s) => s.status === "active");
+
+	const statusBadge = (s: Silence["status"]) =>
+		s === "active" ? (
+			<Badge variant="outline" className="border-amber-500/40 text-amber-500">
+				active
+			</Badge>
+		) : s === "scheduled" ? (
+			<Badge variant="outline" className="border-sky-500/40 text-sky-500">
+				scheduled
+			</Badge>
+		) : (
+			<Badge variant="outline" className="text-muted-foreground">
+				expired
+			</Badge>
+		);
+
+	return (
+		<Card className="bg-background">
+			<CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+				<div className="flex flex-col gap-0.5">
+					<CardTitle className="flex flex-row gap-2 text-xl">
+						<BellOff className="size-5 self-center text-muted-foreground" />
+						Silences
+						{active.length > 0 && (
+							<Badge
+								variant="outline"
+								className="border-amber-500/40 text-amber-500"
+							>
+								{active.length} active
+							</Badge>
+						)}
+					</CardTitle>
+					<CardDescription>
+						Mute notifications during maintenance. Rules still evaluate and show
+						as firing — only the notification is suppressed.
+					</CardDescription>
+				</div>
+				{canManage && <SilenceDialog rules={rules} onDone={refetch} />}
+			</CardHeader>
+			<CardContent>
+				{list.length === 0 ? (
+					<p className="text-muted-foreground text-sm">
+						No silences. Create one to mute alerts during a planned maintenance
+						window.
+					</p>
+				) : (
+					<div className="flex flex-col gap-2">
+						{list.map((s) => (
+							<div
+								key={s.silenceId}
+								className={`flex items-center justify-between gap-3 rounded-lg border p-2.5 text-sm ${
+									s.status === "expired" ? "opacity-60" : ""
+								}`}
+							>
+								<div className="flex min-w-0 flex-col gap-0.5">
+									<div className="flex items-center gap-2">
+										{statusBadge(s.status)}
+										<span className="font-medium">
+											{describeSilenceScope(s, ruleName(s.alertRuleId))}
+										</span>
+									</div>
+									<span className="truncate text-muted-foreground text-xs">
+										{s.comment} · {new Date(s.startsAt).toLocaleString()} →{" "}
+										{new Date(s.endsAt).toLocaleString()}
+										{s.createdBy ? ` · by ${s.createdBy}` : ""}
+									</span>
+								</div>
+								{canManage && s.status !== "expired" && (
+									<div className="flex shrink-0 gap-1">
+										{s.status === "active" && (
+											<Button
+												size="sm"
+												variant="outline"
+												isLoading={del.isPending}
+												onClick={async () => {
+													await del
+														.mutateAsync({
+															silenceId: s.silenceId,
+															endNow: true,
+														})
+														.then(() => {
+															toast.success("Silence ended");
+															refetch();
+														})
+														.catch((e) => toast.error(e.message));
+												}}
+											>
+												End now
+											</Button>
+										)}
+										<DialogAction
+											title="Delete silence"
+											description="Remove this silence? Matching alerts will notify again."
+											type="destructive"
+											onClick={async () => {
+												await del
+													.mutateAsync({ silenceId: s.silenceId })
+													.then(() => {
+														toast.success("Silence deleted");
+														refetch();
+													})
+													.catch((e) => toast.error(e.message));
+											}}
+										>
+											<Button variant="ghost" size="icon" className="size-8">
+												<Trash2 className="size-3.5" />
+											</Button>
+										</DialogAction>
+									</div>
+								)}
+							</div>
+						))}
+					</div>
+				)}
+			</CardContent>
+		</Card>
+	);
+};
+
 export const ShowAlerts = () => {
 	const { data: rules, refetch } = api.alert.list.useQuery(undefined, {
 		refetchInterval: 15000,
@@ -656,6 +1017,8 @@ export const ShowAlerts = () => {
 				</CardContent>
 			</Card>
 
+			<SilencesCard rules={list} canManage={canManage} />
+
 			<Card className="bg-background">
 				<CardHeader>
 					<CardTitle className="text-xl">Recent events</CardTitle>
@@ -682,6 +1045,14 @@ export const ShowAlerts = () => {
 										>
 											{e.type}
 										</Badge>
+										{"silenced" in e && e.silenced && (
+											<Badge
+												variant="outline"
+												className="gap-0.5 text-muted-foreground"
+											>
+												<BellOff className="size-3" /> silenced
+											</Badge>
+										)}
 										<span className="text-muted-foreground text-xs">
 											{e.message}
 										</span>

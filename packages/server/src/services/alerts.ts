@@ -1,11 +1,13 @@
-import { and, desc, eq, gte } from "drizzle-orm";
+import { and, desc, eq, gte, lte } from "drizzle-orm";
 import { db } from "../db";
 import {
 	ALERT_ALL_TARGETS,
 	type AlertMetric,
 	type AlertRule,
+	type AlertSilence,
 	alertEvent,
 	alertRule,
+	alertSilence,
 	metricNeedsTarget,
 	projects,
 	serviceMetricSample,
@@ -188,23 +190,60 @@ export const getMetricHistory = async (
  */
 /** Record an event + notify on a firing/resolved transition. `scope` names the
  * service for an all-services rule (empty for single-target / pool rules). */
+/** Does any active silence suppress a transition for this rule/target/severity? A
+ * silence matches when every non-null matcher matches (empty = org-wide). */
+export const isSilenced = (
+	silences: Pick<AlertSilence, "alertRuleId" | "target" | "severity">[],
+	ctx: { alertRuleId: string; target: string | null; severity: string },
+): boolean =>
+	silences.some(
+		(s) =>
+			(!s.alertRuleId || s.alertRuleId === ctx.alertRuleId) &&
+			(!s.target || s.target === ctx.target) &&
+			(!s.severity || s.severity === ctx.severity),
+	);
+
+/** Silences currently in effect for an org (now within [startsAt, endsAt]). */
+export const getActiveSilences = async (
+	organizationId: string,
+	now: Date = new Date(),
+): Promise<AlertSilence[]> =>
+	db.query.alertSilence.findMany({
+		where: and(
+			eq(alertSilence.organizationId, organizationId),
+			lte(alertSilence.startsAt, now),
+			gte(alertSilence.endsAt, now),
+		),
+	});
+
 const emitAlertTransition = async (
 	rule: AlertRule,
 	value: number,
 	firing: boolean,
 	scope: string,
+	effectiveTarget: string | null,
 	now: Date,
 ): Promise<void> => {
 	const unit = metricUnit(rule.metric);
 	const label = metricLabel(rule.metric);
 	const cmp = rule.comparator === "gt" ? ">" : "<";
+	// An active silence / maintenance window suppresses the notification — but the
+	// transition is still recorded (flagged silenced) so the history is complete.
+	const silences = await getActiveSilences(rule.organizationId, now);
+	const silenced = isSilenced(silences, {
+		alertRuleId: rule.alertRuleId,
+		target: effectiveTarget,
+		severity: rule.severity,
+	});
 	await db.insert(alertEvent).values({
 		organizationId: rule.organizationId,
 		alertRuleId: rule.alertRuleId,
 		type: firing ? "fired" : "resolved",
 		value,
-		message: `${label}${scope} = ${value.toFixed(1)}${unit} (threshold ${cmp} ${rule.threshold}${unit})`,
+		silenced,
+		message: `${label}${scope} = ${value.toFixed(1)}${unit} (threshold ${cmp} ${rule.threshold}${unit})${silenced ? " [silenced]" : ""}`,
 	});
+	if (silenced) return;
 	await sendClusterAlertNotifications(rule.organizationId, {
 		EventType: firing
 			? rule.severity === "critical"
@@ -249,9 +288,23 @@ const evaluateAllServices = async (rule: AlertRule): Promise<void> => {
 		if (firing) anyFiring = true;
 		const wasFiring = prev[svc.appName] === "firing";
 		if (firing && !wasFiring)
-			await emitAlertTransition(rule, value, true, ` [${svc.appName}]`, now);
+			await emitAlertTransition(
+				rule,
+				value,
+				true,
+				` [${svc.appName}]`,
+				svc.appName,
+				now,
+			);
 		else if (!firing && wasFiring)
-			await emitAlertTransition(rule, value, false, ` [${svc.appName}]`, now);
+			await emitAlertTransition(
+				rule,
+				value,
+				false,
+				` [${svc.appName}]`,
+				svc.appName,
+				now,
+			);
 	}
 	await db
 		.update(alertRule)
@@ -305,6 +358,7 @@ export const runAlertEvaluations = async (): Promise<void> => {
 				value,
 				violates,
 				rule.target ? ` [${rule.target}]` : "",
+				rule.target ?? null,
 				now,
 			);
 		} catch (e) {
@@ -380,3 +434,27 @@ export const listAlertEvents = async (organizationId: string, limit = 50) =>
 		orderBy: desc(alertEvent.createdAt),
 		limit,
 	});
+
+/**
+ * Silences for an org: everything still relevant — active, scheduled (future),
+ * and recently-expired (last 24h) — newest-ending first. Each carries a computed
+ * `status` for the UI.
+ */
+export const listAlertSilences = async (organizationId: string) => {
+	const now = Date.now();
+	const cutoff = new Date(now - 24 * 60 * 60 * 1000);
+	const rows = await db.query.alertSilence.findMany({
+		where: and(
+			eq(alertSilence.organizationId, organizationId),
+			gte(alertSilence.endsAt, cutoff),
+		),
+		orderBy: desc(alertSilence.endsAt),
+	});
+	return rows.map((s) => {
+		const starts = new Date(s.startsAt).getTime();
+		const ends = new Date(s.endsAt).getTime();
+		const status: "active" | "scheduled" | "expired" =
+			now < starts ? "scheduled" : now > ends ? "expired" : "active";
+		return { ...s, status };
+	});
+};

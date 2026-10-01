@@ -84,6 +84,8 @@ export const alertEvent = pgTable(
 		type: text("type").notNull(), // "fired" | "resolved"
 		value: doublePrecision("value").notNull().default(0),
 		message: text("message").notNull().default(""),
+		// True when an active silence suppressed this transition's notification.
+		silenced: boolean("silenced").notNull().default(false),
 		createdAt: timestamp("createdAt").notNull().defaultNow(),
 	},
 	(t) => ({
@@ -93,6 +95,55 @@ export const alertEvent = pgTable(
 		),
 	}),
 );
+
+/**
+ * A silence / maintenance window: suppress alert NOTIFICATIONS for the
+ * [startsAt, endsAt] window. Rules still evaluate and transition (the UI shows
+ * them firing), but matching fired/resolved transitions don't notify. A silence
+ * matches a transition when every non-null matcher matches — so an empty-matcher
+ * silence is an org-wide maintenance window, while setting `alertRuleId` /
+ * `target` / `severity` narrows it to one rule, one service, or one severity.
+ */
+export const alertSilence = pgTable(
+	"alert_silence",
+	{
+		silenceId: text("silenceId")
+			.notNull()
+			.primaryKey()
+			.$defaultFn(() => nanoid()),
+		organizationId: text("organizationId")
+			.notNull()
+			.references(() => organization.id, { onDelete: "cascade" }),
+		comment: text("comment").notNull().default(""),
+		startsAt: timestamp("startsAt").notNull().defaultNow(),
+		endsAt: timestamp("endsAt").notNull(),
+		// Matchers (null = match any).
+		alertRuleId: text("alertRuleId").references(() => alertRule.alertRuleId, {
+			onDelete: "cascade",
+		}),
+		target: text("target"), // service appName
+		severity: text("severity"), // "critical" | "warning" | "info"
+		createdBy: text("createdBy"),
+		createdAt: timestamp("createdAt").notNull().defaultNow(),
+	},
+	(t) => ({
+		orgEndsIdx: index("alert_silence_org_ends_idx").on(
+			t.organizationId,
+			t.endsAt,
+		),
+	}),
+);
+
+export const alertSilenceRelations = relations(alertSilence, ({ one }) => ({
+	organization: one(organization, {
+		fields: [alertSilence.organizationId],
+		references: [organization.id],
+	}),
+	rule: one(alertRule, {
+		fields: [alertSilence.alertRuleId],
+		references: [alertRule.alertRuleId],
+	}),
+}));
 
 export const alertRuleRelations = relations(alertRule, ({ one, many }) => ({
 	organization: one(organization, {
@@ -139,3 +190,17 @@ export const apiUpdateAlertRule = apiCreateAlertRule.partial().extend({
 });
 
 export type AlertRule = typeof alertRule.$inferSelect;
+
+// Create a silence. `startsAt` defaults to now (immediate); `endsAt` is required.
+// The UI computes `endsAt` from a duration preset or a custom date (scheduled
+// maintenance). Matchers are all optional (omitted = org-wide).
+export const apiCreateAlertSilence = z.object({
+	comment: z.string().trim().min(1, "Add a reason for the silence"),
+	startsAt: z.string().datetime().optional(),
+	endsAt: z.string().datetime(),
+	alertRuleId: z.string().optional().nullable(),
+	target: z.string().optional().nullable(),
+	severity: z.enum(["critical", "warning", "info"]).optional().nullable(),
+});
+
+export type AlertSilence = typeof alertSilence.$inferSelect;
