@@ -54,6 +54,11 @@ import {
 } from "@nomploy/server/setup/loadbalancer-dns";
 import { getNomadBootstrapCommand } from "@nomploy/server/setup/nomad-bootstrap";
 import {
+	type GalleryPack,
+	mapRegistryPacks,
+	type RegistryPackRaw,
+} from "@nomploy/server/setup/pack-registry";
+import {
 	getClusterServerJoinCommand,
 	getClusterWorkerJoinCommand,
 } from "@nomploy/server/setup/nomad-cluster";
@@ -99,6 +104,7 @@ interface NomadConfig {
 	token: string;
 	namespace: string;
 }
+
 
 /**
  * Resolve which Nomad cluster a request targets.
@@ -1302,24 +1308,10 @@ export const nomadRouter = createTRPCRouter({
 					clearTimeout(t);
 					if (res.ok) {
 						const data = (await res.json()) as {
-							packs?: {
-								name?: string;
-								description?: string;
-								version?: string;
-								appUrl?: string;
-								sourceUrl?: string;
-							}[];
+							packs?: RegistryPackRaw[];
 						};
 						if (Array.isArray(data.packs) && data.packs.length > 0) {
-							return data.packs
-								.filter((p) => p.name)
-								.map((p) => ({
-									name: p.name as string,
-									description: p.description ?? "",
-									version: p.version ?? "",
-									url: p.appUrl || p.sourceUrl || "",
-								}))
-								.sort((a, b) => a.name.localeCompare(b.name));
+							return mapRegistryPacks(data.packs);
 						}
 					}
 				} catch {
@@ -1349,12 +1341,7 @@ done
 				if (stdout.includes("__NO_PACK__")) return [];
 				// Parse the __PACK__:name … __END__ blocks; pull the first
 				// description/version/url out of the pack's HCL metadata.
-				const packs: {
-					name: string;
-					description: string;
-					version: string;
-					url: string;
-				}[] = [];
+				const packs: GalleryPack[] = [];
 				const seen = new Set<string>();
 				const blocks = stdout.split("__PACK__:").slice(1);
 				for (const block of blocks) {
@@ -1369,6 +1356,12 @@ done
 						description: grab(/description\s*=\s*"([^"]*)"/),
 						version: grab(/version\s*=\s*"([^"]*)"/),
 						url: grab(/url\s*=\s*"([^"]*)"/),
+						// metadata.hcl has no category/stars/icon/health — store fields
+						// only come from the GitHub-Pages packs.json fast path above.
+						category: "",
+						stars: null,
+						icon: null,
+						health: null,
 					});
 				}
 				return packs.sort((a, b) => a.name.localeCompare(b.name));

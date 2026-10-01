@@ -1,9 +1,12 @@
 import {
 	ArrowLeft,
 	Box,
+	CheckCircle2,
 	ExternalLink,
 	Loader2,
 	SearchIcon,
+	Star,
+	XCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -80,19 +83,46 @@ const logoSlug = (name: string) => {
 	return LOGO_ALIASES[base] ?? base;
 };
 
-const PackLogo = ({ name }: { name: string }) => {
+// Icon published by the registry: a brand (→ Simple Icons slug) or a colored
+// monogram tile. Older/custom registries omit it — fall back to guessing a
+// Simple Icons slug from the pack name, then a generic box.
+type PackIcon =
+	| { kind: "brand"; slug: string; hex?: string; title?: string }
+	| { kind: "monogram"; text: string; color?: string };
+
+const PackLogo = ({ name, icon }: { name: string; icon?: PackIcon | null }) => {
 	const [errored, setErrored] = useState(false);
-	if (errored || !logoSlug(name)) {
-		return <Box className="size-8 text-muted-foreground" />;
+
+	// Monogram: a colored initial tile, no network fetch.
+	if (icon?.kind === "monogram") {
+		return (
+			<div
+				className="flex size-8 items-center justify-center rounded font-semibold text-sm text-white"
+				style={{ backgroundColor: icon.color || "#6b7280" }}
+			>
+				{icon.text?.slice(0, 2) || name.slice(0, 1).toUpperCase()}
+			</div>
+		);
 	}
+
+	// Brand (from registry) or name-guess: Simple Icons CDN.
+	const slug = icon?.kind === "brand" ? icon.slug : logoSlug(name);
+	if (!errored && slug) {
+		return (
+			// biome-ignore lint/performance/noImgElement: external CDN logo, no next/image
+			<img
+				src={`https://cdn.simpleicons.org/${slug}`}
+				alt={name}
+				className="size-8 object-contain"
+				onError={() => setErrored(true)}
+			/>
+		);
+	}
+	// Last resort: a monogram built from the name (so brand 404s still look good).
 	return (
-		// biome-ignore lint/performance/noImgElement: external CDN logo, no next/image
-		<img
-			src={`https://cdn.simpleicons.org/${logoSlug(name)}`}
-			alt={name}
-			className="size-8 object-contain"
-			onError={() => setErrored(true)}
-		/>
+		<div className="flex size-8 items-center justify-center rounded bg-muted font-semibold text-muted-foreground text-sm">
+			{name.slice(0, 1).toUpperCase() || <Box className="size-5" />}
+		</div>
 	);
 };
 
@@ -143,12 +173,24 @@ const toHclLiteral = (v: PackVar, value: string): string => {
 	return JSON.stringify(value); // properly escapes quotes/newlines
 };
 
+type PackHealth = { ok?: boolean; checkedAt?: string } | null;
+
 type PackSummary = {
 	name: string;
 	description: string;
 	version: string;
 	url: string;
+	category?: string;
+	stars?: number | null;
+	icon?: PackIcon | null;
+	health?: PackHealth;
 };
+
+// "4172" → "4.2k". Keeps star counts compact on the card.
+const fmtStars = (n: number): string =>
+	n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : `${n}`;
+
+const ALL_CATEGORIES = "__all__";
 
 /**
  * Browse a Nomad Pack registry, configure a pack's variables, and deploy it —
@@ -182,6 +224,7 @@ export const AddPack = ({
 			: "",
 	);
 	const [search, setSearch] = useState("");
+	const [category, setCategory] = useState<string>(ALL_CATEGORIES);
 	const [selected, setSelected] = useState<PackSummary | null>(
 		initialPackName
 			? { name: initialPackName, description: "", version: "", url: "" }
@@ -211,11 +254,21 @@ export const AddPack = ({
 		setValues(seed);
 	}, [detail]);
 
-	const filtered = (packs ?? []).filter(
-		(p) =>
-			p.name.toLowerCase().includes(search.toLowerCase()) ||
-			p.description.toLowerCase().includes(search.toLowerCase()),
-	);
+	// Categories present in this registry (for the filter dropdown). The list is
+	// already star-sorted server-side, so the order carries through.
+	const categories = Array.from(
+		new Set((packs ?? []).map((p) => p.category).filter(Boolean) as string[]),
+	).sort((a, b) => a.localeCompare(b));
+
+	const q = search.toLowerCase();
+	const filtered = (packs ?? []).filter((p) => {
+		if (category !== ALL_CATEGORIES && (p.category ?? "") !== category)
+			return false;
+		return (
+			p.name.toLowerCase().includes(q) ||
+			p.description.toLowerCase().includes(q)
+		);
+	});
 
 	const reset = () => {
 		setSelected(null);
@@ -317,7 +370,7 @@ export const AddPack = ({
 						<DialogHeader className="border-b p-6">
 							<div className="flex items-start gap-3">
 								<div className="flex size-12 flex-none items-center justify-center rounded-md bg-muted/40">
-									<PackLogo name={selected.name} />
+									<PackLogo name={selected.name} icon={selected.icon} />
 								</div>
 								<div className="min-w-0 flex-1">
 									<DialogTitle className="flex items-center gap-2">
@@ -497,6 +550,7 @@ export const AddPack = ({
 											onValueChange={(v) => {
 												setRegistry(v);
 												setSearch("");
+												setCategory(ALL_CATEGORIES);
 											}}
 										>
 											<SelectTrigger className="w-full sm:w-[220px]">
@@ -520,6 +574,26 @@ export const AddPack = ({
 												onChange={(e) => setCustom(e.target.value)}
 												className="w-full sm:w-[240px]"
 											/>
+										</div>
+									)}
+									{categories.length > 0 && (
+										<div className="space-y-1.5">
+											<Label className="text-xs">Category</Label>
+											<Select value={category} onValueChange={setCategory}>
+												<SelectTrigger className="w-full sm:w-[180px]">
+													<SelectValue />
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value={ALL_CATEGORIES}>
+														All categories
+													</SelectItem>
+													{categories.map((c) => (
+														<SelectItem key={c} value={c}>
+															{c}
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
 										</div>
 									)}
 									<div className="space-y-1.5">
@@ -559,7 +633,7 @@ export const AddPack = ({
 											>
 												<div className="flex items-start gap-3">
 													<div className="flex size-12 flex-none items-center justify-center rounded-md bg-muted/40">
-														<PackLogo name={p.name} />
+														<PackLogo name={p.name} icon={p.icon} />
 													</div>
 													<div className="min-w-0 flex-1">
 														<div className="flex items-center gap-2">
@@ -572,6 +646,44 @@ export const AddPack = ({
 																	className="flex-none px-1.5 py-0 text-[10px]"
 																>
 																	{p.version}
+																</Badge>
+															)}
+														</div>
+														<div className="mt-1 flex flex-wrap items-center gap-1.5">
+															{typeof p.stars === "number" && (
+																<span className="inline-flex items-center gap-0.5 text-muted-foreground text-xs">
+																	<Star className="size-3 fill-current text-amber-400" />
+																	{fmtStars(p.stars)}
+																</span>
+															)}
+															{p.category && (
+																<Badge
+																	variant="secondary"
+																	className="px-1.5 py-0 text-[10px]"
+																>
+																	{p.category}
+																</Badge>
+															)}
+															{p.health?.ok === true && (
+																<Badge
+																	variant="outline"
+																	className="gap-0.5 border-emerald-500/40 px-1.5 py-0 text-[10px] text-emerald-500"
+																	title={
+																		p.health.checkedAt
+																			? `Boot-tested ${p.health.checkedAt}`
+																			: "Boot-tested OK"
+																	}
+																>
+																	<CheckCircle2 className="size-3" /> boots
+																</Badge>
+															)}
+															{p.health?.ok === false && (
+																<Badge
+																	variant="outline"
+																	className="gap-0.5 border-destructive/40 px-1.5 py-0 text-[10px] text-destructive"
+																	title="Last boot test failed"
+																>
+																	<XCircle className="size-3" /> boot failed
 																</Badge>
 															)}
 														</div>
