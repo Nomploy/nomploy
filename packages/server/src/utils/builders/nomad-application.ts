@@ -236,6 +236,7 @@ export const getBuildNomadApplicationCommand = async (
 	application: ApplicationNested,
 	domains: Domain[],
 	imageOverride?: string,
+	opts?: { detach?: boolean },
 ): Promise<string> => {
 	const { APPLICATIONS_PATH } = paths(!!application.serverId);
 	const projectPath = join(APPLICATIONS_PATH, application.appName, "code");
@@ -272,17 +273,26 @@ ${
 	echo "Image pushed to registry: ✅"
 `
 		: ""
-}	# \`nomad job run\` (no -detach) monitors the deployment and exits non-zero if it
-	# fails (e.g. a progress-deadline timeout when allocs never turn healthy). Test its
-	# exit code explicitly: inside a \`{ } ||\` block \`set -e\` is suppressed, so a bare
-	# \`nomad job run\` followed by an unconditional success echo would report a FAILED
-	# deployment as "done". Gate the success echo on the real result instead.
-	if nomad job run "${jobFilePath}" 2>&1; then
+}	${
+		opts?.detach
+			? // Detached: register the job and return immediately (exit non-zero only on a
+				// bad jobspec / rejected registration). The rollout is watched off the
+				// deployment queue by monitorNomadRollout so a slow/stuck rollout can't
+				// block other deploys. See setup/deploy-monitor.
+				`nomad job run -detach "${jobFilePath}" 2>&1
+	echo "Nomad job registered (monitoring rollout): ✅"`
+			: // Attached: \`nomad job run\` (no -detach) monitors the deployment and exits
+				// non-zero if it fails (e.g. a progress-deadline timeout when allocs never
+				// turn healthy). Test its exit code explicitly: inside a \`{ } ||\` block
+				// \`set -e\` is suppressed, so a bare \`nomad job run\` followed by an
+				// unconditional success echo would report a FAILED deployment as "done".
+				`if nomad job run "${jobFilePath}" 2>&1; then
 		echo "Nomad Job Deployed: ✅"
 	else
 		echo "Error: ❌ Nomad deployment did not become healthy (see the events above)"
 		exit 1
-	fi
+	fi`
+	}
 } || {
 	echo "Error: ❌ Nomad deployment failed"
 	exit 1

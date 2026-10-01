@@ -7,6 +7,7 @@ import {
 	cleanAppName,
 	compose,
 } from "@nomploy/server/db/schema";
+import { monitorNomadRollout } from "@nomploy/server/setup/deploy-monitor";
 import { syncIntentionsForOrg } from "@nomploy/server/setup/nomad-connect";
 import { getBuildComposeCommand } from "@nomploy/server/utils/builders/compose";
 import {
@@ -303,7 +304,8 @@ export const deployCompose = async ({
 		if (compose.composeType === "nomad-pack") {
 			command += getBuildNomadPackCommand(entity);
 		} else if (compose.composeType === "nomad") {
-			command += await getBuildNomadCommand(entity);
+			// Detached: register now, watch the rollout off the deployment queue.
+			command += await getBuildNomadCommand(entity, { detach: true });
 		} else {
 			command += await getBuildComposeCommand(entity);
 		}
@@ -314,40 +316,70 @@ export const deployCompose = async ({
 			await execAsync(commandWithLog);
 		}
 
-		await updateDeploymentStatus(deployment.deploymentId, "done");
-		// Nomad-Pack: patch the just-deployed job's service(s) to provider=consul
-		// + Traefik tags so nomploy's consulCatalog routes the pack's domains
-		// pool-wide (packs default to Nomad-native registration, invisible to
-		// consulCatalog). See setup/pack-domains.
-		if (compose.composeType === "nomad-pack") {
-			const { applyPackJobPatches } = await import(
-				"@nomploy/server/setup/pack-domains"
-			);
-			// Domains + scaling (count/resources/autoscaling) in one re-registration.
-			await applyPackJobPatches(compose).catch((e) =>
-				console.error("pack job patches failed:", e),
-			);
-		}
-		// Phase B: refresh Connect intentions so this project's mesh services
-		// (isolated) get their allow-rules; no-op for non-isolated orgs.
-		if (compose.environment.project.isolated) {
-			await syncIntentionsForOrg(
-				compose.environment.project.organizationId,
-			).catch(() => {});
-		}
-		await updateCompose(composeId, {
-			composeStatus: "done",
-		});
+		const finalizeSuccess = async () => {
+			await updateDeploymentStatus(deployment.deploymentId, "done");
+			// Nomad-Pack: patch the just-deployed job's service(s) to provider=consul
+			// + Traefik tags so nomploy's consulCatalog routes the pack's domains
+			// pool-wide (packs default to Nomad-native registration, invisible to
+			// consulCatalog). See setup/pack-domains.
+			if (compose.composeType === "nomad-pack") {
+				const { applyPackJobPatches } = await import(
+					"@nomploy/server/setup/pack-domains"
+				);
+				// Domains + scaling (count/resources/autoscaling) in one re-registration.
+				await applyPackJobPatches(compose).catch((e) =>
+					console.error("pack job patches failed:", e),
+				);
+			}
+			// Phase B: refresh Connect intentions so this project's mesh services
+			// (isolated) get their allow-rules; no-op for non-isolated orgs.
+			if (compose.environment.project.isolated) {
+				await syncIntentionsForOrg(
+					compose.environment.project.organizationId,
+				).catch(() => {});
+			}
+			await updateCompose(composeId, {
+				composeStatus: "done",
+			});
 
-		await sendBuildSuccessNotifications({
-			projectName: compose.environment.project.name,
-			applicationName: compose.name,
-			applicationType: "compose",
-			buildLink,
-			organizationId: compose.environment.project.organizationId,
-			domains: compose.domains,
-			environmentName: compose.environment.name,
-		});
+			await sendBuildSuccessNotifications({
+				projectName: compose.environment.project.name,
+				applicationName: compose.name,
+				applicationType: "compose",
+				buildLink,
+				organizationId: compose.environment.project.organizationId,
+				domains: compose.domains,
+				environmentName: compose.environment.name,
+			});
+		};
+
+		if (compose.composeType === "nomad") {
+			// Registration succeeded; watch the rollout OFF the deployment queue so a slow
+			// or stuck rollout can't block other orgs' deploys (queue concurrency 1). The
+			// monitor finalizes status + notification once Nomad is terminal.
+			monitorNomadRollout({
+				appName: compose.appName,
+				mode: "job",
+				serverId: compose.serverId,
+				logPath: deployment.logPath,
+				onSuccess: finalizeSuccess,
+				onFailure: async (reason) => {
+					await updateDeploymentStatus(deployment.deploymentId, "error");
+					await updateCompose(composeId, { composeStatus: "error" });
+					await sendBuildErrorNotifications({
+						projectName: compose.environment.project.name,
+						applicationName: compose.name,
+						applicationType: "compose",
+						errorMessage: reason,
+						buildLink,
+						organizationId: compose.environment.project.organizationId,
+					});
+				},
+			});
+		} else {
+			// Pack / docker-compose: finalize synchronously (behavior unchanged).
+			await finalizeSuccess();
+		}
 	} catch (error) {
 		let command = "";
 
@@ -443,7 +475,8 @@ export const rebuildCompose = async ({
 		if (compose.composeType === "nomad-pack") {
 			command += getBuildNomadPackCommand(compose);
 		} else if (compose.composeType === "nomad") {
-			command += await getBuildNomadCommand(compose);
+			// Detached: register now, watch the rollout off the deployment queue.
+			command += await getBuildNomadCommand(compose, { detach: true });
 		} else {
 			command += await getBuildComposeCommand(compose);
 		}
@@ -454,30 +487,51 @@ export const rebuildCompose = async ({
 			await execAsync(commandWithLog);
 		}
 
-		await updateDeploymentStatus(deployment.deploymentId, "done");
-		// Nomad-Pack: patch the just-deployed job's service(s) to provider=consul
-		// + Traefik tags so nomploy's consulCatalog routes the pack's domains
-		// pool-wide (packs default to Nomad-native registration, invisible to
-		// consulCatalog). See setup/pack-domains.
-		if (compose.composeType === "nomad-pack") {
-			const { applyPackJobPatches } = await import(
-				"@nomploy/server/setup/pack-domains"
-			);
-			// Domains + scaling (count/resources/autoscaling) in one re-registration.
-			await applyPackJobPatches(compose).catch((e) =>
-				console.error("pack job patches failed:", e),
-			);
+		const finalizeSuccess = async () => {
+			await updateDeploymentStatus(deployment.deploymentId, "done");
+			// Nomad-Pack: patch the just-deployed job's service(s) to provider=consul
+			// + Traefik tags so nomploy's consulCatalog routes the pack's domains
+			// pool-wide (packs default to Nomad-native registration, invisible to
+			// consulCatalog). See setup/pack-domains.
+			if (compose.composeType === "nomad-pack") {
+				const { applyPackJobPatches } = await import(
+					"@nomploy/server/setup/pack-domains"
+				);
+				// Domains + scaling (count/resources/autoscaling) in one re-registration.
+				await applyPackJobPatches(compose).catch((e) =>
+					console.error("pack job patches failed:", e),
+				);
+			}
+			// Phase B: refresh Connect intentions so this project's mesh services
+			// (isolated) get their allow-rules; no-op for non-isolated orgs.
+			if (compose.environment.project.isolated) {
+				await syncIntentionsForOrg(
+					compose.environment.project.organizationId,
+				).catch(() => {});
+			}
+			await updateCompose(composeId, {
+				composeStatus: "done",
+			});
+		};
+
+		if (compose.composeType === "nomad") {
+			// Registration succeeded; watch the rollout OFF the deployment queue (see
+			// deployCompose) so a slow/stuck rollout can't block other deploys.
+			monitorNomadRollout({
+				appName: compose.appName,
+				mode: "job",
+				serverId: compose.serverId,
+				logPath: deployment.logPath,
+				onSuccess: finalizeSuccess,
+				onFailure: async () => {
+					await updateDeploymentStatus(deployment.deploymentId, "error");
+					await updateCompose(composeId, { composeStatus: "error" });
+				},
+			});
+		} else {
+			// Pack / docker-compose: finalize synchronously (behavior unchanged).
+			await finalizeSuccess();
 		}
-		// Phase B: refresh Connect intentions so this project's mesh services
-		// (isolated) get their allow-rules; no-op for non-isolated orgs.
-		if (compose.environment.project.isolated) {
-			await syncIntentionsForOrg(
-				compose.environment.project.organizationId,
-			).catch(() => {});
-		}
-		await updateCompose(composeId, {
-			composeStatus: "done",
-		});
 	} catch (error) {
 		let command = "";
 

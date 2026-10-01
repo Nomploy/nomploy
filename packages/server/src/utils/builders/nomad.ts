@@ -237,6 +237,7 @@ export const applyServiceScalingOverrides = (
  */
 export const getBuildNomadCommand = async (
 	compose: NomadComposeNested,
+	opts?: { detach?: boolean },
 ): Promise<string> => {
 	const { COMPOSE_PATH } = paths(!!compose.serverId);
 	const { appName } = compose;
@@ -410,9 +411,18 @@ set -e
 	echo "Nomad job file written: \u2705"
 ${buildSteps}
 	# Deploy to Nomad
-	nomad job run "${jobFilePath}" 2>&1
+${
+	opts?.detach
+		? // Detached: register and return at once; the rollout is watched off the
+			// deployment queue by monitorNomadRollout (setup/deploy-monitor) so a slow or
+			// stuck rollout can't block other deploys.
+			`	nomad job run -detach "${jobFilePath}" 2>&1
+	echo "Nomad job registered (monitoring rollout): \u2705"
+`
+		: `	nomad job run "${jobFilePath}" 2>&1
 	echo "Nomad Job Deployed: \u2705"
-${isNativeHcl ? healthCheckSnippet(appName, "job") : ""}} || {
+${isNativeHcl ? healthCheckSnippet(appName, "job") : ""}`
+}} || {
 	echo "Error: \u274c Nomad deployment failed"
 	exit 1
 }

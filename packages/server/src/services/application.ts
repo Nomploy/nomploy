@@ -6,6 +6,7 @@ import {
 	buildAppName,
 } from "@nomploy/server/db/schema";
 import { getAdvancedStats } from "@nomploy/server/monitoring/utils";
+import { monitorNomadRollout } from "@nomploy/server/setup/deploy-monitor";
 import { syncIntentionsForOrg } from "@nomploy/server/setup/nomad-connect";
 import { getBuildCommand } from "@nomploy/server/utils/builders";
 import {
@@ -226,6 +227,8 @@ export const deployApplication = async ({
 				...d,
 				serviceName: NOMAD_APP_SERVICE_NAME,
 			})),
+			undefined,
+			{ detach: true },
 		);
 
 		const commandWithLog = `(${command}) >> ${deployment.logPath} 2>&1`;
@@ -235,24 +238,46 @@ export const deployApplication = async ({
 			await execAsync(commandWithLog);
 		}
 
-		await updateDeploymentStatus(deployment.deploymentId, "done");
-		// Phase B: refresh Connect intentions so this project's mesh services
-		// (isolated) get their allow-rules; no-op for non-isolated orgs.
-		if (application.environment.project.isolated) {
-			await syncIntentionsForOrg(
-				application.environment.project.organizationId,
-			).catch(() => {});
-		}
-		await updateApplicationStatus(applicationId, "done");
-
-		await sendBuildSuccessNotifications({
-			projectName: application.environment.project.name,
-			applicationName: application.name,
-			applicationType: "application",
-			buildLink,
-			organizationId: application.environment.project.organizationId,
-			domains: application.domains,
-			environmentName: application.environment.name,
+		// Registration succeeded. Watch the rollout OFF the deployment queue so a slow
+		// or stuck rollout can't block other orgs' deploys (the queue is concurrency 1);
+		// the monitor finalizes status + notification once Nomad is terminal.
+		monitorNomadRollout({
+			appName: application.appName,
+			mode: "job",
+			serverId,
+			logPath: deployment.logPath,
+			onSuccess: async () => {
+				await updateDeploymentStatus(deployment.deploymentId, "done");
+				// Phase B: refresh Connect intentions so this project's mesh services
+				// (isolated) get their allow-rules; no-op for non-isolated orgs.
+				if (application.environment.project.isolated) {
+					await syncIntentionsForOrg(
+						application.environment.project.organizationId,
+					).catch(() => {});
+				}
+				await updateApplicationStatus(applicationId, "done");
+				await sendBuildSuccessNotifications({
+					projectName: application.environment.project.name,
+					applicationName: application.name,
+					applicationType: "application",
+					buildLink,
+					organizationId: application.environment.project.organizationId,
+					domains: application.domains,
+					environmentName: application.environment.name,
+				});
+			},
+			onFailure: async (reason) => {
+				await updateDeploymentStatus(deployment.deploymentId, "error");
+				await updateApplicationStatus(applicationId, "error");
+				await sendBuildErrorNotifications({
+					projectName: application.environment.project.name,
+					applicationName: application.name,
+					applicationType: "application",
+					errorMessage: reason,
+					buildLink,
+					organizationId: application.environment.project.organizationId,
+				});
+			},
 		});
 	} catch (error) {
 		let command = "";
@@ -334,6 +359,8 @@ export const rebuildApplication = async ({
 				...d,
 				serviceName: NOMAD_APP_SERVICE_NAME,
 			})),
+			undefined,
+			{ detach: true },
 		);
 		const commandWithLog = `(${command}) >> ${deployment.logPath} 2>&1`;
 		if (serverId) {
@@ -341,24 +368,45 @@ export const rebuildApplication = async ({
 		} else {
 			await execAsync(commandWithLog);
 		}
-		await updateDeploymentStatus(deployment.deploymentId, "done");
-		// Phase B: refresh Connect intentions so this project's mesh services
-		// (isolated) get their allow-rules; no-op for non-isolated orgs.
-		if (application.environment.project.isolated) {
-			await syncIntentionsForOrg(
-				application.environment.project.organizationId,
-			).catch(() => {});
-		}
-		await updateApplicationStatus(applicationId, "done");
-
-		await sendBuildSuccessNotifications({
-			projectName: application.environment.project.name,
-			applicationName: application.name,
-			applicationType: "application",
-			buildLink,
-			organizationId: application.environment.project.organizationId,
-			domains: application.domains,
-			environmentName: application.environment.name,
+		// Registration succeeded. Watch the rollout OFF the deployment queue (see
+		// deployApplication) so a slow/stuck rollout can't block other deploys.
+		monitorNomadRollout({
+			appName: application.appName,
+			mode: "job",
+			serverId,
+			logPath: deployment.logPath,
+			onSuccess: async () => {
+				await updateDeploymentStatus(deployment.deploymentId, "done");
+				// Phase B: refresh Connect intentions so this project's mesh services
+				// (isolated) get their allow-rules; no-op for non-isolated orgs.
+				if (application.environment.project.isolated) {
+					await syncIntentionsForOrg(
+						application.environment.project.organizationId,
+					).catch(() => {});
+				}
+				await updateApplicationStatus(applicationId, "done");
+				await sendBuildSuccessNotifications({
+					projectName: application.environment.project.name,
+					applicationName: application.name,
+					applicationType: "application",
+					buildLink,
+					organizationId: application.environment.project.organizationId,
+					domains: application.domains,
+					environmentName: application.environment.name,
+				});
+			},
+			onFailure: async (reason) => {
+				await updateDeploymentStatus(deployment.deploymentId, "error");
+				await updateApplicationStatus(applicationId, "error");
+				await sendBuildErrorNotifications({
+					projectName: application.environment.project.name,
+					applicationName: application.name,
+					applicationType: "application",
+					errorMessage: reason,
+					buildLink,
+					organizationId: application.environment.project.organizationId,
+				});
+			},
 		});
 	} catch (error) {
 		let command = "";
