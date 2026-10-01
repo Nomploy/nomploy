@@ -539,17 +539,63 @@ const resolveZoneForHost = async (
 	return best;
 };
 
+/** The LB's current healthy node public IPs (what its A records resolve to). */
+const lbPublicIps = async (organizationId: string): Promise<string[]> => {
+	try {
+		const nodes = await resolveLbNodes(organizationId);
+		return [
+			...new Set(
+				nodes
+					.filter((n) => n.healthy && !n.draining && n.publicIp)
+					.map((n) => n.publicIp as string),
+			),
+		].sort();
+	} catch {
+		return [];
+	}
+};
+
+/**
+ * Classify the zone apex's current records relative to the LB. Apex is special: a
+ * CNAME can't be POSTed next to A records, and clobbering it once caused an outage
+ * — so we only ACT when the apex is empty (create a flattened CNAME, which
+ * Cloudflare serves as A records alongside MX/TXT/CAA). If it already has A records
+ * that are all LB IPs (a manual but correct setup), it's "pointed" and left alone;
+ * anything else is a "conflict" we refuse to touch.
+ */
+const classifyApexDns = async (
+	zone: { token: string; zoneId: string; zoneName: string },
+	lbHostname: string,
+	ips: string[],
+): Promise<{
+	state: "pointed" | "pending" | "conflict";
+	records: CfRecord[];
+}> => {
+	const recs = await cf<CfRecord[]>(
+		zone.token,
+		`/zones/${zone.zoneId}/dns_records?name=${encodeURIComponent(zone.zoneName)}&per_page=100`,
+	);
+	const relevant = recs.filter((r) => ["A", "AAAA", "CNAME"].includes(r.type));
+	if (relevant.some((r) => r.type === "CNAME" && r.content === lbHostname))
+		return { state: "pointed", records: relevant };
+	if (
+		relevant.length > 0 &&
+		relevant.every((r) => r.type === "A" && ips.includes(r.content))
+	)
+		return { state: "pointed", records: relevant };
+	if (relevant.length > 0) return { state: "conflict", records: relevant };
+	return { state: "pending", records: relevant };
+};
+
 /**
  * Point an app domain at the LB hostname via a CNAME (Cloudflare, unproxied).
  * No-op unless auto-pointing is enabled and a configured provider governs the
- * host's zone. Replaces any conflicting A/AAAA/CNAME on the exact name so the
- * domain resolves to the HA pool instead of a single node.
+ * host's zone. Only ever replaces records nomploy created (the comment marker, or
+ * a CNAME already aimed at the LB); refuses to overwrite user-managed records.
  *
- * SKIPS the zone apex: a CNAME can't coexist with the apex's MX/TXT/CAA records,
- * so the delete-then-CNAME below would strip the apex A records and then fail to
- * create the CNAME, taking the domain offline (regression fixed here). Apex
- * domains must be pointed at the pool's IPs manually (A records) — only
- * subdomains are auto-CNAMEd.
+ * Apex is handled specially (see classifyApexDns): only pointed when EMPTY, via a
+ * Cloudflare flattened CNAME — never a delete-then-create, which once orphaned a
+ * live apex. A correct manual apex (A records == LB IPs) is left as-is.
  */
 export const pointDomainAtLb = async (
 	organizationId: string,
@@ -562,9 +608,35 @@ export const pointDomainAtLb = async (
 	if (!host || host === lb.hostname) return;
 	const zone = await resolveZoneForHost(organizationId, host);
 	if (!zone) return; // unmanaged zone — leave DNS to the user
-	// Never touch the zone apex — a CNAME there conflicts with MX/TXT/CAA and the
-	// delete-then-CNAME would orphan the domain. Apex is pointed manually.
-	if (host === zone.zoneName) return;
+	// Apex: only safe to act when it's empty — create a flattened CNAME (no
+	// delete-then-create gap, so none of the old apex-outage risk). If it already
+	// resolves to the LB (A records == LB IPs), leave it; if it has other records,
+	// refuse (conflict) rather than clobber them.
+	if (host === zone.zoneName) {
+		const ips = await lbPublicIps(organizationId);
+		const { state, records } = await classifyApexDns(zone, lb.hostname, ips);
+		if (state === "conflict") {
+			console.warn(
+				`pointDomainAtLb: refusing to auto-point apex ${host} — existing records ` +
+					`(${records.map((r) => `${r.type}→${r.content}`).join(", ")}) not created ` +
+					`by nomploy. Point the apex at ${lb.hostname} (or the LB IPs) manually.`,
+			);
+			return;
+		}
+		if (state === "pointed") return; // already good — leave it
+		await cf(zone.token, `/zones/${zone.zoneId}/dns_records`, {
+			method: "POST",
+			body: JSON.stringify({
+				type: "CNAME",
+				name: zone.zoneName,
+				content: lb.hostname,
+				ttl: 60,
+				proxied: false,
+				comment: NOMPLOY_DNS_COMMENT,
+			}),
+		});
+		return;
+	}
 
 	const existing = await cf<CfRecord[]>(
 		zone.token,
@@ -645,11 +717,26 @@ export const getDomainDnsPointStatus = async (
 		};
 	}
 	if (host === zone.zoneName) {
+		const ips = await lbPublicIps(organizationId);
+		const { state, records } = await classifyApexDns(zone, lb.hostname, ips);
+		if (state === "conflict") {
+			return {
+				state: "conflict",
+				target: lb.hostname,
+				detail: records.map((r) => `${r.type} → ${r.content}`).join(", "),
+			};
+		}
+		if (state === "pointed") {
+			return {
+				state: "pointed",
+				target: lb.hostname,
+				detail: "Apex points at the LB (flattened CNAME / A records).",
+			};
+		}
 		return {
-			state: "apex_manual",
+			state: "pending",
 			target: lb.hostname,
-			detail:
-				"Zone apex — nomploy never edits the root; set A records to the LB IPs yourself.",
+			detail: "Apex is empty — it'll be pointed via a flattened CNAME.",
 		};
 	}
 	let existing: CfRecord[];
@@ -691,7 +778,8 @@ export const unpointDomain = async (
 	if (!lb?.hostname || !host) return;
 	const zone = await resolveZoneForHost(organizationId, host);
 	if (!zone) return;
-	if (host === zone.zoneName) return; // apex is never auto-pointed (see pointDomainAtLb)
+	// Apex included now: we only delete a CNAME whose content IS the LB (i.e. the
+	// flattened CNAME nomploy created), never the user's A records.
 	const existing = await cf<CfRecord[]>(
 		zone.token,
 		`/zones/${zone.zoneId}/dns_records?type=CNAME&name=${encodeURIComponent(host)}&per_page=100`,
