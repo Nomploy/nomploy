@@ -54,15 +54,18 @@ export const OverviewServices = () => {
 		);
 	});
 
-	// At-a-glance health across the (filtered) services.
+	// At-a-glance health across the (filtered) services. Status enum (matches the
+	// StatusTooltip dot): done = deployed/healthy (green), running = deploying
+	// (amber), error = failed (red), idle = never deployed (muted).
 	const counts = filtered.reduce(
 		(acc, s) => {
-			if (s.status === "running") acc.running++;
+			if (s.status === "done") acc.done++;
+			else if (s.status === "running") acc.running++;
 			else if (s.status === "error") acc.error++;
-			else acc.other++;
+			else acc.idle++;
 			return acc;
 		},
-		{ running: 0, error: 0, other: 0 },
+		{ done: 0, running: 0, error: 0, idle: 0 },
 	);
 
 	return (
@@ -77,7 +80,7 @@ export const OverviewServices = () => {
 						<div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
 							<span className="inline-flex items-center gap-1">
 								<span className="size-2 rounded-full bg-emerald-500" />
-								{counts.running} running
+								{counts.done} healthy
 							</span>
 							{counts.error > 0 && (
 								<span className="inline-flex items-center gap-1">
@@ -85,10 +88,10 @@ export const OverviewServices = () => {
 									{counts.error} error
 								</span>
 							)}
-							{counts.other > 0 && (
+							{counts.idle > 0 && (
 								<span className="inline-flex items-center gap-1">
 									<span className="size-2 rounded-full bg-muted-foreground" />
-									{counts.other} idle
+									{counts.idle} idle
 								</span>
 							)}
 						</div>
