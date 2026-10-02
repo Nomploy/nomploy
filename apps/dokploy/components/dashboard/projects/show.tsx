@@ -667,11 +667,11 @@ export const ShowProjects = () => {
 																	<DateTooltip date={project.createdAt}>
 																		Created
 																	</DateTooltip>
-																	<div className="flex flex-row items-center gap-3 text-muted-foreground">
+																	<div className="flex flex-row flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
 																		{hasMetrics && (
 																			<>
 																				<span
-																					className="flex items-center gap-1"
+																					className="flex items-center gap-1 whitespace-nowrap"
 																					title={
 																						pm && pm.cpuReservedMhz > 0
 																							? `CPU used vs reserved across this project's services (live): ${pm.cpuUsedMhz} of ${pm.cpuReservedMhz} MHz reserved (${pm.cpuPercent}% of node)`
@@ -697,7 +697,7 @@ export const ShowProjects = () => {
 																					)}
 																				</span>
 																				<span
-																					className="flex items-center gap-1"
+																					className="flex items-center gap-1 whitespace-nowrap"
 																					title={
 																						pm && pm.memReservedMb > 0
 																							? `Memory used vs reserved across this project's services (live): ${fmtMb(pm.memoryMb)} of ${fmtMb(pm.memReservedMb)} reserved`
@@ -725,7 +725,7 @@ export const ShowProjects = () => {
 																				</span>
 																			</>
 																		)}
-																		<span>
+																		<span className="whitespace-nowrap">
 																			{totalServices}{" "}
 																			{totalServices === 1
 																				? "service"
