@@ -26,6 +26,7 @@ import { mysqlRouter } from "./routers/mysql";
 import { nomadRouter } from "./routers/nomad";
 import { notificationRouter } from "./routers/notification";
 import { organizationRouter } from "./routers/organization";
+import { overviewRouter } from "./routers/overview";
 import { patchRouter } from "./routers/patch";
 import { portRouter } from "./routers/port";
 import { postgresRouter } from "./routers/postgres";
@@ -63,6 +64,7 @@ export const appRouter = createTRPCRouter({
 	certificates: certificateRouter,
 	compose: composeRouter,
 	deployment: deploymentRouter,
+	overview: overviewRouter,
 	destination: destinationRouter,
 	cloudProvider: cloudProviderRouter,
 	dnsProvider: dnsProviderRouter,
