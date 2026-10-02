@@ -1,4 +1,5 @@
 import { DatabaseBackup, Loader2, SearchIcon } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -103,10 +104,13 @@ export const OverviewBackups = () => {
 									className="border-t transition-colors hover:bg-muted/30 [&>td]:px-3 [&>td]:py-2.5"
 								>
 									<td className="font-medium">
-										<span className="inline-flex items-center gap-1.5">
+										<Link
+											href={`/dashboard/project/${b.projectId}/environment/${b.environmentId}/services/${b.serviceType}/${b.serviceId}`}
+											className="inline-flex items-center gap-1.5 hover:underline"
+										>
 											<DatabaseBackup className="size-3.5 text-muted-foreground" />
 											{b.serviceName}
-										</span>
+										</Link>
 									</td>
 									<td className="text-muted-foreground">
 										{b.database || "—"}{" "}

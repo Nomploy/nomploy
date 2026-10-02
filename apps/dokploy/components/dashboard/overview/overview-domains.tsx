@@ -1,4 +1,5 @@
 import { ExternalLink, Globe, Loader2, SearchIcon } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -111,7 +112,12 @@ export const OverviewDomains = () => {
 											</span>
 										</td>
 										<td className="text-muted-foreground">
-											{d.serviceName}{" "}
+											<Link
+												href={`/dashboard/project/${d.projectId}/environment/${d.environmentId}/services/${d.serviceType}/${d.serviceId}`}
+												className="hover:underline"
+											>
+												{d.serviceName}
+											</Link>{" "}
 											<Badge variant="secondary" className="font-normal">
 												{d.serviceType}
 											</Badge>

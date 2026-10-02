@@ -59,6 +59,7 @@ export interface OverviewDomain {
 	serviceName: string;
 	projectId: string;
 	projectName: string;
+	environmentId: string;
 	environmentName: string;
 }
 
@@ -70,9 +71,12 @@ export interface OverviewBackup {
 	databaseType: string;
 	backupType: string;
 	destinationName: string | null;
+	serviceId: string;
 	serviceName: string;
 	serviceType: string;
+	projectId: string;
 	projectName: string;
+	environmentId: string;
 	environmentName: string;
 }
 
@@ -214,6 +218,7 @@ export const findAllDomainsCentralized = async (
 			serviceName: applications.name,
 			projectId: projects.projectId,
 			projectName: projects.name,
+			environmentId: environments.environmentId,
 			environmentName: environments.name,
 		})
 		.from(domains)
@@ -247,6 +252,7 @@ export const findAllDomainsCentralized = async (
 			serviceName: compose.name,
 			projectId: projects.projectId,
 			projectName: projects.name,
+			environmentId: environments.environmentId,
 			environmentName: environments.name,
 		})
 		.from(domains)
@@ -308,9 +314,12 @@ export const findAllBackupsCentralized = async (
 			databaseType: b.databaseType,
 			backupType: b.backupType,
 			destinationName: b.destination?.name ?? null,
+			serviceId: svc.id,
 			serviceName: svc.name,
 			serviceType: svc.type,
+			projectId: svc.projectId,
 			projectName: svc.projectName,
+			environmentId: svc.environmentId,
 			environmentName: svc.environmentName,
 		});
 	}

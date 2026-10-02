@@ -54,13 +54,46 @@ export const OverviewServices = () => {
 		);
 	});
 
+	// At-a-glance health across the (filtered) services.
+	const counts = filtered.reduce(
+		(acc, s) => {
+			if (s.status === "running") acc.running++;
+			else if (s.status === "error") acc.error++;
+			else acc.other++;
+			return acc;
+		},
+		{ running: 0, error: 0, other: 0 },
+	);
+
 	return (
 		<div className="flex flex-col gap-4">
 			<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-				<h2 className="font-bold text-xl">
-					Services{" "}
-					<span className="text-muted-foreground">({services.length})</span>
-				</h2>
+				<div className="flex flex-col gap-1">
+					<h2 className="font-bold text-xl">
+						Services{" "}
+						<span className="text-muted-foreground">({services.length})</span>
+					</h2>
+					{filtered.length > 0 && (
+						<div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
+							<span className="inline-flex items-center gap-1">
+								<span className="size-2 rounded-full bg-emerald-500" />
+								{counts.running} running
+							</span>
+							{counts.error > 0 && (
+								<span className="inline-flex items-center gap-1">
+									<span className="size-2 rounded-full bg-destructive" />
+									{counts.error} error
+								</span>
+							)}
+							{counts.other > 0 && (
+								<span className="inline-flex items-center gap-1">
+									<span className="size-2 rounded-full bg-muted-foreground" />
+									{counts.other} idle
+								</span>
+							)}
+						</div>
+					)}
+				</div>
 				<div className="flex flex-col gap-2 sm:flex-row sm:items-center">
 					<div className="relative">
 						<SearchIcon className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted-foreground" />
@@ -117,7 +150,14 @@ export const OverviewServices = () => {
 									key={`${s.type}-${s.id}`}
 									className="border-t transition-colors hover:bg-muted/30 [&>td]:px-3 [&>td]:py-2.5"
 								>
-									<td className="font-medium">{s.name}</td>
+									<td className="font-medium">
+										<Link
+											href={`/dashboard/project/${s.projectId}/environment/${s.environmentId}/services/${s.type}/${s.id}`}
+											className="hover:underline"
+										>
+											{s.name}
+										</Link>
+									</td>
 									<td>
 										<Badge variant="secondary" className="font-normal">
 											{TYPE_LABEL[s.type] ?? s.type}
