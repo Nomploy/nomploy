@@ -178,6 +178,18 @@ export const generatePanelNomadJob = (
         "traefik.http.routers.nomploy-secure.priority=100",
       ]
 
+      // While an alloc is an unpromoted CANARY it registers with THESE tags
+      // instead of the ones above — so Traefik does NOT route to it until it's
+      // promoted. Without this, both the old and the new (canary) alloc carry
+      // traefik.enable and sit in the pool together for the whole promotion
+      // window (~10-40s), and Traefik round-robins between them: a self-update
+      // served stale responses + 404'd brand-new API routes on the old alloc,
+      // and the version flapped. canary_tags keeps the rollout zero-downtime
+      // (old serves until the canary is healthy + promoted) AND overlap-free
+      // (only one version is ever routed). On promotion Nomad swaps these for
+      // the real tags; the old alloc deregisters (+ shutdown_delay) and drains.
+      canary_tags = ["traefik.enable=false"]
+
       check {
         type     = "http"
         path     = "/api/health"
