@@ -566,11 +566,36 @@ type Silence = {
 	// tRPC/superjson deserializes timestamps as Date.
 	startsAt: string | Date;
 	endsAt: string | Date;
+	recurring: boolean;
+	recurStartMinute: number | null;
+	recurEndMinute: number | null;
+	recurDays: number[] | null;
 	alertRuleId: string | null;
 	target: string | null;
 	severity: string | null;
 	createdBy: string | null;
 	status: "active" | "scheduled" | "expired";
+};
+
+const DAY_ABBR = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const fmtMinute = (m: number) =>
+	`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+
+// Human window text: recurring → "Daily 02:00–04:00 UTC (Mon, Wed)"; one-shot →
+// "start → end" local time.
+const describeSilenceWindow = (s: Silence): string => {
+	if (s.recurring && s.recurStartMinute != null && s.recurEndMinute != null) {
+		const days =
+			s.recurDays && s.recurDays.length > 0
+				? ` (${s.recurDays
+						.slice()
+						.sort((a, b) => a - b)
+						.map((d) => DAY_ABBR[d])
+						.join(", ")})`
+				: "";
+		return `Daily ${fmtMinute(s.recurStartMinute)}–${fmtMinute(s.recurEndMinute)} UTC${days}`;
+	}
+	return `${new Date(s.startsAt).toLocaleString()} → ${new Date(s.endsAt).toLocaleString()}`;
 };
 
 // Local <input type="datetime-local"> value for a Date (no seconds, local tz).
@@ -608,6 +633,11 @@ const SilenceDialog = ({
 	const [end, setEnd] = useState(
 		toLocalInput(new Date(now.getTime() + 3600_000)),
 	);
+	// Recurring maintenance window (times are UTC, matching the panel's clock).
+	const [recurring, setRecurring] = useState(false);
+	const [recurStart, setRecurStart] = useState("02:00");
+	const [recurEnd, setRecurEnd] = useState("04:00");
+	const [recurDays, setRecurDays] = useState<number[]>([]);
 	const { data: targets } = api.alert.targets.useQuery(undefined, {
 		enabled: open,
 	});
@@ -617,25 +647,48 @@ const SilenceDialog = ({
 		const s = start ? new Date(start) : new Date();
 		setEnd(toLocalInput(new Date(s.getTime() + hours * 3600_000)));
 	};
+	const toMin = (hhmm: string) => {
+		const [h, m] = hhmm.split(":").map(Number);
+		return (h ?? 0) * 60 + (m ?? 0);
+	};
 
 	const submit = async () => {
 		try {
-			await create.mutateAsync({
-				comment: comment.trim(),
-				startsAt: new Date(start).toISOString(),
-				endsAt: new Date(end).toISOString(),
+			const matchers = {
 				alertRuleId: scope === "rule" ? alertRuleId || null : null,
 				target: scope === "service" ? target || null : null,
 				severity:
 					severity === "any"
 						? null
 						: (severity as "critical" | "warning" | "info"),
-			});
+			};
+			await create.mutateAsync(
+				recurring
+					? {
+							comment: comment.trim(),
+							// Recurrence runs from now until ~1 year out (until deleted).
+							startsAt: new Date().toISOString(),
+							endsAt: new Date(Date.now() + 365 * 24 * 3600_000).toISOString(),
+							recurring: true,
+							recurStartMinute: toMin(recurStart),
+							recurEndMinute: toMin(recurEnd),
+							recurDays,
+							...matchers,
+						}
+					: {
+							comment: comment.trim(),
+							startsAt: new Date(start).toISOString(),
+							endsAt: new Date(end).toISOString(),
+							...matchers,
+						},
+			);
 			toast.success("Silence created");
 			setOpen(false);
 			setComment("");
 			setScope("all");
 			setSeverity("any");
+			setRecurring(false);
+			setRecurDays([]);
 			onDone();
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : "Failed to create silence");
@@ -644,7 +697,9 @@ const SilenceDialog = ({
 
 	const valid =
 		comment.trim().length > 0 &&
-		new Date(end) > new Date(start) &&
+		(recurring
+			? toMin(recurEnd) > toMin(recurStart)
+			: new Date(end) > new Date(start)) &&
 		(scope !== "rule" || !!alertRuleId) &&
 		(scope !== "service" || !!target);
 
@@ -732,37 +787,98 @@ const SilenceDialog = ({
 							</SelectContent>
 						</Select>
 					</div>
-					<div className="grid grid-cols-2 gap-3">
-						<div className="flex flex-col gap-1.5">
-							<Label>Starts</Label>
-							<Input
-								type="datetime-local"
-								value={start}
-								onChange={(e) => setStart(e.target.value)}
-							/>
+
+					<div className="flex items-center justify-between rounded-lg border p-2.5">
+						<div className="flex flex-col">
+							<Label className="text-sm">Repeat daily</Label>
+							<span className="text-muted-foreground text-xs">
+								A recurring maintenance window (times in UTC)
+							</span>
 						</div>
-						<div className="flex flex-col gap-1.5">
-							<Label>Ends</Label>
-							<Input
-								type="datetime-local"
-								value={end}
-								onChange={(e) => setEnd(e.target.value)}
-							/>
-						</div>
+						<Switch checked={recurring} onCheckedChange={setRecurring} />
 					</div>
-					<div className="flex flex-wrap gap-1.5">
-						{[1, 4, 12, 24].map((h) => (
-							<Button
-								key={h}
-								type="button"
-								size="sm"
-								variant="secondary"
-								onClick={() => setDuration(h)}
-							>
-								{h}h
-							</Button>
-						))}
-					</div>
+					{recurring ? (
+						<>
+							<div className="grid grid-cols-2 gap-3">
+								<div className="flex flex-col gap-1.5">
+									<Label>From (UTC)</Label>
+									<Input
+										type="time"
+										value={recurStart}
+										onChange={(e) => setRecurStart(e.target.value)}
+									/>
+								</div>
+								<div className="flex flex-col gap-1.5">
+									<Label>To (UTC)</Label>
+									<Input
+										type="time"
+										value={recurEnd}
+										onChange={(e) => setRecurEnd(e.target.value)}
+									/>
+								</div>
+							</div>
+							<div className="flex flex-col gap-1.5">
+								<Label>Days (none = every day)</Label>
+								<div className="flex flex-wrap gap-1">
+									{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
+										(d, i) => {
+											const on = recurDays.includes(i);
+											return (
+												<Button
+													key={d}
+													type="button"
+													size="sm"
+													variant={on ? "default" : "outline"}
+													className="w-11"
+													onClick={() =>
+														setRecurDays((prev) =>
+															on ? prev.filter((x) => x !== i) : [...prev, i],
+														)
+													}
+												>
+													{d}
+												</Button>
+											);
+										},
+									)}
+								</div>
+							</div>
+						</>
+					) : (
+						<>
+							<div className="grid grid-cols-2 gap-3">
+								<div className="flex flex-col gap-1.5">
+									<Label>Starts</Label>
+									<Input
+										type="datetime-local"
+										value={start}
+										onChange={(e) => setStart(e.target.value)}
+									/>
+								</div>
+								<div className="flex flex-col gap-1.5">
+									<Label>Ends</Label>
+									<Input
+										type="datetime-local"
+										value={end}
+										onChange={(e) => setEnd(e.target.value)}
+									/>
+								</div>
+							</div>
+							<div className="flex flex-wrap gap-1.5">
+								{[1, 4, 12, 24].map((h) => (
+									<Button
+										key={h}
+										type="button"
+										size="sm"
+										variant="secondary"
+										onClick={() => setDuration(h)}
+									>
+										{h}h
+									</Button>
+								))}
+							</div>
+						</>
+					)}
 					<div className="flex flex-col gap-1.5">
 						<Label>Reason</Label>
 						<Input
@@ -863,8 +979,7 @@ const SilencesCard = ({
 										</span>
 									</div>
 									<span className="truncate text-muted-foreground text-xs">
-										{s.comment} · {new Date(s.startsAt).toLocaleString()} →{" "}
-										{new Date(s.endsAt).toLocaleString()}
+										{s.comment} · {describeSilenceWindow(s)}
 										{s.createdBy ? ` · by ${s.createdBy}` : ""}
 									</span>
 								</div>

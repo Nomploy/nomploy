@@ -1,4 +1,4 @@
-import { isSilenced } from "@nomploy/server/services/alerts";
+import { isSilenceActive, isSilenced } from "@nomploy/server/services/alerts";
 import { describe, expect, it } from "vitest";
 
 type S = {
@@ -69,5 +69,72 @@ describe("isSilenced — silence matcher", () => {
 
 	it("no silences → not silenced", () => {
 		expect(isSilenced([], ctx)).toBe(false);
+	});
+});
+
+describe("isSilenceActive — one-shot + recurring windows", () => {
+	const bounds = {
+		startsAt: new Date("2026-01-01T00:00:00Z"),
+		endsAt: new Date("2027-01-01T00:00:00Z"),
+	};
+	const win = (p: Record<string, unknown>) => ({
+		...bounds,
+		recurring: false,
+		recurStartMinute: null,
+		recurEndMinute: null,
+		recurDays: null,
+		...p,
+	});
+	// Monday 2026-10-05 03:00 UTC.
+	const now = new Date("2026-10-05T03:00:00Z");
+	const wd = now.getUTCDay();
+
+	it("one-shot: active within bounds, inactive outside", () => {
+		expect(isSilenceActive(win({}), now)).toBe(true);
+		expect(
+			isSilenceActive(
+				win({ endsAt: new Date("2026-02-01T00:00:00Z") }),
+				now,
+			),
+		).toBe(false);
+	});
+
+	it("recurring: active inside the daily window (every day)", () => {
+		const s = win({
+			recurring: true,
+			recurStartMinute: 120, // 02:00
+			recurEndMinute: 240, // 04:00
+			recurDays: [],
+		});
+		expect(isSilenceActive(s, now)).toBe(true); // 03:00 in [02:00,04:00)
+		expect(
+			isSilenceActive(s, new Date("2026-10-05T05:00:00Z")),
+		).toBe(false); // 05:00 outside
+		expect(
+			isSilenceActive(s, new Date("2026-10-05T04:00:00Z")),
+		).toBe(false); // end is exclusive
+	});
+
+	it("recurring: weekday gating", () => {
+		const base = {
+			recurring: true,
+			recurStartMinute: 120,
+			recurEndMinute: 240,
+		};
+		expect(isSilenceActive(win({ ...base, recurDays: [wd] }), now)).toBe(true);
+		expect(
+			isSilenceActive(win({ ...base, recurDays: [(wd + 1) % 7] }), now),
+		).toBe(false);
+	});
+
+	it("recurring: inactive outside overall bounds even in-window", () => {
+		const s = win({
+			startsAt: new Date("2026-10-06T00:00:00Z"), // starts tomorrow
+			recurring: true,
+			recurStartMinute: 120,
+			recurEndMinute: 240,
+			recurDays: [],
+		});
+		expect(isSilenceActive(s, now)).toBe(false);
 	});
 });

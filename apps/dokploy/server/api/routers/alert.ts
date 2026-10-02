@@ -165,6 +165,14 @@ export const alertRouter = createTRPCRouter({
 					comment: input.comment,
 					startsAt,
 					endsAt,
+					recurring: input.recurring ?? false,
+					recurStartMinute: input.recurring
+						? (input.recurStartMinute ?? null)
+						: null,
+					recurEndMinute: input.recurring
+						? (input.recurEndMinute ?? null)
+						: null,
+					recurDays: input.recurring ? (input.recurDays ?? []) : null,
 					alertRuleId: input.alertRuleId ?? null,
 					target: input.target ?? null,
 					severity: input.severity ?? null,

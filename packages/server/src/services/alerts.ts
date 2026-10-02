@@ -203,18 +203,51 @@ export const isSilenced = (
 			(!s.severity || s.severity === ctx.severity),
 	);
 
-/** Silences currently in effect for an org (now within [startsAt, endsAt]). */
+/**
+ * Is a silence in effect at `now`? One-shot = within [startsAt, endsAt]. Recurring
+ * (maintenance window) = within [startsAt, endsAt] AND today's UTC weekday is in
+ * recurDays (empty = every day) AND the UTC minute-of-day is in [recurStartMinute,
+ * recurEndMinute). Non-wrapping daily window (enforced at create: end > start).
+ */
+export const isSilenceActive = (
+	s: Pick<
+		AlertSilence,
+		| "startsAt"
+		| "endsAt"
+		| "recurring"
+		| "recurStartMinute"
+		| "recurEndMinute"
+		| "recurDays"
+	>,
+	now: Date = new Date(),
+): boolean => {
+	const t = now.getTime();
+	if (t < new Date(s.startsAt).getTime() || t > new Date(s.endsAt).getTime())
+		return false;
+	if (!s.recurring) return true;
+	if (s.recurStartMinute == null || s.recurEndMinute == null) return false;
+	const days = s.recurDays ?? [];
+	if (days.length > 0 && !days.includes(now.getUTCDay())) return false;
+	const minuteOfDay = now.getUTCHours() * 60 + now.getUTCMinutes();
+	return minuteOfDay >= s.recurStartMinute && minuteOfDay < s.recurEndMinute;
+};
+
+/** Silences in effect for an org right now (one-shot within window + recurring
+ * windows currently open). Candidates are pulled by the overall [startsAt,endsAt]
+ * bounds, then the recurrence (weekday/time-of-day) is evaluated in TS. */
 export const getActiveSilences = async (
 	organizationId: string,
 	now: Date = new Date(),
-): Promise<AlertSilence[]> =>
-	db.query.alertSilence.findMany({
+): Promise<AlertSilence[]> => {
+	const candidates = await db.query.alertSilence.findMany({
 		where: and(
 			eq(alertSilence.organizationId, organizationId),
 			lte(alertSilence.startsAt, now),
 			gte(alertSilence.endsAt, now),
 		),
 	});
+	return candidates.filter((s) => isSilenceActive(s, now));
+};
 
 const emitAlertTransition = async (
 	rule: AlertRule,
@@ -450,11 +483,17 @@ export const listAlertSilences = async (organizationId: string) => {
 		),
 		orderBy: desc(alertSilence.endsAt),
 	});
+	const nowDate = new Date(now);
 	return rows.map((s) => {
 		const starts = new Date(s.startsAt).getTime();
 		const ends = new Date(s.endsAt).getTime();
+		// Within bounds but (for a recurring window) not currently open = "scheduled".
 		const status: "active" | "scheduled" | "expired" =
-			now < starts ? "scheduled" : now > ends ? "expired" : "active";
+			now > ends
+				? "expired"
+				: now < starts || !isSilenceActive(s, nowDate)
+					? "scheduled"
+					: "active";
 		return { ...s, status };
 	});
 };

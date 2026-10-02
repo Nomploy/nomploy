@@ -115,8 +115,17 @@ export const alertSilence = pgTable(
 			.notNull()
 			.references(() => organization.id, { onDelete: "cascade" }),
 		comment: text("comment").notNull().default(""),
+		// For a one-shot silence: the active window. For a RECURRING one (maintenance
+		// window): the overall validity bounds — the daily window recurs between these.
 		startsAt: timestamp("startsAt").notNull().defaultNow(),
 		endsAt: timestamp("endsAt").notNull(),
+		// Recurring (maintenance window) — a daily window [recurStartMinute,
+		// recurEndMinute) in UTC minutes-from-midnight, on recurDays weekdays (0=Sun..
+		// 6=Sat; empty/null = every day), repeating between startsAt and endsAt.
+		recurring: boolean("recurring").notNull().default(false),
+		recurStartMinute: integer("recurStartMinute"),
+		recurEndMinute: integer("recurEndMinute"),
+		recurDays: integer("recurDays").array(),
 		// Matchers (null = match any).
 		alertRuleId: text("alertRuleId").references(() => alertRule.alertRuleId, {
 			onDelete: "cascade",
@@ -194,13 +203,33 @@ export type AlertRule = typeof alertRule.$inferSelect;
 // Create a silence. `startsAt` defaults to now (immediate); `endsAt` is required.
 // The UI computes `endsAt` from a duration preset or a custom date (scheduled
 // maintenance). Matchers are all optional (omitted = org-wide).
-export const apiCreateAlertSilence = z.object({
-	comment: z.string().trim().min(1, "Add a reason for the silence"),
-	startsAt: z.string().datetime().optional(),
-	endsAt: z.string().datetime(),
-	alertRuleId: z.string().optional().nullable(),
-	target: z.string().optional().nullable(),
-	severity: z.enum(["critical", "warning", "info"]).optional().nullable(),
-});
+export const apiCreateAlertSilence = z
+	.object({
+		comment: z.string().trim().min(1, "Add a reason for the silence"),
+		startsAt: z.string().datetime().optional(),
+		endsAt: z.string().datetime(),
+		alertRuleId: z.string().optional().nullable(),
+		target: z.string().optional().nullable(),
+		severity: z.enum(["critical", "warning", "info"]).optional().nullable(),
+		// Recurring maintenance window: a daily [recurStartMinute, recurEndMinute)
+		// UTC window on recurDays (0=Sun..6=Sat; empty = every day). startsAt/endsAt
+		// then bound the overall recurrence span.
+		recurring: z.boolean().optional(),
+		recurStartMinute: z.number().int().min(0).max(1439).optional().nullable(),
+		recurEndMinute: z.number().int().min(1).max(1440).optional().nullable(),
+		recurDays: z.array(z.number().int().min(0).max(6)).optional().nullable(),
+	})
+	.refine(
+		(v) =>
+			!v.recurring ||
+			(v.recurStartMinute != null &&
+				v.recurEndMinute != null &&
+				v.recurEndMinute > v.recurStartMinute),
+		{
+			message:
+				"A recurring window needs an end time after its start time (same day).",
+			path: ["recurEndMinute"],
+		},
+	);
 
 export type AlertSilence = typeof alertSilence.$inferSelect;
