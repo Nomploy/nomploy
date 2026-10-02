@@ -28,12 +28,24 @@ const TYPE_LABEL: Record<string, string> = {
 
 const ALL = "__all__";
 
+// Summary chips, in display order. `key` is the status bucket; clicking filters
+// the table to it (toggle). Colors match the StatusTooltip dot.
+const STATUS_CHIPS = [
+	{ key: "done", label: "healthy", dot: "bg-emerald-500" },
+	{ key: "running", label: "deploying", dot: "bg-yellow-500" },
+	{ key: "error", label: "error", dot: "bg-destructive" },
+	{ key: "idle", label: "idle", dot: "bg-muted-foreground" },
+] as const;
+
 export const OverviewServices = () => {
 	const { data, isLoading } = api.overview.services.useQuery(undefined, {
 		refetchInterval: 15000,
 	});
 	const [filter, setFilter] = useState("");
 	const [project, setProject] = useState(ALL);
+	// Status bucket filter: ALL, or one of done/running/error/idle (toggled from
+	// the summary chips).
+	const [status, setStatus] = useState<string>(ALL);
 
 	const services = data ?? [];
 	const projectNames = useMemo(
@@ -45,7 +57,9 @@ export const OverviewServices = () => {
 	);
 
 	const q = filter.toLowerCase();
-	const filtered = services.filter((s) => {
+	// Scoped by project + text (NOT status) — the summary counts are computed from
+	// this so the chips always show the full breakdown even while one is selected.
+	const scoped = services.filter((s) => {
 		if (project !== ALL && s.projectName !== project) return false;
 		return (
 			s.name.toLowerCase().includes(q) ||
@@ -54,19 +68,26 @@ export const OverviewServices = () => {
 		);
 	});
 
-	// At-a-glance health across the (filtered) services. Status enum (matches the
-	// StatusTooltip dot): done = deployed/healthy (green), running = deploying
-	// (amber), error = failed (red), idle = never deployed (muted).
-	const counts = filtered.reduce(
+	// At-a-glance health. Status enum (matches the StatusTooltip dot): done =
+	// deployed/healthy (green), running = deploying (amber), error = failed (red),
+	// idle = never deployed (muted).
+	const bucketOf = (st: string | null): keyof typeof counts =>
+		st === "done" || st === "running" || st === "error"
+			? (st as "done" | "running" | "error")
+			: "idle";
+	const counts = scoped.reduce(
 		(acc, s) => {
-			if (s.status === "done") acc.done++;
-			else if (s.status === "running") acc.running++;
-			else if (s.status === "error") acc.error++;
-			else acc.idle++;
+			acc[bucketOf(s.status)]++;
 			return acc;
 		},
 		{ done: 0, running: 0, error: 0, idle: 0 },
 	);
+
+	// The table applies the status filter on top of the project/text scope.
+	const filtered =
+		status === ALL
+			? scoped
+			: scoped.filter((s) => bucketOf(s.status) === status);
 
 	return (
 		<div className="flex flex-col gap-4">
@@ -76,24 +97,29 @@ export const OverviewServices = () => {
 						Services{" "}
 						<span className="text-muted-foreground">({services.length})</span>
 					</h2>
-					{filtered.length > 0 && (
-						<div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
-							<span className="inline-flex items-center gap-1">
-								<span className="size-2 rounded-full bg-emerald-500" />
-								{counts.done} healthy
-							</span>
-							{counts.error > 0 && (
-								<span className="inline-flex items-center gap-1">
-									<span className="size-2 rounded-full bg-destructive" />
-									{counts.error} error
-								</span>
-							)}
-							{counts.idle > 0 && (
-								<span className="inline-flex items-center gap-1">
-									<span className="size-2 rounded-full bg-muted-foreground" />
-									{counts.idle} idle
-								</span>
-							)}
+					{scoped.length > 0 && (
+						<div className="flex flex-wrap items-center gap-1.5 text-xs">
+							{STATUS_CHIPS.filter(
+								(c) => counts[c.key] > 0 || status === c.key,
+							).map((c) => {
+								const active = status === c.key;
+								return (
+									<button
+										key={c.key}
+										type="button"
+										onClick={() => setStatus(active ? ALL : c.key)}
+										title={active ? "Clear filter" : `Show only ${c.label}`}
+										className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 transition-colors ${
+											active
+												? "border-primary bg-primary/10 text-foreground"
+												: "border-transparent text-muted-foreground hover:bg-muted"
+										}`}
+									>
+										<span className={`size-2 rounded-full ${c.dot}`} />
+										{counts[c.key]} {c.label}
+									</button>
+								);
+							})}
 						</div>
 					)}
 				</div>
