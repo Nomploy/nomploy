@@ -5,6 +5,7 @@ import type { GetServerSidePropsContext } from "next";
 import { useRouter } from "next/router";
 import type { ReactElement } from "react";
 import { ShowDeploymentsTable } from "@/components/dashboard/deployments/show-deployments-table";
+import { ShowQueueTable } from "@/components/dashboard/deployments/show-queue-table";
 import { OverviewBackups } from "@/components/dashboard/overview/overview-backups";
 import { OverviewDomains } from "@/components/dashboard/overview/overview-domains";
 import { OverviewServices } from "@/components/dashboard/overview/overview-services";
@@ -18,7 +19,13 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/utils/api";
 
-const TAB_VALUES = ["services", "backups", "domains", "deployments"] as const;
+const TAB_VALUES = [
+	"services",
+	"backups",
+	"domains",
+	"deployments",
+	"queue",
+] as const;
 type TabValue = (typeof TAB_VALUES)[number];
 
 const isValidTab = (t: string): t is TabValue =>
@@ -72,6 +79,9 @@ function OverviewPage() {
 								{canDeployments && (
 									<TabsTrigger value="deployments">Deployments</TabsTrigger>
 								)}
+								{canDeployments && (
+									<TabsTrigger value="queue">Queue</TabsTrigger>
+								)}
 							</TabsList>
 							<TabsContent value="services" className="mt-0 pt-4">
 								<OverviewServices />
@@ -89,6 +99,11 @@ function OverviewPage() {
 							{canDeployments && (
 								<TabsContent value="deployments" className="mt-0 pt-4">
 									<ShowDeploymentsTable />
+								</TabsContent>
+							)}
+							{canDeployments && (
+								<TabsContent value="queue" className="mt-0 pt-4">
+									<ShowQueueTable />
 								</TabsContent>
 							)}
 						</Tabs>

@@ -32,7 +32,6 @@ import {
 	Package,
 	Palette,
 	PieChart,
-	Rocket,
 	Server,
 	ShieldCheck,
 	Star,
@@ -170,13 +169,6 @@ const MENU: Menu = {
 			title: "Overview",
 			url: "/dashboard/overview",
 			icon: LayoutGrid,
-		},
-		{
-			isSingle: true,
-			title: "Deployments",
-			url: "/dashboard/deployments",
-			icon: Rocket,
-			isEnabled: ({ permissions }) => !!permissions?.deployment.read,
 		},
 		{
 			isSingle: true,
