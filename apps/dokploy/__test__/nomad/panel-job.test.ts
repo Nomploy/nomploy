@@ -32,4 +32,21 @@ describe("generatePanelNomadJob — rollout", () => {
 		expect(job).not.toContain("canary_tags");
 		expect(job).toContain('health_check     = "task_states"');
 	});
+
+	it("cert resolver: defaults to HTTP-01, threads DNS-01 when passed", () => {
+		const def = generatePanelNomadJob("img", {}, "t", "panel.example.com");
+		expect(def).toContain(
+			"traefik.http.routers.nomploy-secure.tls.certresolver=letsencrypt",
+		);
+		const dns = generatePanelNomadJob(
+			"img",
+			{},
+			"t",
+			"panel.example.com",
+			"letsencrypt-dns",
+		);
+		expect(dns).toContain(
+			"traefik.http.routers.nomploy-secure.tls.certresolver=letsencrypt-dns",
+		);
+	});
 });

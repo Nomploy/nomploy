@@ -413,7 +413,7 @@ export const reloadDockerResource = async (
 		// tag — those release tags aren't published to the registry (only :latest
 		// and :sha-*), so doing so fails the image pull.
 		const image = resolvePanelImage();
-		const command = getPanelNomadDeployCommand(image, collectPanelEnv());
+		const command = await getPanelNomadDeployCommand(image, collectPanelEnv());
 		if (serverId) {
 			await execAsyncRemote(serverId, command);
 		} else {

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { getDefaultCertResolver } from "../../services/cert-resolver";
 import { encodeBase64 } from "../docker/utils";
 
 // The panel's Traefik file route (written at install), the single place that
@@ -136,6 +137,11 @@ export const generatePanelNomadJob = (
 	env: Record<string, string>,
 	deployedAt: string = new Date().toISOString(),
 	panelDomain?: string,
+	// ACME cert resolver for the panel domain. Behind the HA pool HTTP-01 can't
+	// complete, so when a DNS provider is enabled this is "letsencrypt-dns" (pass
+	// it from getDefaultCertResolver). Defaults to HTTP-01 for the install.sh
+	// bootstrap, where no provider is configured yet.
+	certResolver = "letsencrypt",
 ): string => {
 	// Zero-downtime mode: when we know the panel's domain we route it through
 	// Consul (dynamic port + Traefik tags) and deploy with a CANARY — a new alloc
@@ -174,7 +180,7 @@ export const generatePanelNomadJob = (
         "traefik.http.routers.nomploy-web.priority=100",
         "traefik.http.routers.nomploy-secure.rule=Host(\`${panelDomain}\`)",
         "traefik.http.routers.nomploy-secure.entrypoints=websecure",
-        "traefik.http.routers.nomploy-secure.tls.certresolver=letsencrypt",
+        "traefik.http.routers.nomploy-secure.tls.certresolver=${certResolver}",
         "traefik.http.routers.nomploy-secure.priority=100",
       ]
 
@@ -315,13 +321,17 @@ ${generateEnvBlock(panelEnv)}
  * Shell command that writes the panel job file and submits it to Nomad. Used
  * both by the self-update path and (rendered inline) by install.sh's bootstrap.
  */
-export const getPanelNomadDeployCommand = (
+export const getPanelNomadDeployCommand = async (
 	image: string,
 	env: Record<string, string>,
 	panelDomain: string | undefined = discoverPanelDomain(),
-): string => {
+): Promise<string> => {
+	// Use the DNS-01 resolver for the panel cert when a DNS provider is enabled —
+	// HTTP-01 can't complete behind the HA pool, so the panel cert would otherwise
+	// fail to renew (see [[nomploy-lb-cert-dns01]]).
+	const certResolver = await getDefaultCertResolver();
 	const encoded = encodeBase64(
-		generatePanelNomadJob(image, env, undefined, panelDomain),
+		generatePanelNomadJob(image, env, undefined, panelDomain, certResolver),
 	);
 	return `
 set -e
