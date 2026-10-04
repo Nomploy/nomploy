@@ -83,15 +83,25 @@ const logoSlug = (name: string) => {
 	return LOGO_ALIASES[base] ?? base;
 };
 
-// Icon published by the registry: a brand (→ Simple Icons slug) or a colored
-// monogram tile. Older/custom registries omit it — fall back to guessing a
-// Simple Icons slug from the pack name, then a generic box.
+// Icon published by the registry: a brand (→ Simple Icons slug), a custom
+// inline logo (→ data-URI src), or a colored monogram tile. Older/custom
+// registries omit it — fall back to guessing a Simple Icons slug from the pack
+// name, then a generic box.
 type PackIcon =
 	| { kind: "brand"; slug: string; hex?: string; title?: string }
+	| { kind: "custom"; src: string }
 	| { kind: "monogram"; text: string; color?: string };
 
 const PackLogo = ({ name, icon }: { name: string; icon?: PackIcon | null }) => {
 	const [errored, setErrored] = useState(false);
+
+	// Custom: a self-contained logo the registry published as a data-URI.
+	if (icon?.kind === "custom" && icon.src) {
+		return (
+			// biome-ignore lint/performance/noImgElement: inline data-URI logo, no next/image
+			<img src={icon.src} alt={name} className="size-8 object-contain" />
+		);
+	}
 
 	// Monogram: a colored initial tile, no network fetch.
 	if (icon?.kind === "monogram") {

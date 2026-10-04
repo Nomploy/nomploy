@@ -1,8 +1,10 @@
 // Store metadata published by a GitHub-Pages Nomad-Pack registry (packs.json).
-// A brand icon maps to a Simple Icons slug; a monogram is a colored initial
-// tile. Health is the smoke-test verdict (null = not boot-tested yet).
+// A brand icon maps to a Simple Icons slug; a custom icon is a self-contained
+// logo published as a data-URI; a monogram is a colored initial tile. Health is
+// the smoke-test verdict (null = not boot-tested yet).
 export type PackIcon =
 	| { kind: "brand"; slug: string; hex?: string; title?: string }
+	| { kind: "custom"; src: string }
 	| { kind: "monogram"; text: string; color?: string };
 
 export type PackHealth = { ok?: boolean; checkedAt?: string } | null;
