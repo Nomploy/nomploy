@@ -126,51 +126,56 @@ const AllocationRow = ({
 						</div>
 						<div className="flex items-center gap-2 text-xs text-muted-foreground">
 							<span>v{alloc.JobVersion}</span>
-							<span>{alloc.ClientStatus === "running" ? "▼ Logs" : ""}</span>
+							<span>▼ Logs</span>
 						</div>
 					</div>
 				</CollapsibleTrigger>
 
 				<CollapsibleContent>
-					{alloc.ClientStatus === "running" && (
-						<div className="mt-3 space-y-3">
+					<div className="mt-3 space-y-3">
+						{/* Live metrics only make sense for a running alloc; logs are shown
+						    for ANY alloc — a crash-looped / pending / failed alloc has no
+						    running task and its logs (e.g. stderr "must be absolute URL")
+						    are exactly what explains the failure, so never gate them on
+						    "running" (that hid every crash reason). */}
+						{alloc.ClientStatus === "running" && (
 							<AllocMetrics allocId={alloc.ID} serverId={serverId} />
-							<div className="flex gap-2">
-								{taskNames.length > 1 && (
-									<Select value={taskName} onValueChange={setTaskName}>
-										<SelectTrigger className="w-[160px] h-7 text-xs">
-											<SelectValue />
-										</SelectTrigger>
-										<SelectContent>
-											{taskNames.map((t) => (
-												<SelectItem key={t} value={t}>
-													{t}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								)}
-								<Select
-									value={logType}
-									onValueChange={(v) => setLogType(v as "stdout" | "stderr")}
-								>
-									<SelectTrigger className="w-[100px] h-7 text-xs">
+						)}
+						<div className="flex gap-2">
+							{taskNames.length > 1 && (
+								<Select value={taskName} onValueChange={setTaskName}>
+									<SelectTrigger className="w-[160px] h-7 text-xs">
 										<SelectValue />
 									</SelectTrigger>
 									<SelectContent>
-										<SelectItem value="stdout">stdout</SelectItem>
-										<SelectItem value="stderr">stderr</SelectItem>
+										{taskNames.map((t) => (
+											<SelectItem key={t} value={t}>
+												{t}
+											</SelectItem>
+										))}
 									</SelectContent>
 								</Select>
-							</div>
-							<AllocLogViewer
-								allocId={alloc.ID}
-								taskName={taskName}
-								logType={logType}
-								serverId={serverId}
-							/>
+							)}
+							<Select
+								value={logType}
+								onValueChange={(v) => setLogType(v as "stdout" | "stderr")}
+							>
+								<SelectTrigger className="w-[100px] h-7 text-xs">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="stdout">stdout</SelectItem>
+									<SelectItem value="stderr">stderr</SelectItem>
+								</SelectContent>
+							</Select>
 						</div>
-					)}
+						<AllocLogViewer
+							allocId={alloc.ID}
+							taskName={taskName}
+							logType={logType}
+							serverId={serverId}
+						/>
+					</div>
 				</CollapsibleContent>
 			</div>
 		</Collapsible>
