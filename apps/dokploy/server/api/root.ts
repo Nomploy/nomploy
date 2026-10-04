@@ -24,6 +24,7 @@ import { mongoRouter } from "./routers/mongo";
 import { mountRouter } from "./routers/mount";
 import { mysqlRouter } from "./routers/mysql";
 import { nomadRouter } from "./routers/nomad";
+import { nomadTokenRouter } from "./routers/nomad-token";
 import { notificationRouter } from "./routers/notification";
 import { organizationRouter } from "./routers/organization";
 import { overviewRouter } from "./routers/overview";
@@ -94,6 +95,7 @@ export const appRouter = createTRPCRouter({
 	sshKey: sshRouter,
 	stripe: stripeRouter,
 	nomad: nomadRouter,
+	nomadToken: nomadTokenRouter,
 	user: userRouter,
 	ai: aiRouter,
 	organization: organizationRouter,
