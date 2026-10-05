@@ -362,6 +362,11 @@ export const apiUpdateCompose = createSchema
 		composeId: z.string(),
 		composeFile: z.string().optional(),
 		command: z.string().optional(),
+		// The pinned Nomad-Pack registry ref. A commit/tag pins it (reproducible);
+		// a branch like "master" tracks the registry's latest each deploy; empty
+		// re-arms the first-deploy auto-pin. Settable so a registry change can be
+		// applied without the Upgrade-to-latest flow.
+		nomadPackRef: z.string().optional(),
 	})
 	// configFiles is managed only via setComposeConfigFiles (content lives in a
 	// Nomad Variable), not the generic update. Mirrors apiUpdateApplication.

@@ -73,6 +73,7 @@ export const ShowNomadPackForm = ({ composeId }: Props) => {
 
 	const [nomadPack, setNomadPack] = useState("");
 	const [nomadPackRegistry, setNomadPackRegistry] = useState("");
+	const [nomadPackRef, setNomadPackRef] = useState("");
 	const [variables, setVariables] = useState("");
 	const [browse, setBrowse] = useState(false);
 	// Enumerate packs in the registry only on demand (it adds the registry + reads
@@ -90,6 +91,7 @@ export const ShowNomadPackForm = ({ composeId }: Props) => {
 		if (!data) return;
 		setNomadPack(data.nomadPack ?? "");
 		setNomadPackRegistry(data.nomadPackRegistry ?? "");
+		setNomadPackRef(data.nomadPackRef ?? "");
 		setVariables(data.composeFile ?? "");
 	}, [data]);
 
@@ -103,10 +105,11 @@ export const ShowNomadPackForm = ({ composeId }: Props) => {
 				composeId,
 				nomadPack: nomadPack.trim(),
 				nomadPackRegistry: nomadPackRegistry.trim(),
+				nomadPackRef: nomadPackRef.trim(),
 				composeFile: variables,
 			});
 			toast.success("Pack settings saved");
-			await refetch();
+			await Promise.all([refetch(), refetchVersion()]);
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : "Failed to save");
 		}
@@ -118,6 +121,7 @@ export const ShowNomadPackForm = ({ composeId }: Props) => {
 		!!data &&
 		(nomadPack !== (data.nomadPack ?? "") ||
 			nomadPackRegistry !== (data.nomadPackRegistry ?? "") ||
+			nomadPackRef !== (data.nomadPackRef ?? "") ||
 			variables !== (data.composeFile ?? ""));
 
 	return (
@@ -238,6 +242,23 @@ export const ShowNomadPackForm = ({ composeId }: Props) => {
 							onChange={(e) => setNomadPackRegistry(e.target.value)}
 						/>
 					</div>
+				</div>
+				<div className="space-y-1.5">
+					<Label>Registry ref (pin)</Label>
+					<Input
+						placeholder="commit / tag / branch — blank auto-pins on first deploy"
+						value={nomadPackRef}
+						onChange={(e) => setNomadPackRef(e.target.value)}
+						className="font-mono text-xs"
+					/>
+					<p className="text-muted-foreground text-xs">
+						Which registry version to render. A commit or tag{" "}
+						<strong>pins</strong> it (reproducible); a branch like{" "}
+						<code>master</code> <strong>tracks the latest</strong> each deploy,
+						so a registry change applies on the next redeploy; blank re-pins to
+						the current latest on the next deploy. The Upgrade button above sets
+						this to the registry's latest commit.
+					</p>
 				</div>
 				<div className="space-y-1.5">
 					<div className="flex items-center justify-between">
