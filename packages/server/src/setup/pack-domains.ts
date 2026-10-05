@@ -125,6 +125,14 @@ export const applyDomainsToJob = (
 			// consulCatalog routes this once it's a Consul service with the tags.
 			s.Provider = "consul";
 			s.Tags = generateConsulTags(appName, s.Name, svcDomains);
+			// Hide a canary alloc from Traefik until it's promoted — the same
+			// mechanism the panel job uses (see nomad-panel.ts canary_tags).
+			// Without it a canary registers with the routing tags while still
+			// starting/unhealthy, and consulCatalog drops the whole service when
+			// no instance is passing (the count=1 cutover window) → a 404 during
+			// the roll. canary_tags keeps the old alloc serving until the canary
+			// is healthy and promoted, then Nomad swaps in the real tags.
+			s.CanaryTags = s.Tags.length > 0 ? ["traefik.enable=false"] : [];
 			changed = true;
 		}
 	}
