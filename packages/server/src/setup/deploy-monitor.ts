@@ -92,6 +92,29 @@ const jobState = async (jid: string): Promise<RolloutState> => {
 	}
 };
 
+/**
+ * Synchronously poll the given Nomad job id(s) until they reach a terminal
+ * rollout state: "ok" once every job is healthy, "failed" on a definitive
+ * failure of any job, or "pending" if the deadline passes while still rolling.
+ * Reuses the same deployment/allocation signal as monitorNomadRollout
+ * ({@link jobState}). Used by the Nomad-Pack deploy path, which registers in TS
+ * (single registration) and then waits here before finalizing.
+ */
+export const waitForRollout = async (
+	ids: string[],
+	deadlineMs: number = DEFAULT_DEADLINE_MS,
+): Promise<RolloutState> => {
+	if (!ids.length) return "ok";
+	const deadline = Date.now() + deadlineMs;
+	while (Date.now() < deadline) {
+		const states = await Promise.all(ids.map(jobState));
+		if (states.some((s) => s === "failed")) return "failed";
+		if (states.every((s) => s === "ok")) return "ok";
+		await sleep(POLL_INTERVAL_MS);
+	}
+	return "pending";
+};
+
 export interface RolloutMonitorOptions {
 	appName: string;
 	mode: "job" | "pack";
@@ -140,18 +163,7 @@ export const monitorNomadRollout = (opts: RolloutMonitorOptions): void => {
 				);
 				outcome = "ok";
 			} else {
-				while (Date.now() < deadline) {
-					const states = await Promise.all(ids.map(jobState));
-					if (states.some((s) => s === "failed")) {
-						outcome = "failed";
-						break;
-					}
-					if (states.every((s) => s === "ok")) {
-						outcome = "ok";
-						break;
-					}
-					await sleep(POLL_INTERVAL_MS);
-				}
+				outcome = await waitForRollout(ids, deadline - Date.now());
 			}
 		} catch (err) {
 			// Unexpected monitor error: don't fail an otherwise-registered deploy.

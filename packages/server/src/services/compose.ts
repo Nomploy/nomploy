@@ -7,12 +7,18 @@ import {
 	cleanAppName,
 	compose,
 } from "@nomploy/server/db/schema";
-import { monitorNomadRollout } from "@nomploy/server/setup/deploy-monitor";
+import {
+	monitorNomadRollout,
+	waitForRollout,
+} from "@nomploy/server/setup/deploy-monitor";
 import { syncIntentionsForOrg } from "@nomploy/server/setup/nomad-connect";
+import type { PackMetaCtx } from "@nomploy/server/setup/pack-nomad";
 import { getBuildComposeCommand } from "@nomploy/server/utils/builders/compose";
 import {
 	getBuildNomadCommand,
 	getBuildNomadPackCommand,
+	type NomadComposeNested,
+	packRenderDir,
 } from "@nomploy/server/utils/builders/nomad";
 import { randomizeSpecificationFile } from "@nomploy/server/utils/docker/compose";
 import {
@@ -51,6 +57,59 @@ import { generateApplyPatchesCommand } from "./patch";
 import { validUniqueServerAppName } from "./project";
 
 export type Compose = typeof compose.$inferSelect;
+
+/**
+ * Nomad-Pack single registration. The deploy shell has already RENDERED the
+ * pack's job files (nomad-pack render --to-dir); here we do the ONE Nomad
+ * registration in TS — ingress tags + canary_tags/shutdown_delay and the panel's
+ * scaling overrides folded into that single register (buildPackJobPatch), re-
+ * stamping the pack.* meta so `nomad-pack destroy` still finds the jobs. Then we
+ * wait for the rollout to go healthy (reusing the detached-path poller). This
+ * replaces `nomad-pack run` + a post-deploy re-patch, which was TWO registrations
+ * per deploy and broke canary (each register is its own canary transition →
+ * consulCatalog 404 window). Throws on a definitive rollout failure so the deploy
+ * is marked failed; warns-and-continues on timeout.
+ */
+const registerPackDeployment = async (
+	entity: NomadComposeNested,
+	logPath: string,
+): Promise<void> => {
+	const { registerRenderedPackJobs } = await import(
+		"@nomploy/server/setup/pack-nomad"
+	);
+	const { buildPackJobPatch } = await import(
+		"@nomploy/server/setup/pack-domains"
+	);
+	const meta: PackMetaCtx = {
+		deploymentName: entity.appName,
+		packName: (entity.nomadPack || "").trim(),
+		registryName: entity.nomadPackRegistry ? "nomploy-custom" : "default",
+		version: (entity.nomadPackRef || "").trim() || "latest",
+	};
+	const patch = await buildPackJobPatch(entity);
+	const ids = await registerRenderedPackJobs(
+		packRenderDir(entity),
+		meta,
+		patch,
+	);
+	const outcome = await waitForRollout(ids, 150_000);
+	const line =
+		outcome === "failed"
+			? "Nomad Pack rollout FAILED ❌"
+			: outcome === "ok"
+				? "Nomad Pack rollout healthy ✅"
+				: "Nomad Pack rollout not confirmed within the window (still in progress) — check the dashboard";
+	const logCmd = `echo "${encodeBase64(`${line}\n`)}" | base64 -d >> ${logPath}`;
+	try {
+		if (entity.serverId) await execAsyncRemote(entity.serverId, logCmd);
+		else await execAsync(logCmd);
+	} catch {
+		// best-effort log line
+	}
+	if (outcome === "failed") {
+		throw new Error("Nomad Pack rollout did not become healthy");
+	}
+};
 
 export const createCompose = async (
 	input: z.infer<typeof apiCreateCompose>,
@@ -316,21 +375,14 @@ export const deployCompose = async ({
 			await execAsync(commandWithLog);
 		}
 
+		// Nomad-Pack: the shell only RENDERED the pack; do the single Nomad
+		// registration (ingress + scaling folded in) and wait for health in TS.
+		if (compose.composeType === "nomad-pack") {
+			await registerPackDeployment(entity, deployment.logPath);
+		}
+
 		const finalizeSuccess = async () => {
 			await updateDeploymentStatus(deployment.deploymentId, "done");
-			// Nomad-Pack: patch the just-deployed job's service(s) to provider=consul
-			// + Traefik tags so nomploy's consulCatalog routes the pack's domains
-			// pool-wide (packs default to Nomad-native registration, invisible to
-			// consulCatalog). See setup/pack-domains.
-			if (compose.composeType === "nomad-pack") {
-				const { applyPackJobPatches } = await import(
-					"@nomploy/server/setup/pack-domains"
-				);
-				// Domains + scaling (count/resources/autoscaling) in one re-registration.
-				await applyPackJobPatches(compose).catch((e) =>
-					console.error("pack job patches failed:", e),
-				);
-			}
 			// Phase B: refresh Connect intentions so this project's mesh services
 			// (isolated) get their allow-rules; no-op for non-isolated orgs.
 			if (compose.environment.project.isolated) {
@@ -487,21 +539,14 @@ export const rebuildCompose = async ({
 			await execAsync(commandWithLog);
 		}
 
+		// Nomad-Pack: the shell only RENDERED the pack; do the single Nomad
+		// registration (ingress + scaling folded in) and wait for health in TS.
+		if (compose.composeType === "nomad-pack") {
+			await registerPackDeployment(compose, deployment.logPath);
+		}
+
 		const finalizeSuccess = async () => {
 			await updateDeploymentStatus(deployment.deploymentId, "done");
-			// Nomad-Pack: patch the just-deployed job's service(s) to provider=consul
-			// + Traefik tags so nomploy's consulCatalog routes the pack's domains
-			// pool-wide (packs default to Nomad-native registration, invisible to
-			// consulCatalog). See setup/pack-domains.
-			if (compose.composeType === "nomad-pack") {
-				const { applyPackJobPatches } = await import(
-					"@nomploy/server/setup/pack-domains"
-				);
-				// Domains + scaling (count/resources/autoscaling) in one re-registration.
-				await applyPackJobPatches(compose).catch((e) =>
-					console.error("pack job patches failed:", e),
-				);
-			}
 			// Phase B: refresh Connect intentions so this project's mesh services
 			// (isolated) get their allow-rules; no-op for non-isolated orgs.
 			if (compose.environment.project.isolated) {

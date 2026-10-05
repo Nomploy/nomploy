@@ -133,6 +133,13 @@ export const applyDomainsToJob = (
 			// the roll. canary_tags keeps the old alloc serving until the canary
 			// is healthy and promoted, then Nomad swaps in the real tags.
 			s.CanaryTags = s.Tags.length > 0 ? ["traefik.enable=false"] : [];
+			// Graceful drain: on promotion the old alloc deregisters from Consul
+			// then waits before stopping, so consulCatalog/Traefik sees the new
+			// alloc before the old one disappears (overlap, not a gap). Same as the
+			// panel job's shutdown_delay. 5s, in nanoseconds; don't override one the
+			// pack author already set.
+			if (s.Tags.length > 0 && !s.ShutdownDelay)
+				s.ShutdownDelay = 5_000_000_000;
 			changed = true;
 		}
 	}
@@ -183,4 +190,28 @@ export const applyPackJobPatches = async (
 		const s = applyScalingToJob(job, compose);
 		return d || s;
 	});
+};
+
+/**
+ * Build the mutator applied to a pack's job(s) at their SINGLE registration
+ * (registerRenderedPackJobs): the same domains (Traefik tags + canary_tags +
+ * shutdown_delay) and scaling (count/resources/autoscaling) overrides that
+ * {@link applyPackJobPatches} used to apply as a second re-registration. Folding
+ * them into the one register is what keeps a canary roll a single clean
+ * transition (no 404 window). Resolves domains + the default cert resolver once,
+ * up front, so the returned patch is synchronous.
+ */
+export const buildPackJobPatch = async (
+	compose: Pick<Compose, "appName" | "serviceScaling"> &
+		PackScalingCompose & { domains?: Domain[] },
+): Promise<(job: NomadJob) => void> => {
+	const domains = applyDefaultCertResolver(
+		compose.domains ?? [],
+		await getDefaultCertResolver().catch(() => "letsencrypt"),
+	);
+	const { applyScalingToJob } = await import("./pack-scaling");
+	return (job) => {
+		applyDomainsToJob(job, compose.appName, domains);
+		applyScalingToJob(job, compose);
+	};
 };

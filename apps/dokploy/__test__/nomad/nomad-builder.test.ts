@@ -2,7 +2,9 @@ import {
 	applyServiceScalingOverrides,
 	generateNomadJobSpec,
 	getBuildNomadCommand,
+	getBuildNomadPackCommand,
 	type NomadServiceSpec,
+	packRenderDir,
 } from "@nomploy/server/utils/builders/nomad";
 import { describe, expect, it } from "vitest";
 
@@ -699,5 +701,37 @@ describe("nomad builder — shared-mode group autoscaling", () => {
 		).toString("utf8");
 		expect(hcl).toContain("count = 1");
 		expect(hcl).not.toContain("scaling {");
+	});
+});
+
+describe("nomad builder — Nomad Pack render command", () => {
+	const packCompose = {
+		appName: "mypack",
+		serverId: null,
+		composeFile: "",
+		nomadPack: "grafana",
+		nomadPackRegistry: null,
+		nomadPackRef: "abc1234",
+		// biome-ignore lint/suspicious/noExplicitAny: test mock of NomadComposeNested
+	} as any;
+
+	it("renders the pack to a dir (single TS registration), not `nomad-pack run`", () => {
+		const cmd = getBuildNomadPackCommand(packCompose);
+		// New behavior: render to a dir; the Nomad registration is done in TS
+		// afterwards (registerRenderedPackJobs) so a canary roll is one clean
+		// transition instead of two registrations.
+		expect(cmd).toContain("nomad-pack render grafana");
+		expect(cmd).toContain(`--to-dir "${packRenderDir(packCompose)}"`);
+		expect(cmd).toContain("--auto-approve");
+		expect(cmd).toContain("Nomad Pack rendered");
+		// Must NOT run (register) the pack from the shell any more.
+		expect(cmd).not.toContain("nomad-pack run");
+		expect(cmd).not.toContain('--name "mypack"');
+	});
+
+	it("packRenderDir sits under the pack's code projectPath", () => {
+		expect(packRenderDir(packCompose).endsWith("mypack/code/rendered")).toBe(
+			true,
+		);
 	});
 });
