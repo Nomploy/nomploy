@@ -16,6 +16,7 @@ import { ShowNomadNodes } from "@/components/dashboard/nomad/nodes/show-nomad-no
 import { ShowScheduler } from "@/components/dashboard/nomad/nodes/show-scheduler";
 import { NomadOverview } from "@/components/dashboard/nomad/overview";
 import { ShowServiceScaling } from "@/components/dashboard/nomad/scaling/show-service-scaling";
+import { ShowNomadTokens } from "@/components/dashboard/settings/nomad-tokens/show-nomad-tokens";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
 import {
 	Select,
@@ -33,6 +34,8 @@ const LOCAL = "local";
 const NomadDashboard = () => {
 	const [selected, setSelected] = useState<string>(LOCAL);
 	const { data: servers } = api.server.all.useQuery();
+	const { data: permissions } = api.user.getPermissions.useQuery();
+	const canTokens = !!permissions?.server?.create;
 	const router = useRouter();
 
 	const serverId = selected === LOCAL ? undefined : selected;
@@ -75,6 +78,7 @@ const NomadDashboard = () => {
 					<TabsTrigger value="consul">Consul</TabsTrigger>
 					<TabsTrigger value="network">Network</TabsTrigger>
 					<TabsTrigger value="logs">Logs</TabsTrigger>
+					{canTokens && <TabsTrigger value="tokens">Tokens</TabsTrigger>}
 				</TabsList>
 				<TabsContent value="cluster">
 					<ShowCluster />
@@ -102,6 +106,11 @@ const NomadDashboard = () => {
 				<TabsContent value="logs">
 					<ShowNomadLogs serverId={serverId} />
 				</TabsContent>
+				{canTokens && (
+					<TabsContent value="tokens">
+						<ShowNomadTokens />
+					</TabsContent>
+				)}
 			</Tabs>
 		</div>
 	);

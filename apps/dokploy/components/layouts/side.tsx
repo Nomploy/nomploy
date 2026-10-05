@@ -403,16 +403,6 @@ const MENU: Menu = {
 		},
 		{
 			isSingle: true,
-			title: "Nomad Tokens",
-			url: "/dashboard/settings/nomad-tokens",
-			icon: Key,
-			// Nomad ACL tokens for cluster integrations — self-hosted + admins only.
-			isEnabled: ({ permissions, isCloud }) =>
-				!isCloud && !!permissions?.server.create,
-		},
-
-		{
-			isSingle: true,
 			title: "Certificates",
 			url: "/dashboard/settings/certificates",
 			icon: ShieldCheck,

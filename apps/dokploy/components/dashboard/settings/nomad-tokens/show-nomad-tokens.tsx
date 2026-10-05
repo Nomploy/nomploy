@@ -166,92 +166,87 @@ export const ShowNomadTokens = () => {
 	const tokens = data ?? [];
 
 	return (
-		<div className="w-full">
-			<Card className="mx-auto h-full max-w-5xl rounded-xl bg-sidebar p-2.5">
-				<div className="rounded-xl bg-background shadow-md">
-					<CardHeader className="flex flex-row items-start justify-between gap-4">
-						<div>
-							<CardTitle className="flex flex-row gap-2 text-xl">
-								<KeyRound className="size-6 self-center text-orange-500" />
-								Nomad API Tokens
-							</CardTitle>
-							<CardDescription>
-								Scoped Nomad ACL tokens for services that call the Nomad API
-								(e.g. a collector or deploy tool). Minted via the control
-								plane's management token; the secret is shown once and not
-								stored.
-							</CardDescription>
-						</div>
-						<CreateTokenDialog onDone={refetch} />
-					</CardHeader>
-					<CardContent className="space-y-2 border-t py-8">
-						{isError ? (
-							<AlertBlock type="error">
-								{error?.message ?? "Failed to list tokens"} — Nomad ACLs must be
-								enabled.
-							</AlertBlock>
-						) : isPending ? (
-							<div className="flex min-h-[25vh] items-center justify-center gap-2 text-muted-foreground text-sm">
-								<span>Loading...</span>
-								<Loader2 className="size-4 animate-spin" />
-							</div>
-						) : tokens.length === 0 ? (
-							<div className="flex min-h-[25vh] flex-col items-center justify-center gap-3">
-								<KeyRound className="size-8 text-muted-foreground" />
-								<span className="text-base text-muted-foreground">
-									No Nomad tokens yet.
-								</span>
-							</div>
-						) : (
-							<div className="flex flex-col gap-3">
-								{tokens.map((t) => (
-									<div
-										key={t.accessorId}
-										className="flex items-center justify-between rounded-lg border bg-background p-3.5"
-									>
-										<div className="flex flex-col gap-0.5">
-											<span className="flex items-center gap-2 font-medium text-sm">
-												{t.name}
-												<Badge variant="secondary" className="font-normal">
-													{t.scope}
-												</Badge>
-											</span>
-											<span className="text-muted-foreground text-xs">
-												accessor {t.accessorId.slice(0, 8)}…
-												{t.createTime
-													? ` · ${new Date(t.createTime).toLocaleString()}`
-													: ""}
-											</span>
-										</div>
-										<DialogAction
-											title="Revoke token"
-											description="Revoke this Nomad token? Any service using it will immediately lose Nomad API access."
-											type="destructive"
-											onClick={async () => {
-												await del
-													.mutateAsync({ accessorId: t.accessorId })
-													.then(() => {
-														toast.success("Token revoked");
-														refetch();
-													})
-													.catch((e) => toast.error(e.message));
-											}}
-										>
-											<Button
-												variant="ghost"
-												size="icon"
-												className="group hover:bg-red-500/10"
-											>
-												<Trash2 className="size-3.5 text-primary group-hover:text-red-500" />
-											</Button>
-										</DialogAction>
-									</div>
-								))}
-							</div>
-						)}
-					</CardContent>
+		<Card className="bg-background">
+			<CardHeader className="flex flex-row items-start justify-between gap-4">
+				<div>
+					<CardTitle className="flex flex-row gap-2 text-xl">
+						<KeyRound className="size-6 self-center text-orange-500" />
+						Nomad API Tokens
+					</CardTitle>
+					<CardDescription>
+						Scoped Nomad ACL tokens for services that call the Nomad API (e.g. a
+						collector or deploy tool). Minted via the control plane's management
+						token; the secret is shown once and not stored.
+					</CardDescription>
 				</div>
-			</Card>
-		</div>
+				<CreateTokenDialog onDone={refetch} />
+			</CardHeader>
+			<CardContent className="space-y-2 border-t py-8">
+				{isError ? (
+					<AlertBlock type="error">
+						{error?.message ?? "Failed to list tokens"} — Nomad ACLs must be
+						enabled.
+					</AlertBlock>
+				) : isPending ? (
+					<div className="flex min-h-[25vh] items-center justify-center gap-2 text-muted-foreground text-sm">
+						<span>Loading...</span>
+						<Loader2 className="size-4 animate-spin" />
+					</div>
+				) : tokens.length === 0 ? (
+					<div className="flex min-h-[25vh] flex-col items-center justify-center gap-3">
+						<KeyRound className="size-8 text-muted-foreground" />
+						<span className="text-base text-muted-foreground">
+							No Nomad tokens yet.
+						</span>
+					</div>
+				) : (
+					<div className="flex flex-col gap-3">
+						{tokens.map((t) => (
+							<div
+								key={t.accessorId}
+								className="flex items-center justify-between rounded-lg border bg-background p-3.5"
+							>
+								<div className="flex flex-col gap-0.5">
+									<span className="flex items-center gap-2 font-medium text-sm">
+										{t.name}
+										<Badge variant="secondary" className="font-normal">
+											{t.scope}
+										</Badge>
+									</span>
+									<span className="text-muted-foreground text-xs">
+										accessor {t.accessorId.slice(0, 8)}…
+										{t.createTime
+											? ` · ${new Date(t.createTime).toLocaleString()}`
+											: ""}
+									</span>
+								</div>
+								<DialogAction
+									title="Revoke token"
+									description="Revoke this Nomad token? Any service using it will immediately lose Nomad API access."
+									type="destructive"
+									onClick={async () => {
+										await del
+											.mutateAsync({ accessorId: t.accessorId })
+											.then(() => {
+												toast.success("Token revoked");
+												refetch();
+											})
+											.catch((e) => toast.error(e.message));
+									}}
+								>
+									<Button
+										variant="ghost"
+										size="icon"
+										className="group hover:bg-red-500/10"
+									>
+										<Trash2 className="size-3.5 text-primary group-hover:text-red-500" />
+									</Button>
+								</DialogAction>
+							</div>
+						))}
+					</div>
+				)}
+			</CardContent>
+		</Card>
 	);
 };
