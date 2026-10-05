@@ -117,6 +117,7 @@ export const applyDomainsToJob = (
 			...(tg.Services ?? []),
 			...(tg.Tasks ?? []).flatMap((t: NomadJob) => t.Services ?? []),
 		];
+		let routed = false;
 		for (const s of svcs) {
 			if (!s.Name) continue;
 			const svcDomains = domains.filter(
@@ -133,14 +134,19 @@ export const applyDomainsToJob = (
 			// the roll. canary_tags keeps the old alloc serving until the canary
 			// is healthy and promoted, then Nomad swaps in the real tags.
 			s.CanaryTags = s.Tags.length > 0 ? ["traefik.enable=false"] : [];
-			// Graceful drain: on promotion the old alloc deregisters from Consul
-			// then waits before stopping, so consulCatalog/Traefik sees the new
-			// alloc before the old one disappears (overlap, not a gap). Same as the
-			// panel job's shutdown_delay. 10s, in nanoseconds; don't override one the
-			// pack author already set. (10s vs 5s shaved the last transient 502 seen
-			// at the promotion instant on a count=1 pack canary — 2026-10-05.)
-			if (s.Tags.length > 0 && !s.ShutdownDelay)
-				s.ShutdownDelay = 10_000_000_000;
+			if (s.Tags.length > 0) routed = true;
+			changed = true;
+		}
+		// Graceful drain at the GROUP level. Nomad honors shutdown_delay on the
+		// group/task, NOT the service — a service-level set is silently dropped
+		// (that's why the earlier service-level attempt was a no-op and pack
+		// canary rolls still blipped). On promotion the old alloc deregisters from
+		// Consul then stays alive this long before stopping, so Traefik's
+		// consulCatalog (~5s refresh) picks up the promoted alloc before the old
+		// disappears — overlap, not a gap. Mirrors the panel job's group
+		// shutdown_delay. Skip if the pack author already set one.
+		if (routed && !tg.ShutdownDelay) {
+			tg.ShutdownDelay = 10_000_000_000;
 			changed = true;
 		}
 	}
