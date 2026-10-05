@@ -430,10 +430,24 @@ ${isNativeHcl ? healthCheckSnippet(appName, "job") : ""}`
 };
 
 /**
+ * The directory `nomad-pack render --to-dir` writes the pack's rendered job
+ * files into — the same `<COMPOSE_PATH>/<appName>/code` projectPath the deploy
+ * command uses, plus `rendered`. {@link registerRenderedPackJobs} reads these
+ * back to do the SINGLE Nomad registration (no `nomad-pack run`, so no second
+ * re-register and no canary churn).
+ */
+export const packRenderDir = (compose: NomadComposeNested): string => {
+	const { COMPOSE_PATH } = paths(!!compose.serverId);
+	return join(COMPOSE_PATH, compose.appName, "code", "rendered");
+};
+
+/**
  * Build the deploy command for a Nomad Pack (composeType = "nomad-pack").
  * Writes the pack variables (composeFile, HCL) to a var-file, optionally
- * registers a custom pack registry, and runs `nomad-pack run`. The deployment is
- * named by appName so it maps back to nomploy for status/logs.
+ * registers a custom pack registry, and RENDERS the pack's job files to a dir
+ * (via `nomad-pack render --to-dir`). The actual Nomad registration — a single
+ * one, with ingress/scaling patches folded in — happens in TS afterwards
+ * (registerRenderedPackJobs), so canary rolls see one clean transition.
  */
 export const getBuildNomadPackCommand = (
 	compose: NomadComposeNested,
@@ -442,6 +456,7 @@ export const getBuildNomadPackCommand = (
 	const { appName, composeFile, nomadPack, nomadPackRegistry, nomadPackRef } =
 		compose;
 	const projectPath = join(COMPOSE_PATH, appName, "code");
+	const renderDir = packRenderDir(compose);
 	const varFile = join(projectPath, `${appName}.vars.hcl`);
 
 	if (!nomadPack || !nomadPack.trim()) {
@@ -485,9 +500,9 @@ set -e
 {
 	command -v nomad-pack >/dev/null 2>&1 || { echo "Error: nomad-pack is not installed on this host. Nomad Pack deploys run on the control plane — deploy this compose without a specific server, or install nomad-pack on the target."; exit 1; }
 	mkdir -p "${projectPath}"
-${writeVars}${addRegistry}	nomad-pack run ${nomadPack}${registryFlag}${refFlag}${varFlag} --name "${appName}" 2>&1
-	echo "Nomad Pack deployed"
-${healthCheckSnippet(appName, "pack")}} || {
+${writeVars}${addRegistry}	rm -rf "${renderDir}" && nomad-pack render ${nomadPack}${registryFlag}${refFlag}${varFlag} --to-dir "${renderDir}" --auto-approve 2>&1
+	echo "Nomad Pack rendered"
+} || {
 	echo "Error: Nomad Pack deployment failed"
 	exit 1
 }
