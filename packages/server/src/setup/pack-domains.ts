@@ -136,10 +136,11 @@ export const applyDomainsToJob = (
 			// Graceful drain: on promotion the old alloc deregisters from Consul
 			// then waits before stopping, so consulCatalog/Traefik sees the new
 			// alloc before the old one disappears (overlap, not a gap). Same as the
-			// panel job's shutdown_delay. 5s, in nanoseconds; don't override one the
-			// pack author already set.
+			// panel job's shutdown_delay. 10s, in nanoseconds; don't override one the
+			// pack author already set. (10s vs 5s shaved the last transient 502 seen
+			// at the promotion instant on a count=1 pack canary — 2026-10-05.)
 			if (s.Tags.length > 0 && !s.ShutdownDelay)
-				s.ShutdownDelay = 5_000_000_000;
+				s.ShutdownDelay = 10_000_000_000;
 			changed = true;
 		}
 	}
