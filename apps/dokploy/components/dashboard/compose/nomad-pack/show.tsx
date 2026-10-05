@@ -1,6 +1,7 @@
 import { ArrowUpCircle, Box, Loader2, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { CodeEditor } from "@/components/shared/code-editor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,7 +28,6 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/utils/api";
 
 interface Props {
@@ -111,6 +111,14 @@ export const ShowNomadPackForm = ({ composeId }: Props) => {
 			toast.error(e instanceof Error ? e.message : "Failed to save");
 		}
 	};
+
+	// Compare against the last-saved values so a failed/half save stays flagged
+	// (the control-plane session can 401 mid-edit and silently drop a save).
+	const dirty =
+		!!data &&
+		(nomadPack !== (data.nomadPack ?? "") ||
+			nomadPackRegistry !== (data.nomadPackRegistry ?? "") ||
+			variables !== (data.composeFile ?? ""));
 
 	return (
 		<Card className="bg-background">
@@ -232,26 +240,53 @@ export const ShowNomadPackForm = ({ composeId }: Props) => {
 					</div>
 				</div>
 				<div className="space-y-1.5">
-					<Label>Variables (HCL)</Label>
-					<Textarea
-						className="min-h-[220px] font-mono text-xs"
-						placeholder={'# pack variables, e.g.\ncount = 2\nregion = "global"'}
-						value={variables}
-						onChange={(e) => setVariables(e.target.value)}
-					/>
+					<div className="flex items-center justify-between">
+						<Label>Variables (HCL)</Label>
+						{dirty && (
+							<Badge
+								variant="outline"
+								className="border-amber-500/40 text-amber-600 dark:text-amber-400"
+							>
+								Unsaved changes
+							</Badge>
+						)}
+					</div>
+					<div
+						onKeyDown={(e) => {
+							if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+								e.preventDefault();
+								if (!update.isPending) save();
+							}
+						}}
+					>
+						<CodeEditor
+							language="properties"
+							lineWrapping
+							wrapperClassName="max-h-[55vh] rounded-md border"
+							placeholder={
+								'# pack variables, e.g.\ncount = 2\nregion = "global"'
+							}
+							value={variables}
+							onChange={(value) => setVariables(value)}
+						/>
+					</div>
 					<p className="text-muted-foreground text-xs">
 						Passed as <code>--var-file</code>. Leave empty to use the pack's
-						defaults. After saving, use Deploy to run the pack.
+						defaults. Save (⌘/Ctrl+S), then Deploy to run the pack.
 					</p>
 				</div>
 				<div>
-					<Button type="button" onClick={save} disabled={update.isPending}>
+					<Button
+						type="button"
+						onClick={save}
+						disabled={update.isPending || !dirty}
+					>
 						{update.isPending ? (
 							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
 						) : (
 							<Save className="mr-2 h-4 w-4" />
 						)}
-						{update.isPending ? "Saving…" : "Save"}
+						{update.isPending ? "Saving…" : dirty ? "Save" : "Saved"}
 					</Button>
 				</div>
 			</CardContent>
