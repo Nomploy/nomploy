@@ -4,7 +4,7 @@ import path from "node:path";
 import { paths } from "../constants";
 import { encodeBase64 } from "../utils/docker/utils";
 import { execAsync } from "../utils/process/execAsync";
-import { TRAEFIK_VERSION } from "./traefik-setup";
+import { getTraefikVersion } from "./traefik-setup";
 
 const JOB_NAME = "nomploy-traefik-ha";
 const CONSUL_ADDR = "http://127.0.0.1:8500";
@@ -81,7 +81,7 @@ export const generateTraefikHaJob = (opts: {
       driver = "docker"
 
       config {
-        image        = "traefik:v${TRAEFIK_VERSION}"
+        image        = "traefik:v${getTraefikVersion()}"
         network_mode = "host"
         args         = ["--configFile=/local/traefik.yml"]
       }

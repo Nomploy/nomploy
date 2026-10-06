@@ -50,6 +50,12 @@ import {
 } from "@nomploy/server";
 import { db } from "@nomploy/server/db";
 import { checkPermission } from "@nomploy/server/services/permission";
+import { deployTraefikHaSystemJob } from "@nomploy/server/setup/traefik-ha";
+import {
+	getTraefikVersion,
+	initializeStandaloneTraefik,
+	setTraefikVersion,
+} from "@nomploy/server/setup/traefik-setup";
 import { TRPCError } from "@trpc/server";
 import { eq, sql } from "drizzle-orm";
 import { scheduledJobs, scheduleJob } from "node-schedule";
@@ -161,6 +167,37 @@ export const settingsRouter = createTRPCRouter({
 				action: "reload",
 				resourceType: "settings",
 				resourceName: "nomploy-traefik",
+			});
+			return true;
+		}),
+	getTraefikVersion: adminProcedure
+		.input(apiServerSchema)
+		.query(({ input }) => {
+			return { version: getTraefikVersion(input?.serverId) };
+		}),
+	upgradeTraefik: adminProcedure
+		.input(
+			z.object({
+				version: z.string().regex(/^\d+\.\d+\.\d+$/),
+				serverId: z.string().optional(),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			setTraefikVersion(input.version, input.serverId);
+			// Recreate on the new image in the background so the request returns
+			// immediately (the pull + recreate briefly interrupts ingress). Then
+			// best-effort re-register the HA pool so LB nodes pull the new image too —
+			// tolerate failure when HA isn't enabled / no LB nodes exist.
+			void (async () => {
+				await initializeStandaloneTraefik({ serverId: input.serverId });
+				await deployTraefikHaSystemJob().catch(() => {});
+			})().catch((err) => {
+				console.error("upgradeTraefik background:", err);
+			});
+			await audit(ctx, {
+				action: "update",
+				resourceType: "settings",
+				resourceName: "traefik-version",
 			});
 			return true;
 		}),
