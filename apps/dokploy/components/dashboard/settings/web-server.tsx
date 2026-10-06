@@ -15,6 +15,7 @@ import { ShowTraefikActions } from "./servers/actions/show-traefik-actions";
 import { ToggleDockerCleanup } from "./servers/actions/toggle-docker-cleanup";
 import { ShowWebServerBackups } from "./web-server/show-web-server-backups";
 import { UpdateServer } from "./web-server/update-server";
+import { UpgradeTraefik } from "./web-server/upgrade-traefik";
 
 export const WebServer = () => {
 	const { data: webServerSettings } =
@@ -50,6 +51,8 @@ export const WebServer = () => {
 
 							<UpdateServer />
 						</div>
+
+						<UpgradeTraefik />
 
 						<div className="flex items-center flex-wrap justify-between gap-4">
 							<span className="text-sm text-muted-foreground flex items-center gap-1.5">

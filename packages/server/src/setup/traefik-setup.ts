@@ -2,6 +2,7 @@ import {
 	chmodSync,
 	existsSync,
 	mkdirSync,
+	readFileSync,
 	rmSync,
 	statSync,
 	writeFileSync,
@@ -21,6 +22,52 @@ export const TRAEFIK_PORT =
 export const TRAEFIK_HTTP3_PORT =
 	Number.parseInt(process.env.TRAEFIK_HTTP3_PORT!, 10) || 443;
 export const TRAEFIK_VERSION = process.env.TRAEFIK_VERSION || "3.6.7";
+
+// A semver like "3.6.7" — the only shape we accept for a Traefik image tag.
+const TRAEFIK_VERSION_RE = /^\d+\.\d+\.\d+$/;
+
+// The stored version lives next to the main Traefik config so a recreate always
+// picks it up. Falls back to the env/default when the file is missing/invalid.
+const traefikVersionFile = (serverId?: string): string => {
+	const { MAIN_TRAEFIK_PATH } = paths(!!serverId);
+	return path.join(MAIN_TRAEFIK_PATH, "traefik-version");
+};
+
+/**
+ * Resolve the Traefik version to run. Reads the stored `traefik-version` file
+ * (set via the panel's upgrade action); falls back to `process.env.TRAEFIK_VERSION`
+ * or the pinned default when the file is missing or malformed.
+ */
+export const getTraefikVersion = (serverId?: string): string => {
+	try {
+		const stored = readFileSync(traefikVersionFile(serverId), "utf8").trim();
+		if (TRAEFIK_VERSION_RE.test(stored)) {
+			return stored;
+		}
+	} catch {
+		// fall through to the env/default
+	}
+	return TRAEFIK_VERSION;
+};
+
+/**
+ * Persist the Traefik version to run. Validates the semver shape (throws on bad
+ * input) and writes it to the `traefik-version` file so subsequent recreates and
+ * HA-pool deploys use it.
+ */
+export const setTraefikVersion = (version: string, serverId?: string): void => {
+	const trimmed = version.trim();
+	if (!TRAEFIK_VERSION_RE.test(trimmed)) {
+		throw new Error(`Invalid Traefik version: ${version}`);
+	}
+	const { MAIN_TRAEFIK_PATH } = paths(!!serverId);
+	mkdirSync(MAIN_TRAEFIK_PATH, { recursive: true });
+	writeFileSync(
+		path.join(MAIN_TRAEFIK_PATH, "traefik-version"),
+		trimmed,
+		"utf8",
+	);
+};
 
 export interface TraefikOptions {
 	env?: string[];
@@ -42,7 +89,7 @@ export const initializeStandaloneTraefik = async ({
 	skipPull,
 }: TraefikOptions = {}) => {
 	const { MAIN_TRAEFIK_PATH, DYNAMIC_TRAEFIK_PATH } = paths(!!serverId);
-	const imageName = `traefik:v${TRAEFIK_VERSION}`;
+	const imageName = `traefik:v${getTraefikVersion(serverId)}`;
 	const containerName = "nomploy-traefik";
 
 	// Host networking (matching install.sh): Traefik binds 80/443/8080 (via its
