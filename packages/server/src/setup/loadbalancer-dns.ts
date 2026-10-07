@@ -1321,7 +1321,7 @@ export const getLoadBalancerMetricsHistory = async (
  * certs" click. No-op unless the pool is deployed.
  */
 export const startLoadBalancerCertSyncLoop = (
-	intervalMinutes = 5,
+	intervalMinutes = 1,
 ): NodeJS.Timeout => {
 	const tick = async () => {
 		try {
@@ -1329,14 +1329,18 @@ export const startLoadBalancerCertSyncLoop = (
 				`/job/${TRAEFIK_HA_JOB_NAME}/allocations`,
 			).catch(() => [] as Alloc[]);
 			if (!allocs.some((a) => a.DesiredStatus === "run")) return;
-			// Change-aware: a no-op unless the hub's certs actually changed, so a
-			// short interval propagates freshly-issued/renewed certs to the pool
-			// within minutes without churning KV or reloading Traefik every tick.
+			// Change-aware + KV-presence-aware: a no-op unless the hub's certs
+			// changed OR KV lost them (Consul restart) — so a freshly-issued/renewed
+			// cert reaches the pool within ~1 min, and a wiped KV self-heals, without
+			// churning KV or reloading Traefik every tick.
 			await syncTraefikCertsToConsulKV();
 		} catch (e) {
 			console.error("loadbalancer-certs: resync error:", e);
 		}
 	};
+	// Run once immediately so a panel restart / leader change repopulates KV fast
+	// (e.g. right after a Consul restart wiped it) instead of waiting a full tick.
+	void tick();
 	return setInterval(tick, intervalMinutes * 60 * 1000);
 };
 

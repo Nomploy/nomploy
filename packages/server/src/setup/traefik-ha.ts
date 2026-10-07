@@ -184,6 +184,22 @@ const consulKvDeleteTree = async (prefix: string): Promise<void> => {
 	}
 };
 
+/** Count keys under a KV prefix (0 when the prefix is absent). Used to detect KV
+ * loss — e.g. a Consul restart (reboot recovery) that wipes the cert tree while
+ * this process keeps its in-memory sync hash, which would otherwise leave the HA
+ * pool certless forever. */
+const consulKvKeyCount = async (prefix: string): Promise<number> => {
+	const res = await fetch(`${CONSUL_ADDR}/v1/kv/${prefix}?keys`, {
+		headers: consulHeaders(),
+	});
+	if (res.status === 404) return 0;
+	if (!res.ok) {
+		throw new Error(`Consul KV keys ${prefix} failed: HTTP ${res.status}`);
+	}
+	const keys = (await res.json()) as string[] | null;
+	return Array.isArray(keys) ? keys.length : 0;
+};
+
 /** Decode every live cert from the hub's acme.json (base64 PEM per Traefik's
  * on-disk format) into inline PEM strings. */
 const readAcmeCertificates = (): { cert: string; key: string }[] => {
@@ -277,7 +293,15 @@ export const syncTraefikCertsToConsulKV = async (opts?: {
 	const certs = readAcmeCertificates();
 	const hash = createHash("sha256").update(JSON.stringify(certs)).digest("hex");
 	if (!opts?.force && hash === lastSyncedCertHash) {
-		return { certCount: certs.length, changed: false };
+		// The in-memory hash says KV is already in sync — but KV can be wiped
+		// out-of-band (a Consul restart in reboot recovery) while this process
+		// keeps running, which would otherwise leave the pool certless forever.
+		// Verify KV still holds the certs (2 keys each: certFile + keyFile); only
+		// skip when it genuinely does, else fall through and re-write them.
+		const present = await consulKvKeyCount(KV_CERTS_PREFIX).catch(() => 0);
+		if (present >= certs.length * 2) {
+			return { certCount: certs.length, changed: false };
+		}
 	}
 	await consulKvDeleteTree(KV_CERTS_PREFIX);
 	// Drop the stale single-blob key from the earlier design, if present.
