@@ -57,6 +57,7 @@ const convertService = (
 	const replicas = service.deploy?.replicas || 1;
 	const env = resolveServiceEnvironment(service, envVars);
 	const entrypoint = extractEntrypoint(service);
+	const command = extractCommand(service);
 	const healthCheck = extractHealthCheck(service);
 	const resources = extractResources(service);
 	const scaling = extractScaling(service);
@@ -70,6 +71,7 @@ const convertService = (
 		replicas,
 		env,
 		entrypoint,
+		command,
 		healthCheck,
 		resources,
 		scaling,
@@ -248,6 +250,20 @@ const extractEntrypoint = (
 		return service.entrypoint.split(/\s+/);
 	}
 	return service.entrypoint;
+};
+
+/**
+ * Extract the compose `command:` as a string array (Docker driver `args`).
+ * A string is split on whitespace (same as entrypoint); a list is used as-is.
+ * Without this the container runs the image's default CMD and the compose
+ * `command:` is silently dropped.
+ */
+const extractCommand = (service: DefinitionsService): string[] | undefined => {
+	if (!service.command) return undefined;
+	if (typeof service.command === "string") {
+		return service.command.split(/\s+/);
+	}
+	return service.command;
 };
 
 /**

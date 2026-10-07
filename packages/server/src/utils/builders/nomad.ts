@@ -29,6 +29,8 @@ export interface NomadServiceSpec {
 	replicas: number;
 	env: Record<string, string>;
 	entrypoint?: string[];
+	/** docker-compose `command:` → the Docker driver's `args` (overrides image CMD). */
+	command?: string[];
 	healthCheck?: {
 		type: string;
 		path?: string;
@@ -725,6 +727,9 @@ ${portLines}
 			const entrypointLine = s.entrypoint
 				? `\n        entrypoint = ${JSON.stringify(s.entrypoint)}`
 				: "";
+			const argsLine = s.command
+				? `\n        args = ${JSON.stringify(s.command)}`
+				: "";
 			const portsConfig =
 				s.ports.length > 0
 					? `\n        ports = [${s.ports.map((p) => `"${p.label}"`).join(", ")}]`
@@ -745,7 +750,7 @@ ${portLines}
 
       config {
         image = "${s.image}"${dockerForcePull(s.image, forcePull)}
-        extra_hosts = [${hostAliases}]${portsConfig}${entrypointLine}${volumesConfig}${mountBlocks}
+        extra_hosts = [${hostAliases}]${portsConfig}${entrypointLine}${argsLine}${volumesConfig}${mountBlocks}
       }
 
 ${envBlock}${secretsBlock}${fileMounts.templates}${configFiles.templates}
@@ -881,6 +886,9 @@ const generateIndependentTaskGroup = (
 	const entrypointLine = service.entrypoint
 		? `\n        entrypoint = ${JSON.stringify(service.entrypoint)}`
 		: "";
+	const argsLine = service.command
+		? `\n        args = ${JSON.stringify(service.command)}`
+		: "";
 
 	const hasPorts = service.ports.length > 0;
 	const dnsServers = clusterDnsServers()
@@ -967,7 +975,7 @@ ${discoveryService}
       driver = "docker"
 
       config {
-        image = "${service.image}"${dockerForcePull(service.image, forcePull)}${portsConfig}${entrypointLine}${volumesConfig}${mountBlocks}
+        image = "${service.image}"${dockerForcePull(service.image, forcePull)}${portsConfig}${entrypointLine}${argsLine}${volumesConfig}${mountBlocks}
       }
 
 ${envBlock}${secretsBlock}${fileMounts.templates}${configFiles.templates}${hostsTemplate}
@@ -1030,6 +1038,9 @@ const generateTaskGroup = (
 	const scalingBlock = generateScalingBlock(service.scaling);
 	const entrypointLine = service.entrypoint
 		? `\n        entrypoint = ${JSON.stringify(service.entrypoint)}`
+		: "";
+	const argsLine = service.command
+		? `\n        args = ${JSON.stringify(service.command)}`
 		: "";
 
 	const hasPorts = service.ports.length > 0;
@@ -1110,7 +1121,7 @@ ${consulServices}
       driver = "docker"
 
       config {
-        image = "${service.image}"${dockerForcePull(service.image, forcePull)}${portsConfig}${entrypointLine}${volumesConfig}${mountBlocks}
+        image = "${service.image}"${dockerForcePull(service.image, forcePull)}${portsConfig}${entrypointLine}${argsLine}${volumesConfig}${mountBlocks}
       }
 
 ${envBlock}${secretsBlock}${fileMounts.templates}${configFiles.templates}
