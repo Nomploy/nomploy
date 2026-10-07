@@ -9,8 +9,7 @@ export const TRAEFIK_PORT =
 	Number.parseInt(process.env.TRAEFIK_PORT!, 10) || 80;
 export const TRAEFIK_SSL_PORT =
 	Number.parseInt(process.env.TRAEFIK_SSL_PORT!, 10) || 443;
-const CONSUL_ADDRESS =
-	process.env.CONSUL_ADDRESS || "http://127.0.0.1:8500";
+const CONSUL_ADDRESS = process.env.CONSUL_ADDRESS || "http://127.0.0.1:8500";
 const NOMAD_ADDRESS = process.env.NOMAD_ADDRESS || "http://127.0.0.1:4646";
 const TRAEFIK_NETWORK = process.env.TRAEFIK_NETWORK || "host";
 const TRAEFIK_CONSUL_ADDRESS =
@@ -36,9 +35,7 @@ const ensureConsulRunning = async () => {
 		await execAsync("consul members");
 		console.log("Consul is running ✅");
 	} catch {
-		throw new Error(
-			"Consul is not running. Start it with: consul agent -dev",
-		);
+		throw new Error("Consul is not running. Start it with: consul agent -dev");
 	}
 };
 
@@ -49,8 +46,8 @@ const checkDockerAuthForNomad = async () => {
 	} else {
 		console.warn(
 			"⚠️  Docker auth config not found at /root/.docker/config.json\n" +
-			"   Nomad won't be able to pull from private registries.\n" +
-			"   Run 'docker login <registry>' to configure.",
+				"   Nomad won't be able to pull from private registries.\n" +
+				"   Run 'docker login <registry>' to configure.",
 		);
 	}
 };
@@ -61,16 +58,16 @@ const ensureNomadRunning = async () => {
 		console.log("Nomad is running ✅");
 	} catch {
 		throw new Error(
-			`Nomad is not running. Start it with:\n` +
-			`  nomad agent -dev -bind=127.0.0.1\n\n` +
-			`For production, ensure your Nomad client config includes:\n` +
-			`  plugin "docker" {\n` +
-			`    config {\n` +
-			`      auth {\n` +
-			`        config = "/root/.docker/config.json"\n` +
-			`      }\n` +
-			`    }\n` +
-			`  }`,
+			"Nomad is not running. Start it with:\n" +
+				"  nomad agent -dev -bind=127.0.0.1\n\n" +
+				"For production, ensure your Nomad client config includes:\n" +
+				`  plugin "docker" {\n` +
+				"    config {\n" +
+				"      auth {\n" +
+				`        config = "/root/.docker/config.json"\n` +
+				"      }\n" +
+				"    }\n" +
+				"  }",
 		);
 	}
 };
@@ -150,6 +147,14 @@ entryPoints:
     address: ":${TRAEFIK_PORT}"
   websecure:
     address: ":${TRAEFIK_SSL_PORT}"
+  metrics:
+    address: ":8082"
+
+metrics:
+  prometheus:
+    entryPoint: metrics
+    addEntryPointsLabels: true
+    addServicesLabels: true
 
 providers:
   consulCatalog:
@@ -193,9 +198,10 @@ certificatesResolvers:
 		mkdirSync(DYNAMIC_TRAEFIK_PATH, { recursive: true });
 	}
 
-	const networkFlag = TRAEFIK_NETWORK === "host"
-		? "--network host"
-		: `-p ${TRAEFIK_PORT}:${TRAEFIK_PORT} -p ${TRAEFIK_SSL_PORT}:${TRAEFIK_SSL_PORT} -p 8080:8080`;
+	const networkFlag =
+		TRAEFIK_NETWORK === "host"
+			? "--network host"
+			: `-p ${TRAEFIK_PORT}:${TRAEFIK_PORT} -p ${TRAEFIK_SSL_PORT}:${TRAEFIK_SSL_PORT} -p 8080:8080`;
 
 	await execAsync(`docker run -d --name ${name} \
 		${networkFlag} \

@@ -218,6 +218,9 @@ export const getDefaultTraefikConfig = () => {
 			web: {
 				address: `:${TRAEFIK_PORT}`,
 			},
+			metrics: {
+				address: ":8082",
+			},
 			websecure: {
 				address: `:${TRAEFIK_SSL_PORT}`,
 				http3: {
@@ -234,6 +237,13 @@ export const getDefaultTraefikConfig = () => {
 		},
 		api: {
 			insecure: true,
+		},
+		metrics: {
+			prometheus: {
+				entryPoint: "metrics",
+				addEntryPointsLabels: true,
+				addServicesLabels: true,
+			},
 		},
 		...(process.env.NODE_ENV === "production" && {
 			certificatesResolvers: {
@@ -273,6 +283,9 @@ export const getDefaultServerTraefikConfig = () => {
 			web: {
 				address: `:${TRAEFIK_PORT}`,
 			},
+			metrics: {
+				address: ":8082",
+			},
 			websecure: {
 				address: `:${TRAEFIK_SSL_PORT}`,
 				http3: {
@@ -287,6 +300,13 @@ export const getDefaultServerTraefikConfig = () => {
 		},
 		api: {
 			insecure: true,
+		},
+		metrics: {
+			prometheus: {
+				entryPoint: "metrics",
+				addEntryPointsLabels: true,
+				addServicesLabels: true,
+			},
 		},
 		certificatesResolvers: {
 			letsencrypt: {

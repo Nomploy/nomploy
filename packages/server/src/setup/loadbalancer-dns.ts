@@ -1189,7 +1189,9 @@ export const sampleLoadBalancerMetrics = async (): Promise<number> => {
 		try {
 			const nodes = await resolveLbNodes(organizationId);
 			for (const n of nodes) {
-				if (n.isHub) continue; // hub runs standalone Traefik — no :8082 metrics
+				// The hub's standalone Traefik now exposes the same :8082 Prometheus
+				// endpoint as the pool nodes (metrics entrypoint added in nomad-setup /
+				// traefik-setup), so it's scraped too and shows up in the LB graphs.
 				const host = n.wgIp || n.ip;
 				if (!host) continue;
 				const c = await scrapeRawCounters(host);
