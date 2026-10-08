@@ -324,6 +324,13 @@ exporters:
     tls:
       insecure: ${isHttps ? "false" : "true"}
 service:
+  telemetry:
+    metrics:
+      # Expose the collector's own throughput metrics on the node's WireGuard IP
+      # (consul-template renders NODE_IP, set from the task env below) so the
+      # panel can read them for the Observability throughput graph. WG-only — not
+      # bound to 0.0.0.0, so it isn't exposed on any public interface.
+      address: {{ env "NODE_IP" }}:8888
   pipelines:
     metrics:
       receivers: [prometheus]
@@ -369,6 +376,12 @@ export const generateOtelCollectorJob = (cfg: OtelConfig): string => {
 
     task "otel" {
       driver = "docker"
+
+      # Node's WireGuard IP, used by the config template to bind the collector's
+      # own telemetry endpoint (:8888) WG-only so the panel can scrape it.
+      env {
+        NODE_IP = "\${attr.unique.network.ip-address}"
+      }
 
       config {
         image        = "${OTEL_IMAGE}"
@@ -461,6 +474,18 @@ export type ObservabilityStatus = {
 		node: string | null;
 		allocId: string | null;
 		image: string;
+		/**
+		 * Cumulative throughput counters from the collector's own telemetry
+		 * (:8888) — metric points received from scrapes, exported to OTLP, and
+		 * failed to export. null when the collector is down/unreachable. The UI
+		 * diffs successive polls into a live points/sec throughput graph.
+		 */
+		points: {
+			received: number;
+			sent: number;
+			failed: number;
+			at: number;
+		} | null;
 	};
 	targets: ObservabilityTarget[];
 };
@@ -484,7 +509,14 @@ export const getObservabilityStatus =
 			node: null as string | null,
 			allocId: null as string | null,
 			image: OTEL_IMAGE,
+			points: null as {
+				received: number;
+				sent: number;
+				failed: number;
+				at: number;
+			} | null,
 		};
+		let nodeId: string | null = null;
 		try {
 			const jobRes = await fetch(`${NOMAD_LOCAL}/v1/job/${JOB_NAME}`, {
 				headers: nomadHeaders(),
@@ -504,6 +536,7 @@ export const getObservabilityStatus =
 					const allocs = (await allocRes.json()) as {
 						ClientStatus?: string;
 						NodeName?: string;
+						NodeID?: string;
 						ID?: string;
 					}[];
 					const running = allocs.filter((a) => a.ClientStatus === "running");
@@ -511,11 +544,69 @@ export const getObservabilityStatus =
 					if (running[0]) {
 						collector.node = running[0].NodeName ?? null;
 						collector.allocId = running[0].ID ?? null;
+						nodeId = running[0].NodeID ?? null;
 					}
 				}
 			}
 		} catch {
 			// leave defaults
+		}
+
+		// Throughput counters from the collector's own telemetry (:8888 on the
+		// node's WG IP). Resolve the node IP, scrape the prometheus endpoint, parse
+		// the three otelcol_*_metric_points counters. Best-effort.
+		if (nodeId) {
+			try {
+				const nodeRes = await fetch(`${NOMAD_LOCAL}/v1/node/${nodeId}`, {
+					headers: nomadHeaders(),
+				});
+				if (nodeRes.ok) {
+					const node = (await nodeRes.json()) as {
+						Attributes?: Record<string, string>;
+					};
+					const ip = node.Attributes?.["unique.network.ip-address"];
+					if (ip) {
+						const mRes = await fetch(`http://${ip}:8888/metrics`, {
+							signal: AbortSignal.timeout(4000),
+						});
+						if (mRes.ok) {
+							const body = await mRes.text();
+							const num = (metric: string): number => {
+								// Sum all label-series of the counter (there is usually one).
+								const re = new RegExp(
+									`^${metric}(?:\\{[^}]*\\})? ([0-9.e+-]+)`,
+									"gm",
+								);
+								let total = 0;
+								let found = false;
+								let mm: RegExpExecArray | null = re.exec(body);
+								while (mm !== null) {
+									const v = Number.parseFloat(mm[1] ?? "");
+									if (Number.isFinite(v)) {
+										total += v;
+										found = true;
+									}
+									mm = re.exec(body);
+								}
+								return found ? total : Number.NaN;
+							};
+							const received = num("otelcol_receiver_accepted_metric_points");
+							const sent = num("otelcol_exporter_sent_metric_points");
+							const failed = num("otelcol_exporter_send_failed_metric_points");
+							if (Number.isFinite(received) || Number.isFinite(sent)) {
+								collector.points = {
+									received: Number.isFinite(received) ? received : 0,
+									sent: Number.isFinite(sent) ? sent : 0,
+									failed: Number.isFinite(failed) ? failed : 0,
+									at: Date.now(),
+								};
+							}
+						}
+					}
+				}
+			} catch {
+				// leave points = null
+			}
 		}
 
 		const targets: ObservabilityTarget[] = [];

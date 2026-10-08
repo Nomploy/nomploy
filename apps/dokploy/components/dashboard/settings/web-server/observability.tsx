@@ -1,5 +1,13 @@
-import { CheckCircle2, Plus, RefreshCw, Trash2, XCircle } from "lucide-react";
+import {
+	CheckCircle2,
+	Dices,
+	Plus,
+	RefreshCw,
+	Trash2,
+	XCircle,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
 import { AlertBlock } from "@/components/shared/alert-block";
 import { DialogAction } from "@/components/shared/dialog-action";
@@ -12,6 +20,12 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import {
+	type ChartConfig,
+	ChartContainer,
+	ChartTooltip,
+	ChartTooltipContent,
+} from "@/components/ui/chart";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -24,6 +38,18 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/utils/api";
+
+type ThroughputPoint = {
+	t: number;
+	received: number;
+	sent: number;
+	failed: number;
+};
+const MAX_TP_POINTS = 60;
+const throughputConfig = {
+	received: { label: "Scraped /s", color: "hsl(var(--chart-1))" },
+	sent: { label: "Exported /s", color: "hsl(var(--chart-2))" },
+} satisfies ChartConfig;
 
 type ScrapeAuth =
 	| { type: "none" }
@@ -46,8 +72,26 @@ type EditProfile = {
 
 const PROFILE_NAME_RE = /^[A-Za-z0-9_-]+$/;
 
+/**
+ * A random, hard-to-guess profile name. The name ends up in a public Consul tag
+ * (`nomploy.metrics.auth=<name>`); a guessable name would let a rogue workload
+ * self-tag with it and make the collector scrape it using this profile's token,
+ * leaking the credential. A random suffix makes that impractical.
+ */
+const genProfileName = (): string => {
+	let rand = "";
+	try {
+		const b = new Uint8Array(6);
+		crypto.getRandomValues(b);
+		rand = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+	} catch {
+		rand = Math.random().toString(36).slice(2, 14);
+	}
+	return `scrape-${rand}`;
+};
+
 const emptyProfile = (): EditProfile => ({
-	name: "",
+	name: genProfileName(),
 	type: "bearer",
 	scheme: "Bearer",
 	credentials: "",
@@ -195,6 +239,44 @@ export const Observability = () => {
 
 	const collector = status?.collector;
 	const targets = status?.targets ?? [];
+
+	// Live throughput: keep a rolling window of the collector's cumulative
+	// counters across polls, then diff consecutive samples into points/sec. No
+	// history before the page was opened (the counters live only in the
+	// collector); resets if the collector restarts (counters go backwards).
+	const [tpHistory, setTpHistory] = useState<ThroughputPoint[]>([]);
+	const points = collector?.points ?? null;
+	useEffect(() => {
+		if (!points) return;
+		setTpHistory((prev) => {
+			if (prev.length > 0 && prev[prev.length - 1]?.t === points.at)
+				return prev;
+			return [
+				...prev,
+				{
+					t: points.at,
+					received: points.received,
+					sent: points.sent,
+					failed: points.failed,
+				},
+			].slice(-MAX_TP_POINTS);
+		});
+	}, [points]);
+
+	const tpData = tpHistory.flatMap((cur, i) => {
+		const prev = tpHistory[i - 1];
+		if (!prev) return [];
+		const dt = Math.max(1, (cur.t - prev.t) / 1000);
+		const rate = (a: number, b: number) => Math.max(0, (a - b) / dt);
+		return [
+			{
+				t: cur.t,
+				received: Number(rate(cur.received, prev.received).toFixed(2)),
+				sent: Number(rate(cur.sent, prev.sent).toFixed(2)),
+				failed: Number(rate(cur.failed, prev.failed).toFixed(2)),
+			},
+		];
+	});
 
 	return (
 		<Card className="bg-background">
@@ -397,15 +479,28 @@ export const Observability = () => {
 									className="flex flex-col gap-2 rounded-md border p-3"
 								>
 									<div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-										<div className="flex w-full flex-col gap-2 sm:max-w-[12rem]">
+										<div className="flex w-full flex-col gap-2 sm:max-w-[14rem]">
 											<Label>Name</Label>
-											<Input
-												placeholder="e.g. goliash"
-												value={p.name}
-												onChange={(e) =>
-													updateProfile(i, { name: e.target.value })
-												}
-											/>
+											<div className="flex items-center gap-1">
+												<Input
+													placeholder="scrape-xxxx"
+													value={p.name}
+													onChange={(e) =>
+														updateProfile(i, { name: e.target.value })
+													}
+												/>
+												<Button
+													type="button"
+													variant="outline"
+													size="icon"
+													title="Generate a random, hard-to-guess name"
+													onClick={() =>
+														updateProfile(i, { name: genProfileName() })
+													}
+												>
+													<Dices className="size-4" />
+												</Button>
+											</div>
 										</div>
 										<div className="flex w-full flex-col gap-2 sm:max-w-[12rem]">
 											<Label>Type</Label>
@@ -537,6 +632,94 @@ export const Observability = () => {
 							<span className="font-mono text-xs text-muted-foreground">
 								{collector.image}
 							</span>
+						)}
+
+						{points && (
+							<div className="flex flex-col gap-2 rounded-lg border p-3">
+								<div className="flex flex-wrap items-baseline justify-between gap-2">
+									<Label>Throughput</Label>
+									<div className="flex gap-4 text-sm">
+										<span>
+											<span className="font-semibold">
+												{tpData.length > 0
+													? (tpData[tpData.length - 1]?.received ?? 0)
+													: 0}
+											</span>
+											<span className="text-muted-foreground"> scraped/s</span>
+										</span>
+										<span>
+											<span className="font-semibold">
+												{tpData.length > 0
+													? (tpData[tpData.length - 1]?.sent ?? 0)
+													: 0}
+											</span>
+											<span className="text-muted-foreground"> exported/s</span>
+										</span>
+										{points.failed > 0 && (
+											<span className="text-destructive">
+												{points.failed} export failures
+											</span>
+										)}
+									</div>
+								</div>
+								{tpData.length < 2 ? (
+									<span className="text-sm text-muted-foreground">
+										Collecting… the live graph builds up over the next polls.
+									</span>
+								) : (
+									<ChartContainer
+										config={throughputConfig}
+										className="h-[160px] w-full"
+									>
+										<AreaChart data={tpData}>
+											<CartesianGrid vertical={false} />
+											<XAxis
+												dataKey="t"
+												tickLine={false}
+												axisLine={false}
+												tickMargin={8}
+												minTickGap={40}
+												tickFormatter={(v) =>
+													new Date(v).toLocaleTimeString([], {
+														hour: "2-digit",
+														minute: "2-digit",
+													})
+												}
+											/>
+											<YAxis
+												tickLine={false}
+												axisLine={false}
+												width={32}
+												allowDecimals={false}
+											/>
+											<ChartTooltip content={<ChartTooltipContent />} />
+											<Area
+												type="monotone"
+												dataKey="received"
+												stroke="var(--color-received)"
+												fill="var(--color-received)"
+												fillOpacity={0.15}
+												strokeWidth={2}
+												isAnimationActive={false}
+											/>
+											<Area
+												type="monotone"
+												dataKey="sent"
+												stroke="var(--color-sent)"
+												fill="var(--color-sent)"
+												fillOpacity={0.15}
+												strokeWidth={2}
+												isAnimationActive={false}
+											/>
+										</AreaChart>
+									</ChartContainer>
+								)}
+								<span className="text-xs text-muted-foreground">
+									Metric points the collector scrapes vs exports to the OTLP
+									backend, per second. Live from the collector's own telemetry;
+									history starts when you open this page.
+								</span>
+							</div>
 						)}
 
 						<div className="flex flex-col gap-1">
