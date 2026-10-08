@@ -63,6 +63,7 @@ const convertService = (
 	const scaling = extractScaling(service);
 	const volumes = extractVolumes(service, declaredVolumes);
 	const fileMounts = extractFileMounts(service, configContents);
+	const metricsPort = extractMetricsPort(service);
 
 	return {
 		name,
@@ -77,7 +78,29 @@ const convertService = (
 		scaling,
 		volumes,
 		fileMounts,
+		metricsPort,
 	};
+};
+
+/**
+ * Extract the Prometheus /metrics port from the `x-nomad-metrics-port` service
+ * extension. When set (>0), the service's primary Consul service is tagged
+ * `nomploy.metrics.port=<port>` so the built-in OTel Collector scrapes it.
+ * Example:
+ *   my-service:
+ *     x-nomad-metrics-port: 9090
+ */
+const extractMetricsPort = (
+	service: DefinitionsService,
+): number | undefined => {
+	const raw = (service as Record<string, unknown>)["x-nomad-metrics-port"];
+	const n =
+		typeof raw === "number"
+			? raw
+			: typeof raw === "string"
+				? Number.parseInt(raw, 10)
+				: Number.NaN;
+	return Number.isInteger(n) && n > 0 ? n : undefined;
 };
 
 /**

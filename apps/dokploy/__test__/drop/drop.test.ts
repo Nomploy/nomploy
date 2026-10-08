@@ -141,6 +141,7 @@ const baseApp: ApplicationNested = {
 	autoscaleCpuTarget: null,
 	autoscaleMemoryTarget: null,
 	nodePool: null,
+	metricsPort: null,
 	nomadSecretsEnabled: false,
 	updateMaxParallel: 1,
 	canaryCount: 0,

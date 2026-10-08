@@ -16,15 +16,29 @@ const OTEL_IMAGE = "otel/opentelemetry-collector-contrib:0.111.0";
 
 const consulToken = (): string => process.env.CONSUL_TOKEN ?? "";
 
+/**
+ * Credential the collector presents when scraping discovered services whose
+ * /metrics is behind auth. The Prometheus receiver attaches one credential per
+ * scrape job, so this is a single cluster-wide credential applied to the
+ * tag-discovered services job; the Traefik :8082 endpoint is always scraped
+ * unauthenticated.
+ *  - `none`   — no scrape auth.
+ *  - `bearer` — `Authorization: <scheme> <credentials>`. `scheme` defaults to
+ *               "Bearer" but can be any scheme word (e.g. "Token"), so a range
+ *               of header-token schemes are covered.
+ *  - `basic`  — HTTP Basic (`username`/`password`).
+ */
+export type OtelScrapeAuth =
+	| { type: "none" }
+	| { type: "bearer"; scheme: string; credentials: string }
+	| { type: "basic"; username: string; password: string };
+
 export type OtelConfig = {
 	enabled: boolean;
 	otlpEndpoint: string;
 	otlpHeaders: Record<string, string>;
 	scrapeIntervalSeconds: number;
-	/** Bearer token sent when scraping discovered services' /metrics (for
-	 * endpoints behind auth). Applied to the tag-discovered services job; the
-	 * Traefik :8082 endpoint is scraped without it. Empty = no scrape auth. */
-	scrapeBearerToken: string;
+	scrapeAuth: OtelScrapeAuth;
 };
 
 const DEFAULT_OTEL_CONFIG: OtelConfig = {
@@ -32,7 +46,47 @@ const DEFAULT_OTEL_CONFIG: OtelConfig = {
 	otlpEndpoint: "",
 	otlpHeaders: {},
 	scrapeIntervalSeconds: 30,
-	scrapeBearerToken: "",
+	scrapeAuth: { type: "none" },
+};
+
+/**
+ * Normalize an arbitrary persisted/input value into a well-formed scrape-auth.
+ * Also migrates the legacy `scrapeBearerToken` string (shipped in v0.30.198)
+ * into a `bearer` auth so an upgrade keeps working.
+ */
+const normalizeScrapeAuth = (
+	raw: unknown,
+	legacyBearer?: unknown,
+): OtelScrapeAuth => {
+	const a = raw as Partial<Record<string, unknown>> | undefined;
+	const type = a?.type;
+	if (type === "bearer") {
+		const credentials =
+			typeof a?.credentials === "string" ? a.credentials.trim() : "";
+		const scheme =
+			typeof a?.scheme === "string" && a.scheme.trim() !== ""
+				? a.scheme.trim()
+				: "Bearer";
+		return credentials === ""
+			? { type: "none" }
+			: { type: "bearer", scheme, credentials };
+	}
+	if (type === "basic") {
+		const username = typeof a?.username === "string" ? a.username.trim() : "";
+		const password = typeof a?.password === "string" ? a.password : "";
+		return username === "" && password === ""
+			? { type: "none" }
+			: { type: "basic", username, password };
+	}
+	// Legacy migration: a bare scrapeBearerToken string.
+	if (typeof legacyBearer === "string" && legacyBearer.trim() !== "") {
+		return {
+			type: "bearer",
+			scheme: "Bearer",
+			credentials: legacyBearer.trim(),
+		};
+	}
+	return { type: "none" };
 };
 
 // The observability config lives in a sibling dir of the main Traefik config,
@@ -62,10 +116,10 @@ export const getOtelConfig = (): OtelConfig => {
 				Number.isFinite(scrape) && scrape >= 5 && scrape <= 3600
 					? Math.floor(scrape)
 					: DEFAULT_OTEL_CONFIG.scrapeIntervalSeconds,
-			scrapeBearerToken:
-				typeof parsed.scrapeBearerToken === "string"
-					? parsed.scrapeBearerToken
-					: "",
+			scrapeAuth: normalizeScrapeAuth(
+				(parsed as { scrapeAuth?: unknown }).scrapeAuth,
+				(parsed as { scrapeBearerToken?: unknown }).scrapeBearerToken,
+			),
 		};
 	} catch {
 		return { ...DEFAULT_OTEL_CONFIG };
@@ -94,10 +148,7 @@ export const setOtelConfig = (cfg: OtelConfig): void => {
 				? cfg.otlpHeaders
 				: {},
 		scrapeIntervalSeconds: scrape,
-		scrapeBearerToken:
-			typeof cfg.scrapeBearerToken === "string"
-				? cfg.scrapeBearerToken.trim()
-				: "",
+		scrapeAuth: normalizeScrapeAuth(cfg.scrapeAuth),
 	};
 	const file = otelConfigPath();
 	mkdirSync(path.dirname(file), { recursive: true });
@@ -124,14 +175,20 @@ export const generateOtelCollectorConfig = (cfg: OtelConfig): string => {
 	// Nested as a sibling of `server:` under the consul_sd_configs list item
 	// (14-space indent).
 	const tokenLine = token ? `\n              token: ${yamlQuote(token)}` : "";
-	// Bearer token for scraping discovered services whose /metrics is behind
-	// auth. Sits at the scrape_config level (10-space indent), as a sibling of
+	// Scrape credential for discovered services whose /metrics is behind auth.
+	// Sits at the scrape_config level (10-space indent), as a sibling of
 	// `consul_sd_configs:`/`relabel_configs:`. Only applied to the tag-discovered
 	// services job — Traefik's :8082 is unauthenticated.
-	const scrapeAuth = cfg.scrapeBearerToken.trim();
-	const scrapeAuthBlock = scrapeAuth
-		? `\n          authorization:\n            type: Bearer\n            credentials: ${yamlQuote(scrapeAuth)}`
-		: "";
+	const scrapeAuthBlock = (() => {
+		const auth = cfg.scrapeAuth;
+		if (auth.type === "bearer") {
+			return `\n          authorization:\n            type: ${yamlQuote(auth.scheme || "Bearer")}\n            credentials: ${yamlQuote(auth.credentials)}`;
+		}
+		if (auth.type === "basic") {
+			return `\n          basic_auth:\n            username: ${yamlQuote(auth.username)}\n            password: ${yamlQuote(auth.password)}`;
+		}
+		return "";
+	})();
 	const isHttps = /^https:\/\//i.test(cfg.otlpEndpoint.trim());
 	const headerEntries = Object.entries(cfg.otlpHeaders ?? {});
 	const headersBlock =

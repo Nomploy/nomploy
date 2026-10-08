@@ -123,18 +123,28 @@ export const applyDomainsToJob = (
 			const svcDomains = domains.filter(
 				(d) => d.serviceName === s.Name && d.host,
 			);
+			// Preserve an opt-in metrics tag the pack set on its service — we
+			// overwrite s.Tags below, so carry nomploy.metrics.port=<port> over
+			// (the OTel Collector scrapes by it; see setup/otel-collector.ts). The
+			// Provider flip to consul also makes it visible to consul_sd discovery.
+			const existingTags = Array.isArray(s.Tags) ? (s.Tags as string[]) : [];
+			const metricsTags = existingTags.filter(
+				(t) => typeof t === "string" && t.startsWith("nomploy.metrics.port="),
+			);
 			// consulCatalog routes this once it's a Consul service with the tags.
 			s.Provider = "consul";
-			s.Tags = generateConsulTags(appName, s.Name, svcDomains);
+			const traefikTags = generateConsulTags(appName, s.Name, svcDomains);
+			s.Tags = [...traefikTags, ...metricsTags];
 			// Hide a canary alloc from Traefik until it's promoted — the same
 			// mechanism the panel job uses (see nomad-panel.ts canary_tags).
 			// Without it a canary registers with the routing tags while still
 			// starting/unhealthy, and consulCatalog drops the whole service when
 			// no instance is passing (the count=1 cutover window) → a 404 during
 			// the roll. canary_tags keeps the old alloc serving until the canary
-			// is healthy and promoted, then Nomad swaps in the real tags.
-			s.CanaryTags = s.Tags.length > 0 ? ["traefik.enable=false"] : [];
-			if (s.Tags.length > 0) routed = true;
+			// is healthy and promoted, then Nomad swaps in the real tags. Gated on
+			// the Traefik (routing) tags only — a metrics-only service isn't routed.
+			s.CanaryTags = traefikTags.length > 0 ? ["traefik.enable=false"] : [];
+			if (traefikTags.length > 0) routed = true;
 			changed = true;
 		}
 		// Graceful drain at the GROUP level. Nomad honors shutdown_delay on the

@@ -170,6 +170,10 @@ export const applications = pgTable("application", {
 	// Nomad node pool (autoscaling group) to run this app in. Null/"default" = the
 	// built-in default pool. Emitted as the job's `node_pool`.
 	nodePool: text("nodePool"),
+	// Container port this app serves Prometheus /metrics on. When set, the app's
+	// primary Consul service is tagged nomploy.metrics.port=<port> so the built-in
+	// OTel Collector scrapes it. Null = not scraped.
+	metricsPort: integer("metricsPort"),
 	// Secrets are stored in a Nomad Variable at nomad/jobs/<appName> (never in the
 	// job HCL); the task reads them via its workload identity + a template block.
 	// This flag gates emitting that template — opt-in per app so a cluster without
@@ -380,6 +384,7 @@ const createSchema = createInsertSchema(applications, {
 	previewLabels: z.array(z.string()).optional(),
 	cleanCache: z.boolean().optional(),
 	ulimitsSwarm: UlimitsSwarmSchema.nullable(),
+	metricsPort: z.number().int().positive().nullable().optional(),
 	enableSubmodules: z.boolean().optional(),
 	icon: z
 		.string()

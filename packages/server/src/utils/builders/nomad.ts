@@ -31,6 +31,12 @@ export interface NomadServiceSpec {
 	entrypoint?: string[];
 	/** docker-compose `command:` → the Docker driver's `args` (overrides image CMD). */
 	command?: string[];
+	/**
+	 * Container port this service serves Prometheus `/metrics` on. When set (>0),
+	 * the primary service is tagged `nomploy.metrics.port=<port>` so the built-in
+	 * OTel Collector discovers and scrapes it. Undefined = not scraped.
+	 */
+	metricsPort?: number;
 	healthCheck?: {
 		type: string;
 		path?: string;
@@ -1596,9 +1602,22 @@ const generateConsulServices = (
 		// Tag the mesh service with its project so the intentions engine can group
 		// services by project from a single Consul catalog listing (catalog returns
 		// tags, not meta). Harmless to Traefik, which ignores non-traefik tags.
+		// Opt-in metrics scraping: tag the primary port's service with
+		// nomploy.metrics.port=<port> so the OTel Collector discovers and scrapes
+		// its /metrics (see setup/otel-collector.ts). Only on the primary service.
+		const metricsTag =
+			isPrimary &&
+			typeof service.metricsPort === "number" &&
+			service.metricsPort > 0
+				? [`nomploy.metrics.port=${service.metricsPort}`]
+				: [];
 		const allTags = inMesh
-			? [...tags, `${NOMPLOY_PROJECT_TAG}${segmentation.projectId}`]
-			: tags;
+			? [
+					...tags,
+					`${NOMPLOY_PROJECT_TAG}${segmentation.projectId}`,
+					...metricsTag,
+				]
+			: [...tags, ...metricsTag];
 		const tagsStr =
 			allTags.length > 0
 				? `\n      tags = [\n${allTags.map((t) => `        ${JSON.stringify(t)},`).join("\n")}\n      ]`

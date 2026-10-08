@@ -12,8 +12,20 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/utils/api";
+
+type ScrapeAuth =
+	| { type: "none" }
+	| { type: "bearer"; scheme: string; credentials: string }
+	| { type: "basic"; username: string; password: string };
 
 export const Observability = () => {
 	const { data, refetch } = api.settings.getObservability.useQuery();
@@ -25,7 +37,13 @@ export const Observability = () => {
 	const [headerKey, setHeaderKey] = useState("");
 	const [headerValue, setHeaderValue] = useState("");
 	const [scrapeInterval, setScrapeInterval] = useState("30");
-	const [scrapeBearerToken, setScrapeBearerToken] = useState("");
+	const [scrapeAuthType, setScrapeAuthType] = useState<
+		"none" | "bearer" | "basic"
+	>("none");
+	const [scrapeScheme, setScrapeScheme] = useState("Bearer");
+	const [scrapeCredentials, setScrapeCredentials] = useState("");
+	const [scrapeUsername, setScrapeUsername] = useState("");
+	const [scrapePassword, setScrapePassword] = useState("");
 
 	// Prefill once the stored config loads.
 	useEffect(() => {
@@ -33,7 +51,15 @@ export const Observability = () => {
 		setEnabled(data.enabled);
 		setOtlpEndpoint(data.otlpEndpoint);
 		setScrapeInterval(String(data.scrapeIntervalSeconds));
-		setScrapeBearerToken(data.scrapeBearerToken ?? "");
+		const auth = data.scrapeAuth ?? { type: "none" };
+		setScrapeAuthType(auth.type);
+		if (auth.type === "bearer") {
+			setScrapeScheme(auth.scheme || "Bearer");
+			setScrapeCredentials(auth.credentials);
+		} else if (auth.type === "basic") {
+			setScrapeUsername(auth.username);
+			setScrapePassword(auth.password);
+		}
 		const entries = Object.entries(data.otlpHeaders ?? {});
 		if (entries[0]) {
 			setHeaderKey(entries[0][0]);
@@ -54,6 +80,24 @@ export const Observability = () => {
 			headers[k] = headerValue;
 		}
 		return headers;
+	};
+
+	const buildScrapeAuth = (): ScrapeAuth => {
+		if (scrapeAuthType === "bearer") {
+			return {
+				type: "bearer",
+				scheme: scrapeScheme.trim() || "Bearer",
+				credentials: scrapeCredentials.trim(),
+			};
+		}
+		if (scrapeAuthType === "basic") {
+			return {
+				type: "basic",
+				username: scrapeUsername.trim(),
+				password: scrapePassword,
+			};
+		}
+		return { type: "none" };
 	};
 
 	return (
@@ -114,22 +158,75 @@ export const Observability = () => {
 					</div>
 				</div>
 
-				<div className="flex w-full flex-col gap-2">
-					<Label htmlFor="otel-scrape-token">
-						Scrape bearer token (optional)
-					</Label>
-					<Input
-						id="otel-scrape-token"
-						type="password"
-						placeholder="Sent as Authorization: Bearer <token> to service /metrics"
-						value={scrapeBearerToken}
-						onChange={(e) => setScrapeBearerToken(e.target.value)}
-					/>
+				<div className="flex flex-col gap-2">
+					<Label htmlFor="otel-scrape-auth">Scrape auth</Label>
+					<Select
+						value={scrapeAuthType}
+						onValueChange={(v) =>
+							setScrapeAuthType(v as "none" | "bearer" | "basic")
+						}
+					>
+						<SelectTrigger id="otel-scrape-auth" className="sm:max-w-xs">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="none">None</SelectItem>
+							<SelectItem value="bearer">Bearer / token header</SelectItem>
+							<SelectItem value="basic">Basic auth</SelectItem>
+						</SelectContent>
+					</Select>
 					<span className="text-sm text-muted-foreground">
-						Used when a service's <code>/metrics</code> endpoint requires auth.
-						Not sent to the Traefik load balancer.
+						Credential sent when a service's <code>/metrics</code> requires
+						auth. Applied to discovered services; never to the Traefik load
+						balancer.
 					</span>
 				</div>
+
+				{scrapeAuthType === "bearer" && (
+					<div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+						<div className="flex w-full flex-col gap-2 sm:max-w-[10rem]">
+							<Label htmlFor="otel-scrape-scheme">Scheme</Label>
+							<Input
+								id="otel-scrape-scheme"
+								placeholder="Bearer"
+								value={scrapeScheme}
+								onChange={(e) => setScrapeScheme(e.target.value)}
+							/>
+						</div>
+						<div className="flex w-full flex-col gap-2">
+							<Label htmlFor="otel-scrape-token">Token / credentials</Label>
+							<Input
+								id="otel-scrape-token"
+								type="password"
+								placeholder="Sent as Authorization: <scheme> <token>"
+								value={scrapeCredentials}
+								onChange={(e) => setScrapeCredentials(e.target.value)}
+							/>
+						</div>
+					</div>
+				)}
+
+				{scrapeAuthType === "basic" && (
+					<div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+						<div className="flex w-full flex-col gap-2">
+							<Label htmlFor="otel-scrape-user">Username</Label>
+							<Input
+								id="otel-scrape-user"
+								value={scrapeUsername}
+								onChange={(e) => setScrapeUsername(e.target.value)}
+							/>
+						</div>
+						<div className="flex w-full flex-col gap-2">
+							<Label htmlFor="otel-scrape-pass">Password</Label>
+							<Input
+								id="otel-scrape-pass"
+								type="password"
+								value={scrapePassword}
+								onChange={(e) => setScrapePassword(e.target.value)}
+							/>
+						</div>
+					</div>
+				)}
 
 				<div className="flex w-full flex-col gap-2 sm:max-w-xs">
 					<Label htmlFor="otel-interval">Scrape interval (s)</Label>
@@ -164,7 +261,7 @@ export const Observability = () => {
 									otlpEndpoint: otlpEndpoint.trim(),
 									otlpHeaders: buildHeaders(),
 									scrapeIntervalSeconds: scrapeNum,
-									scrapeBearerToken: scrapeBearerToken.trim(),
+									scrapeAuth: buildScrapeAuth(),
 								});
 								toast.success(
 									enabled

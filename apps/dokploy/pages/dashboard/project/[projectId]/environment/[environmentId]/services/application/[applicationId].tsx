@@ -15,6 +15,7 @@ import superjson from "superjson";
 import { ShowApplicationAutoscaling } from "@/components/dashboard/application/advanced/autoscaling/show-autoscaling";
 import { ShowClusterSettings } from "@/components/dashboard/application/advanced/cluster/show-cluster-settings";
 import { AddCommand } from "@/components/dashboard/application/advanced/general/add-command";
+import { ShowApplicationMetrics } from "@/components/dashboard/application/advanced/metrics/show-metrics";
 import { ShowPorts } from "@/components/dashboard/application/advanced/ports/show-port";
 import { ShowRedirects } from "@/components/dashboard/application/advanced/redirects/show-redirects";
 import { ShowSecurity } from "@/components/dashboard/application/advanced/security/show-security";
@@ -470,6 +471,9 @@ const Service = (
 														applicationId={applicationId}
 														appName={data?.appName || undefined}
 														serverId={data?.serverId || undefined}
+													/>
+													<ShowApplicationMetrics
+														applicationId={applicationId}
 													/>
 													<ShowVersionHistory
 														appName={data?.appName || undefined}
