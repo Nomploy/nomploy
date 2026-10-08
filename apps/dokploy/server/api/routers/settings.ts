@@ -52,6 +52,7 @@ import { db } from "@nomploy/server/db";
 import { checkPermission } from "@nomploy/server/services/permission";
 import {
 	deployOtelCollector,
+	getObservabilityLogs,
 	getObservabilityStatus,
 	getOtelConfig,
 	setOtelConfig,
@@ -214,6 +215,11 @@ export const settingsRouter = createTRPCRouter({
 	getObservabilityStatus: adminProcedure.query(() => {
 		return getObservabilityStatus();
 	}),
+	getObservabilityLogs: adminProcedure
+		.input(z.object({ lines: z.number().int().min(20).max(1000).optional() }))
+		.query(({ input }) => {
+			return getObservabilityLogs(input.lines ?? 200);
+		}),
 	saveObservability: adminProcedure
 		.input(
 			z.object({

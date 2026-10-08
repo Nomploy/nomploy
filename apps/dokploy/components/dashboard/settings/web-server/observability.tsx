@@ -64,6 +64,14 @@ export const Observability = () => {
 	} = api.settings.getObservabilityStatus.useQuery(undefined, {
 		refetchInterval: 15000,
 	});
+	const {
+		data: logs,
+		refetch: refetchLogs,
+		isRefetching: logsRefetching,
+	} = api.settings.getObservabilityLogs.useQuery(
+		{ lines: 300 },
+		{ refetchInterval: 15000 },
+	);
 	const { mutateAsync: saveObservability, isPending } =
 		api.settings.saveObservability.useMutation();
 
@@ -220,6 +228,7 @@ export const Observability = () => {
 								</Badge>
 							)}
 						</TabsTrigger>
+						<TabsTrigger value="logs">Logs</TabsTrigger>
 					</TabsList>
 
 					<TabsContent value="collector" className="flex flex-col gap-4 pt-4">
@@ -505,6 +514,11 @@ export const Observability = () => {
 										not deployed
 									</Badge>
 								)}
+								{collector?.node && (
+									<span className="text-muted-foreground">
+										on <span className="font-mono">{collector.node}</span>
+									</span>
+								)}
 							</div>
 							<Button
 								type="button"
@@ -519,6 +533,11 @@ export const Observability = () => {
 								Refresh
 							</Button>
 						</div>
+						{collector?.image && (
+							<span className="font-mono text-xs text-muted-foreground">
+								{collector.image}
+							</span>
+						)}
 
 						<div className="flex flex-col gap-1">
 							<Label>Discovered targets</Label>
@@ -575,6 +594,36 @@ export const Observability = () => {
 								</table>
 							</div>
 						)}
+					</TabsContent>
+
+					<TabsContent value="logs" className="flex flex-col gap-3 pt-4">
+						<div className="flex items-center justify-between gap-3">
+							<span className="text-sm text-muted-foreground">
+								Live collector output{" "}
+								{logs?.allocId && (
+									<span className="font-mono">
+										· alloc {logs.allocId.slice(0, 8)}
+									</span>
+								)}
+								. Scrape/export errors show here (e.g. a 401 on a service's{" "}
+								<code>/metrics</code> means the wrong auth profile).
+							</span>
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								onClick={() => refetchLogs()}
+								disabled={logsRefetching}
+							>
+								<RefreshCw
+									className={`mr-1 size-4 ${logsRefetching ? "animate-spin" : ""}`}
+								/>
+								Refresh
+							</Button>
+						</div>
+						<pre className="max-h-[28rem] overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap">
+							{logs?.logs || "No logs yet."}
+						</pre>
 					</TabsContent>
 				</Tabs>
 

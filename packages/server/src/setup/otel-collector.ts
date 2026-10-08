@@ -258,7 +258,10 @@ export const generateOtelCollectorConfig = (cfg: OtelConfig): string => {
                 [__meta_consul_service_address, __meta_consul_tags]
               regex: ([^;]+);.*,nomploy\\.metrics\\.port=([0-9]+),.*
               target_label: __address__
-              replacement: "\${1}:\${2}"
+              # Brace-less capture refs ($1,$2) on purpose: this YAML is embedded
+              # in a Nomad HCL2 heredoc, which would interpolate \${1}/\${2} itself
+              # (→ "1"/"2") before the collector sees them. $1/$2 pass through.
+              replacement: "$1:$2"
               separator: ";"
             - target_label: __metrics_path__
               replacement: /metrics`;
@@ -311,7 +314,7 @@ export const generateOtelCollectorConfig = (cfg: OtelConfig): string => {
             # IP. Scrape its Prometheus metrics entryPoint on :8082.
             - source_labels: [__meta_consul_service_address]
               target_label: __address__
-              replacement: "\${1}:8082"
+              replacement: "$1:8082"
             - target_label: __metrics_path__
               replacement: /metrics
 ${servicesJobsBlock}
@@ -437,6 +440,10 @@ export type ObservabilityStatus = {
 		deployed: boolean;
 		status: string | null;
 		runningAllocs: number;
+		/** Node the running alloc is on, and its id (for logs). */
+		node: string | null;
+		allocId: string | null;
+		image: string;
 	};
 	targets: ObservabilityTarget[];
 };
@@ -457,6 +464,9 @@ export const getObservabilityStatus =
 			deployed: false,
 			status: null as string | null,
 			runningAllocs: 0,
+			node: null as string | null,
+			allocId: null as string | null,
+			image: OTEL_IMAGE,
 		};
 		try {
 			const jobRes = await fetch(`${NOMAD_LOCAL}/v1/job/${JOB_NAME}`, {
@@ -476,10 +486,15 @@ export const getObservabilityStatus =
 				if (allocRes.ok) {
 					const allocs = (await allocRes.json()) as {
 						ClientStatus?: string;
+						NodeName?: string;
+						ID?: string;
 					}[];
-					collector.runningAllocs = allocs.filter(
-						(a) => a.ClientStatus === "running",
-					).length;
+					const running = allocs.filter((a) => a.ClientStatus === "running");
+					collector.runningAllocs = running.length;
+					if (running[0]) {
+						collector.node = running[0].NodeName ?? null;
+						collector.allocId = running[0].ID ?? null;
+					}
 				}
 			}
 		} catch {
@@ -539,3 +554,55 @@ export const getObservabilityStatus =
 
 		return { collector, targets };
 	};
+
+/**
+ * Tail the running collector's logs (combined stderr+stdout) for the
+ * Observability UI. Returns the alloc's recent output, or a short message when
+ * no alloc is running. Best-effort — never throws.
+ */
+export const getObservabilityLogs = async (
+	lines = 200,
+): Promise<{ allocId: string | null; logs: string }> => {
+	try {
+		const allocRes = await fetch(
+			`${NOMAD_LOCAL}/v1/job/${JOB_NAME}/allocations`,
+			{ headers: nomadHeaders() },
+		);
+		if (!allocRes.ok) {
+			return { allocId: null, logs: "" };
+		}
+		const allocs = (await allocRes.json()) as {
+			ClientStatus?: string;
+			ID?: string;
+		}[];
+		const alloc = allocs.find((a) => a.ClientStatus === "running");
+		if (!alloc?.ID) {
+			return { allocId: null, logs: "Collector is not running." };
+		}
+		// Grab a generous tail from each stream, then merge and keep the last N
+		// lines. The collector logs to stderr; stdout is usually empty.
+		const fetchStream = async (type: "stderr" | "stdout"): Promise<string> => {
+			try {
+				const res = await fetch(
+					`${NOMAD_LOCAL}/v1/client/fs/logs/${alloc.ID}?task=otel&type=${type}&plain=true&origin=end&offset=60000`,
+					{ headers: nomadHeaders() },
+				);
+				return res.ok ? await res.text() : "";
+			} catch {
+				return "";
+			}
+		};
+		const [err, out] = await Promise.all([
+			fetchStream("stderr"),
+			fetchStream("stdout"),
+		]);
+		const merged = `${out}\n${err}`
+			.split("\n")
+			.filter((l) => l.trim() !== "")
+			.slice(-lines)
+			.join("\n");
+		return { allocId: alloc.ID, logs: merged || "(no output yet)" };
+	} catch {
+		return { allocId: null, logs: "" };
+	}
+};
