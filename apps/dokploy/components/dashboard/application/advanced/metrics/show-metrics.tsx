@@ -11,7 +11,18 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { api } from "@/utils/api";
+
+// Sentinel for the "no profile" Select option (empty-string values aren't
+// allowed by the Select primitive).
+const NO_PROFILE = "__none__";
 
 interface Props {
 	applicationId: string;
@@ -25,14 +36,19 @@ interface Props {
  */
 export const ShowApplicationMetrics = ({ applicationId }: Props) => {
 	const { data, refetch } = api.application.one.useQuery({ applicationId });
+	const { data: observability } = api.settings.getObservability.useQuery();
 	const update = api.application.update.useMutation();
 
 	const [port, setPort] = useState<string>("");
+	const [authProfile, setAuthProfile] = useState<string>(NO_PROFILE);
 
 	useEffect(() => {
 		if (!data) return;
 		setPort(data.metricsPort != null ? String(data.metricsPort) : "");
+		setAuthProfile(data.metricsAuthProfile || NO_PROFILE);
 	}, [data]);
+
+	const profiles = observability?.authProfiles ?? [];
 
 	const save = async () => {
 		const trimmed = port.trim();
@@ -45,6 +61,8 @@ export const ShowApplicationMetrics = ({ applicationId }: Props) => {
 			await update.mutateAsync({
 				applicationId,
 				metricsPort: trimmed === "" ? null : n,
+				metricsAuthProfile:
+					trimmed === "" || authProfile === NO_PROFILE ? null : authProfile,
 			});
 			toast.success("Metrics settings saved — redeploy to apply");
 			await refetch();
@@ -79,8 +97,27 @@ export const ShowApplicationMetrics = ({ applicationId }: Props) => {
 						onChange={(e) => setPort(e.target.value)}
 					/>
 					<p className="text-muted-foreground text-xs">
-						If the endpoint needs auth, set the scrape credential in Settings →
-						Web Server → Observability.
+						The container port, scraped over the cluster mesh.
+					</p>
+				</div>
+				<div className="space-y-1.5 sm:max-w-xs">
+					<Label>Auth profile (optional)</Label>
+					<Select value={authProfile} onValueChange={setAuthProfile}>
+						<SelectTrigger>
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value={NO_PROFILE}>None (no auth)</SelectItem>
+							{profiles.map((p) => (
+								<SelectItem key={p.name} value={p.name}>
+									{p.name} ({p.type})
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+					<p className="text-muted-foreground text-xs">
+						If <code>/metrics</code> needs auth, pick a scrape auth profile.
+						Define profiles in Settings → Web Server → Observability.
 					</p>
 				</div>
 				<div>

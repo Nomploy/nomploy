@@ -64,6 +64,7 @@ const convertService = (
 	const volumes = extractVolumes(service, declaredVolumes);
 	const fileMounts = extractFileMounts(service, configContents);
 	const metricsPort = extractMetricsPort(service);
+	const metricsAuthProfile = extractMetricsAuthProfile(service);
 
 	return {
 		name,
@@ -79,7 +80,22 @@ const convertService = (
 		volumes,
 		fileMounts,
 		metricsPort,
+		metricsAuthProfile,
 	};
+};
+
+/**
+ * Extract the OTel scrape auth profile from the `x-nomad-metrics-auth` service
+ * extension. When set (and metrics is enabled), the service is tagged
+ * `nomploy.metrics.auth=<name>` so the collector scrapes it with that profile's
+ * credential. Only the regex-safe profile charset is accepted.
+ */
+const extractMetricsAuthProfile = (
+	service: DefinitionsService,
+): string | undefined => {
+	const raw = (service as Record<string, unknown>)["x-nomad-metrics-auth"];
+	const s = typeof raw === "string" ? raw.trim() : "";
+	return s !== "" && /^[A-Za-z0-9_-]+$/.test(s) ? s : undefined;
 };
 
 /**

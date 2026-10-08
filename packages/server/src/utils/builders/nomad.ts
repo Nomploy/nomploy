@@ -37,6 +37,12 @@ export interface NomadServiceSpec {
 	 * OTel Collector discovers and scrapes it. Undefined = not scraped.
 	 */
 	metricsPort?: number;
+	/**
+	 * Named OTel scrape auth profile (`nomploy.metrics.auth=<name>`) for a
+	 * `/metrics` behind auth; the collector scrapes it with that profile's
+	 * credential. Only meaningful with `metricsPort`. Undefined = default job.
+	 */
+	metricsAuthProfile?: string;
 	healthCheck?: {
 		type: string;
 		path?: string;
@@ -1604,13 +1610,21 @@ const generateConsulServices = (
 		// tags, not meta). Harmless to Traefik, which ignores non-traefik tags.
 		// Opt-in metrics scraping: tag the primary port's service with
 		// nomploy.metrics.port=<port> so the OTel Collector discovers and scrapes
-		// its /metrics (see setup/otel-collector.ts). Only on the primary service.
-		const metricsTag =
+		// its /metrics (see setup/otel-collector.ts). An optional metricsAuthProfile
+		// adds nomploy.metrics.auth=<name>, routing it to that profile's scrape job
+		// (its credential). Only on the primary service.
+		const metricsOn =
 			isPrimary &&
 			typeof service.metricsPort === "number" &&
-			service.metricsPort > 0
-				? [`nomploy.metrics.port=${service.metricsPort}`]
-				: [];
+			service.metricsPort > 0;
+		const metricsTag = metricsOn
+			? [
+					`nomploy.metrics.port=${service.metricsPort}`,
+					...(service.metricsAuthProfile
+						? [`nomploy.metrics.auth=${service.metricsAuthProfile}`]
+						: []),
+				]
+			: [];
 		const allTags = inMesh
 			? [
 					...tags,

@@ -36,6 +36,7 @@ import {
 	ShieldCheck,
 	Star,
 	Tags,
+	Telescope,
 	Trash2,
 	User,
 	Users,
@@ -227,6 +228,15 @@ const MENU: Menu = {
 			title: "Load Balancer",
 			url: "/dashboard/loadbalancer",
 			icon: Network,
+			isEnabled: ({ permissions, isCloud }) =>
+				!!(permissions?.docker.read && !isCloud),
+		},
+		{
+			isSingle: true,
+			title: "Observability",
+			url: "/dashboard/observability",
+			icon: Telescope,
+			// Admin-only cluster OTel collector config; non-cloud only.
 			isEnabled: ({ permissions, isCloud }) =>
 				!!(permissions?.docker.read && !isCloud),
 		},

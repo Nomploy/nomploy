@@ -171,6 +171,7 @@ export const applicationToNomadSpec = (
 		env,
 		entrypoint: entrypoint.length > 0 ? entrypoint : undefined,
 		metricsPort: application.metricsPort ?? undefined,
+		metricsAuthProfile: application.metricsAuthProfile ?? undefined,
 		resources: cpu || memory ? { cpu, memory } : undefined,
 		scaling,
 		volumes: volumes.length > 0 ? volumes : undefined,

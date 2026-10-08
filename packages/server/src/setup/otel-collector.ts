@@ -33,12 +33,33 @@ export type OtelScrapeAuth =
 	| { type: "bearer"; scheme: string; credentials: string }
 	| { type: "basic"; username: string; password: string };
 
+/**
+ * A named scrape credential. A service opts into one by carrying the Consul tag
+ * `nomploy.metrics.auth=<name>` (alongside `nomploy.metrics.port=<port>`); the
+ * collector emits a dedicated scrape job per profile that presents this
+ * credential. Prometheus attaches auth per scrape job (not per target — see the
+ * receiver docs), so per-service tokens are modelled as one job per profile, and
+ * the token value lives here (central, rotatable) rather than in Consul. `name`
+ * must match PROFILE_NAME_RE so it is safe in a job name and a tag regex.
+ */
+export type OtelAuthProfile = { name: string } & (
+	| { type: "bearer"; scheme: string; credentials: string }
+	| { type: "basic"; username: string; password: string }
+);
+
+// Profile names key the tag (`nomploy.metrics.auth=<name>`), a scrape job name,
+// and a regex, so keep them to an unambiguous, regex-safe charset.
+export const PROFILE_NAME_RE = /^[A-Za-z0-9_-]+$/;
+
 export type OtelConfig = {
 	enabled: boolean;
 	otlpEndpoint: string;
 	otlpHeaders: Record<string, string>;
 	scrapeIntervalSeconds: number;
+	/** Default credential for tagged services that name no auth profile. */
 	scrapeAuth: OtelScrapeAuth;
+	/** Named credentials a service selects via `nomploy.metrics.auth=<name>`. */
+	authProfiles: OtelAuthProfile[];
 };
 
 const DEFAULT_OTEL_CONFIG: OtelConfig = {
@@ -47,6 +68,28 @@ const DEFAULT_OTEL_CONFIG: OtelConfig = {
 	otlpHeaders: {},
 	scrapeIntervalSeconds: 30,
 	scrapeAuth: { type: "none" },
+	authProfiles: [],
+};
+
+/**
+ * Normalize an arbitrary value into a well-formed, deduped profile list: valid
+ * names only (PROFILE_NAME_RE), each with a usable bearer/basic credential,
+ * first occurrence of a name winning.
+ */
+const normalizeAuthProfiles = (raw: unknown): OtelAuthProfile[] => {
+	if (!Array.isArray(raw)) return [];
+	const out: OtelAuthProfile[] = [];
+	const seen = new Set<string>();
+	for (const item of raw) {
+		const p = item as Partial<Record<string, unknown>>;
+		const name = typeof p?.name === "string" ? p.name.trim() : "";
+		if (!PROFILE_NAME_RE.test(name) || seen.has(name)) continue;
+		const auth = normalizeScrapeAuth(p);
+		if (auth.type === "none") continue; // a profile must carry a credential
+		seen.add(name);
+		out.push({ name, ...auth } as OtelAuthProfile);
+	}
+	return out;
 };
 
 /**
@@ -120,6 +163,9 @@ export const getOtelConfig = (): OtelConfig => {
 				(parsed as { scrapeAuth?: unknown }).scrapeAuth,
 				(parsed as { scrapeBearerToken?: unknown }).scrapeBearerToken,
 			),
+			authProfiles: normalizeAuthProfiles(
+				(parsed as { authProfiles?: unknown }).authProfiles,
+			),
 		};
 	} catch {
 		return { ...DEFAULT_OTEL_CONFIG };
@@ -149,6 +195,7 @@ export const setOtelConfig = (cfg: OtelConfig): void => {
 				: {},
 		scrapeIntervalSeconds: scrape,
 		scrapeAuth: normalizeScrapeAuth(cfg.scrapeAuth),
+		authProfiles: normalizeAuthProfiles(cfg.authProfiles),
 	};
 	const file = otelConfigPath();
 	mkdirSync(path.dirname(file), { recursive: true });
@@ -164,9 +211,12 @@ const yamlQuote = (value: string): string => `"${value.replace(/"/g, '\\"')}"`;
  *  - `traefik` — the HA LB pool's host-networked Traefik, scraped on :8082
  *    (its Prometheus metrics entryPoint). The Consul service address is the
  *    node IP.
- *  - `consul-services` — every Consul service, kept only when it carries a
- *    `nomploy.metrics.port=<port>` tag; the port is extracted from the tag and
- *    becomes the scrape target `<service-address>:<port>`.
+ *  - `consul-services` — services tagged `nomploy.metrics.port=<port>` that name
+ *    no auth profile; the port is extracted and the target becomes
+ *    `<service-address>:<port>`. Scraped with the default credential.
+ *  - `consul-services-<profile>` — one per auth profile: the same, but only
+ *    services also tagged `nomploy.metrics.auth=<profile>`, scraped with that
+ *    profile's credential (Prometheus auth is per job, not per target).
  *
  * Metrics flow prometheus receiver -> otlp exporter to the configured backend.
  */
@@ -175,12 +225,10 @@ export const generateOtelCollectorConfig = (cfg: OtelConfig): string => {
 	// Nested as a sibling of `server:` under the consul_sd_configs list item
 	// (14-space indent).
 	const tokenLine = token ? `\n              token: ${yamlQuote(token)}` : "";
-	// Scrape credential for discovered services whose /metrics is behind auth.
-	// Sits at the scrape_config level (10-space indent), as a sibling of
-	// `consul_sd_configs:`/`relabel_configs:`. Only applied to the tag-discovered
-	// services job — Traefik's :8082 is unauthenticated.
-	const scrapeAuthBlock = (() => {
-		const auth = cfg.scrapeAuth;
+	// Scrape credential as a scrape_config-level block (10-space indent), sibling
+	// of `consul_sd_configs:`/`relabel_configs:`. Prometheus auth is per-job, so
+	// per-service tokens are modelled as one job per auth profile below.
+	const authToBlock = (auth: OtelScrapeAuth): string => {
 		if (auth.type === "bearer") {
 			return `\n          authorization:\n            type: ${yamlQuote(auth.scheme || "Bearer")}\n            credentials: ${yamlQuote(auth.credentials)}`;
 		}
@@ -188,7 +236,54 @@ export const generateOtelCollectorConfig = (cfg: OtelConfig): string => {
 			return `\n          basic_auth:\n            username: ${yamlQuote(auth.username)}\n            password: ${yamlQuote(auth.password)}`;
 		}
 		return "";
-	})();
+	};
+	// One consul-services scrape job. `authTagRelabel` narrows which tagged
+	// services this job owns (the default job drops any that name a profile; a
+	// profile job keeps only those naming it), so each service is scraped by
+	// exactly one job with the right credential.
+	const servicesJob = (
+		jobName: string,
+		authBlock: string,
+		authTagRelabel: string,
+	): string => `        - job_name: ${jobName}${authBlock}
+          consul_sd_configs:
+            - server: ${yamlQuote(CONSUL_SD_SERVER)}${tokenLine}
+          relabel_configs:
+            # Keep only services tagged nomploy.metrics.port=<port>.
+            - source_labels: [__meta_consul_tags]
+              regex: .*,nomploy\\.metrics\\.port=([0-9]+),.*
+              action: keep${authTagRelabel}
+            # Extract the port from that tag and build <service-address>:<port>.
+            - source_labels:
+                [__meta_consul_service_address, __meta_consul_tags]
+              regex: ([^;]+);.*,nomploy\\.metrics\\.port=([0-9]+),.*
+              target_label: __address__
+              replacement: "\${1}:\${2}"
+              separator: ";"
+            - target_label: __metrics_path__
+              replacement: /metrics`;
+
+	// Default job: tagged services that name NO auth profile (dropped otherwise,
+	// since a per-profile job owns them). Uses the default scrape credential.
+	const defaultServicesJob = servicesJob(
+		"consul-services",
+		authToBlock(cfg.scrapeAuth),
+		"\n            # Exclude services that select an auth profile (a per-profile\n            # job scrapes those with their own credential).\n            - source_labels: [__meta_consul_tags]\n              regex: .*,nomploy\\.metrics\\.auth=.*\n              action: drop",
+	);
+	// One job per profile: tagged services selecting it, scraped with its
+	// credential. Profile names are PROFILE_NAME_RE, so safe in job name + regex.
+	const profileJobs = cfg.authProfiles
+		.map((p) =>
+			servicesJob(
+				`consul-services-${p.name}`,
+				authToBlock(p),
+				`\n            # Keep only services selecting the "${p.name}" auth profile.\n            - source_labels: [__meta_consul_tags]\n              regex: .*,nomploy\\.metrics\\.auth=${p.name},.*\n              action: keep`,
+			),
+		)
+		.join("\n");
+	const servicesJobsBlock = profileJobs
+		? `${defaultServicesJob}\n${profileJobs}`
+		: defaultServicesJob;
 	const isHttps = /^https:\/\//i.test(cfg.otlpEndpoint.trim());
 	const headerEntries = Object.entries(cfg.otlpHeaders ?? {});
 	const headersBlock =
@@ -219,23 +314,7 @@ export const generateOtelCollectorConfig = (cfg: OtelConfig): string => {
               replacement: "\${1}:8082"
             - target_label: __metrics_path__
               replacement: /metrics
-        - job_name: consul-services${scrapeAuthBlock}
-          consul_sd_configs:
-            - server: ${yamlQuote(CONSUL_SD_SERVER)}${tokenLine}
-          relabel_configs:
-            # Keep only services tagged nomploy.metrics.port=<port>.
-            - source_labels: [__meta_consul_tags]
-              regex: .*,nomploy\\.metrics\\.port=([0-9]+),.*
-              action: keep
-            # Extract the port from that tag and build <service-address>:<port>.
-            - source_labels:
-                [__meta_consul_service_address, __meta_consul_tags]
-              regex: ([^;]+);.*,nomploy\\.metrics\\.port=([0-9]+),.*
-              target_label: __address__
-              replacement: "\${1}:\${2}"
-              separator: ";"
-            - target_label: __metrics_path__
-              replacement: /metrics
+${servicesJobsBlock}
 exporters:
   otlp:
     endpoint: ${yamlQuote(cfg.otlpEndpoint)}${headersBlock}

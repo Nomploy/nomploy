@@ -123,13 +123,14 @@ export const applyDomainsToJob = (
 			const svcDomains = domains.filter(
 				(d) => d.serviceName === s.Name && d.host,
 			);
-			// Preserve an opt-in metrics tag the pack set on its service — we
-			// overwrite s.Tags below, so carry nomploy.metrics.port=<port> over
-			// (the OTel Collector scrapes by it; see setup/otel-collector.ts). The
-			// Provider flip to consul also makes it visible to consul_sd discovery.
+			// Preserve the opt-in metrics tags the pack set on its service — we
+			// overwrite s.Tags below, so carry nomploy.metrics.port=<port> and
+			// nomploy.metrics.auth=<profile> over (the OTel Collector scrapes by
+			// them; see setup/otel-collector.ts). The Provider flip to consul also
+			// makes the service visible to consul_sd discovery.
 			const existingTags = Array.isArray(s.Tags) ? (s.Tags as string[]) : [];
 			const metricsTags = existingTags.filter(
-				(t) => typeof t === "string" && t.startsWith("nomploy.metrics.port="),
+				(t) => typeof t === "string" && t.startsWith("nomploy.metrics."),
 			);
 			// consulCatalog routes this once it's a Consul service with the tags.
 			s.Provider = "consul";

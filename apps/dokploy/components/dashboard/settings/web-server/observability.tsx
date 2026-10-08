@@ -1,3 +1,4 @@
+import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AlertBlock } from "@/components/shared/alert-block";
@@ -27,6 +28,31 @@ type ScrapeAuth =
 	| { type: "bearer"; scheme: string; credentials: string }
 	| { type: "basic"; username: string; password: string };
 
+type AuthProfile =
+	| { name: string; type: "bearer"; scheme: string; credentials: string }
+	| { name: string; type: "basic"; username: string; password: string };
+
+// All fields held at once so switching type keeps what was typed.
+type EditProfile = {
+	name: string;
+	type: "bearer" | "basic";
+	scheme: string;
+	credentials: string;
+	username: string;
+	password: string;
+};
+
+const PROFILE_NAME_RE = /^[A-Za-z0-9_-]+$/;
+
+const emptyProfile = (): EditProfile => ({
+	name: "",
+	type: "bearer",
+	scheme: "Bearer",
+	credentials: "",
+	username: "",
+	password: "",
+});
+
 export const Observability = () => {
 	const { data, refetch } = api.settings.getObservability.useQuery();
 	const { mutateAsync: saveObservability, isPending } =
@@ -44,6 +70,7 @@ export const Observability = () => {
 	const [scrapeCredentials, setScrapeCredentials] = useState("");
 	const [scrapeUsername, setScrapeUsername] = useState("");
 	const [scrapePassword, setScrapePassword] = useState("");
+	const [profiles, setProfiles] = useState<EditProfile[]>([]);
 
 	// Prefill once the stored config loads.
 	useEffect(() => {
@@ -60,6 +87,16 @@ export const Observability = () => {
 			setScrapeUsername(auth.username);
 			setScrapePassword(auth.password);
 		}
+		setProfiles(
+			(data.authProfiles ?? []).map((p) => ({
+				...emptyProfile(),
+				name: p.name,
+				type: p.type,
+				...(p.type === "bearer"
+					? { scheme: p.scheme || "Bearer", credentials: p.credentials }
+					: { username: p.username, password: p.password }),
+			})),
+		);
 		const entries = Object.entries(data.otlpHeaders ?? {});
 		if (entries[0]) {
 			setHeaderKey(entries[0][0]);
@@ -67,11 +104,23 @@ export const Observability = () => {
 		}
 	}, [data]);
 
+	const updateProfile = (i: number, patch: Partial<EditProfile>) =>
+		setProfiles((ps) => ps.map((p, j) => (j === i ? { ...p, ...patch } : p)));
+	const removeProfile = (i: number) =>
+		setProfiles((ps) => ps.filter((_, j) => j !== i));
+	const addProfile = () => setProfiles((ps) => [...ps, emptyProfile()]);
+
+	// Names must be unique, non-empty and regex-safe for the collector config.
+	const trimmedNames = profiles.map((p) => p.name.trim());
+	const profilesValid =
+		trimmedNames.every((n) => PROFILE_NAME_RE.test(n)) &&
+		new Set(trimmedNames).size === trimmedNames.length;
+
 	const scrapeNum = Number(scrapeInterval);
 	const scrapeValid =
 		Number.isInteger(scrapeNum) && scrapeNum >= 5 && scrapeNum <= 3600;
 	const endpointValid = !enabled || otlpEndpoint.trim().length > 0;
-	const canSave = scrapeValid && endpointValid && !isPending;
+	const canSave = scrapeValid && endpointValid && profilesValid && !isPending;
 
 	const buildHeaders = (): Record<string, string> => {
 		const headers: Record<string, string> = {};
@@ -99,6 +148,27 @@ export const Observability = () => {
 		}
 		return { type: "none" };
 	};
+
+	const buildAuthProfiles = (): AuthProfile[] =>
+		profiles
+			.map((p): AuthProfile | null => {
+				const name = p.name.trim();
+				if (!PROFILE_NAME_RE.test(name)) return null;
+				return p.type === "basic"
+					? {
+							name,
+							type: "basic",
+							username: p.username.trim(),
+							password: p.password,
+						}
+					: {
+							name,
+							type: "bearer",
+							scheme: p.scheme.trim() || "Bearer",
+							credentials: p.credentials.trim(),
+						};
+			})
+			.filter((p): p is AuthProfile => p !== null);
 
 	return (
 		<Card className="bg-background">
@@ -228,6 +298,143 @@ export const Observability = () => {
 					</div>
 				)}
 
+				<div className="flex flex-col gap-3 rounded-lg border p-3">
+					<div className="flex items-center justify-between gap-4">
+						<div className="flex flex-col gap-1">
+							<Label>Auth profiles</Label>
+							<span className="text-sm text-muted-foreground">
+								Named credentials a service selects by name (its metrics "Auth
+								profile"), so each service can be scraped with its own token.
+								Tokens stay here, never in Consul.
+							</span>
+						</div>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							onClick={addProfile}
+						>
+							<Plus className="mr-1 size-4" /> Add
+						</Button>
+					</div>
+
+					{profiles.length === 0 && (
+						<span className="text-sm text-muted-foreground">
+							No profiles yet.
+						</span>
+					)}
+
+					{profiles.map((p, i) => {
+						const name = p.name.trim();
+						const dupe =
+							name !== "" && trimmedNames.filter((n) => n === name).length > 1;
+						const badName = name !== "" && !PROFILE_NAME_RE.test(name);
+						return (
+							<div
+								key={i}
+								className="flex flex-col gap-2 rounded-md border p-3"
+							>
+								<div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+									<div className="flex w-full flex-col gap-2 sm:max-w-[12rem]">
+										<Label>Name</Label>
+										<Input
+											placeholder="e.g. goliash"
+											value={p.name}
+											onChange={(e) =>
+												updateProfile(i, { name: e.target.value })
+											}
+										/>
+									</div>
+									<div className="flex w-full flex-col gap-2 sm:max-w-[12rem]">
+										<Label>Type</Label>
+										<Select
+											value={p.type}
+											onValueChange={(v) =>
+												updateProfile(i, { type: v as "bearer" | "basic" })
+											}
+										>
+											<SelectTrigger>
+												<SelectValue />
+											</SelectTrigger>
+											<SelectContent>
+												<SelectItem value="bearer">
+													Bearer / token header
+												</SelectItem>
+												<SelectItem value="basic">Basic auth</SelectItem>
+											</SelectContent>
+										</Select>
+									</div>
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon"
+										className="text-muted-foreground"
+										onClick={() => removeProfile(i)}
+									>
+										<Trash2 className="size-4" />
+									</Button>
+								</div>
+
+								{(dupe || badName) && (
+									<span className="text-sm text-destructive">
+										{badName
+											? "Use only letters, numbers, dashes and underscores."
+											: "Duplicate profile name."}
+									</span>
+								)}
+
+								{p.type === "bearer" ? (
+									<div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+										<div className="flex w-full flex-col gap-2 sm:max-w-[10rem]">
+											<Label>Scheme</Label>
+											<Input
+												placeholder="Bearer"
+												value={p.scheme}
+												onChange={(e) =>
+													updateProfile(i, { scheme: e.target.value })
+												}
+											/>
+										</div>
+										<div className="flex w-full flex-col gap-2">
+											<Label>Token / credentials</Label>
+											<Input
+												type="password"
+												placeholder="Sent as Authorization: <scheme> <token>"
+												value={p.credentials}
+												onChange={(e) =>
+													updateProfile(i, { credentials: e.target.value })
+												}
+											/>
+										</div>
+									</div>
+								) : (
+									<div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+										<div className="flex w-full flex-col gap-2">
+											<Label>Username</Label>
+											<Input
+												value={p.username}
+												onChange={(e) =>
+													updateProfile(i, { username: e.target.value })
+												}
+											/>
+										</div>
+										<div className="flex w-full flex-col gap-2">
+											<Label>Password</Label>
+											<Input
+												type="password"
+												value={p.password}
+												onChange={(e) =>
+													updateProfile(i, { password: e.target.value })
+												}
+											/>
+										</div>
+									</div>
+								)}
+							</div>
+						);
+					})}
+				</div>
+
 				<div className="flex w-full flex-col gap-2 sm:max-w-xs">
 					<Label htmlFor="otel-interval">Scrape interval (s)</Label>
 					<Input
@@ -262,6 +469,7 @@ export const Observability = () => {
 									otlpHeaders: buildHeaders(),
 									scrapeIntervalSeconds: scrapeNum,
 									scrapeAuth: buildScrapeAuth(),
+									authProfiles: buildAuthProfiles(),
 								});
 								toast.success(
 									enabled

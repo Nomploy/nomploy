@@ -174,6 +174,10 @@ export const applications = pgTable("application", {
 	// primary Consul service is tagged nomploy.metrics.port=<port> so the built-in
 	// OTel Collector scrapes it. Null = not scraped.
 	metricsPort: integer("metricsPort"),
+	// Named OTel scrape auth profile (Settings → Observability) for a /metrics
+	// behind auth; adds nomploy.metrics.auth=<name> so the collector scrapes it
+	// with that profile's credential. Null = default (no-auth) scrape job.
+	metricsAuthProfile: text("metricsAuthProfile"),
 	// Secrets are stored in a Nomad Variable at nomad/jobs/<appName> (never in the
 	// job HCL); the task reads them via its workload identity + a template block.
 	// This flag gates emitting that template — opt-in per app so a cluster without
@@ -385,6 +389,11 @@ const createSchema = createInsertSchema(applications, {
 	cleanCache: z.boolean().optional(),
 	ulimitsSwarm: UlimitsSwarmSchema.nullable(),
 	metricsPort: z.number().int().positive().nullable().optional(),
+	metricsAuthProfile: z
+		.string()
+		.regex(/^[A-Za-z0-9_-]+$/)
+		.nullable()
+		.optional(),
 	enableSubmodules: z.boolean().optional(),
 	icon: z
 		.string()

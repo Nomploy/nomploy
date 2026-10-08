@@ -232,6 +232,24 @@ export const settingsRouter = createTRPCRouter({
 						}),
 					])
 					.optional(),
+				authProfiles: z
+					.array(
+						z.discriminatedUnion("type", [
+							z.object({
+								name: z.string().regex(/^[A-Za-z0-9_-]+$/),
+								type: z.literal("bearer"),
+								scheme: z.string(),
+								credentials: z.string(),
+							}),
+							z.object({
+								name: z.string().regex(/^[A-Za-z0-9_-]+$/),
+								type: z.literal("basic"),
+								username: z.string(),
+								password: z.string(),
+							}),
+						]),
+					)
+					.optional(),
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
@@ -241,6 +259,7 @@ export const settingsRouter = createTRPCRouter({
 				otlpHeaders: input.otlpHeaders ?? {},
 				scrapeIntervalSeconds: input.scrapeIntervalSeconds ?? 30,
 				scrapeAuth: input.scrapeAuth ?? { type: "none" },
+				authProfiles: input.authProfiles ?? [],
 			});
 			// Deploy/stop the collector job in the background so the request returns
 			// immediately (mirrors reloadTraefik). Tolerate failure (e.g. no cluster).
