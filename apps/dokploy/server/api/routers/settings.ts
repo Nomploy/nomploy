@@ -50,6 +50,12 @@ import {
 } from "@nomploy/server";
 import { db } from "@nomploy/server/db";
 import { checkPermission } from "@nomploy/server/services/permission";
+import {
+	deployOtelCollector,
+	getOtelConfig,
+	setOtelConfig,
+	stopOtelCollector,
+} from "@nomploy/server/setup/otel-collector";
 import { deployTraefikHaSystemJob } from "@nomploy/server/setup/traefik-ha";
 import {
 	getTraefikVersion,
@@ -198,6 +204,43 @@ export const settingsRouter = createTRPCRouter({
 				action: "update",
 				resourceType: "settings",
 				resourceName: "traefik-version",
+			});
+			return true;
+		}),
+	getObservability: adminProcedure.query(() => {
+		return getOtelConfig();
+	}),
+	saveObservability: adminProcedure
+		.input(
+			z.object({
+				enabled: z.boolean(),
+				otlpEndpoint: z.string(),
+				otlpHeaders: z.record(z.string(), z.string()).optional(),
+				scrapeIntervalSeconds: z.number().int().min(5).max(3600).optional(),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			setOtelConfig({
+				enabled: input.enabled,
+				otlpEndpoint: input.otlpEndpoint,
+				otlpHeaders: input.otlpHeaders ?? {},
+				scrapeIntervalSeconds: input.scrapeIntervalSeconds ?? 30,
+			});
+			// Deploy/stop the collector job in the background so the request returns
+			// immediately (mirrors reloadTraefik). Tolerate failure (e.g. no cluster).
+			void (async () => {
+				if (input.enabled) {
+					await deployOtelCollector();
+				} else {
+					await stopOtelCollector();
+				}
+			})().catch((err) => {
+				console.error("saveObservability background:", err);
+			});
+			await audit(ctx, {
+				action: "update",
+				resourceType: "settings",
+				resourceName: "otel-collector",
 			});
 			return true;
 		}),
