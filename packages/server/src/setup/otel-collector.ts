@@ -343,6 +343,17 @@ export const generateOtelCollectorJob = (cfg: OtelConfig): string => {
   datacenters = ["dc1"]
   type        = "service"
 
+  # Keep the collector OFF the control-plane node. The panel also lives there and
+  # needs a free slot for its canary alloc during a zero-downtime roll; a
+  # host-net 256MB collector on that node exhausts its memory and blocks panel
+  # rolls. The collector reaches the hub's Consul + scrape targets over the mesh
+  # from any worker, so pin it away from the control plane.
+  constraint {
+    attribute = "\${meta.nomploy_control_plane}"
+    operator  = "!="
+    value     = "true"
+  }
+
   group "otel" {
     count = 1
 
