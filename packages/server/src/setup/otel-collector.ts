@@ -344,10 +344,9 @@ export const generateOtelCollectorJob = (cfg: OtelConfig): string => {
     count = 1
 
     reschedule {
-      attempts  = 0
-      unlimited = true
-      delay     = "15s"
-      mode      = "delay"
+      unlimited      = true
+      delay          = "15s"
+      delay_function = "constant"
     }
 
     network {
