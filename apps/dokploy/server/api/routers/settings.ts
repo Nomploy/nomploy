@@ -52,6 +52,7 @@ import { db } from "@nomploy/server/db";
 import { checkPermission } from "@nomploy/server/services/permission";
 import {
 	deployOtelCollector,
+	getObservabilityStatus,
 	getOtelConfig,
 	setOtelConfig,
 	stopOtelCollector,
@@ -209,6 +210,9 @@ export const settingsRouter = createTRPCRouter({
 		}),
 	getObservability: adminProcedure.query(() => {
 		return getOtelConfig();
+	}),
+	getObservabilityStatus: adminProcedure.query(() => {
+		return getObservabilityStatus();
 	}),
 	saveObservability: adminProcedure
 		.input(

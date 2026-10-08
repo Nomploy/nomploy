@@ -408,3 +408,135 @@ export const stopOtelCollector = async (): Promise<void> => {
 };
 
 export const OTEL_COLLECTOR_JOB_NAME = JOB_NAME;
+
+// Control-plane-local Nomad/Consul (the panel runs on the hub). Mirrors the
+// addresses other setup modules use (pack-domains.ts, resolve.ts).
+const NOMAD_LOCAL = process.env.NOMAD_ADDRESS || "http://127.0.0.1:4646";
+const CONSUL_LOCAL = "http://127.0.0.1:8500";
+
+const nomadHeaders = (): Record<string, string> => {
+	const t = process.env.NOMAD_TOKEN || "";
+	return t ? { "X-Nomad-Token": t } : {};
+};
+const consulHeaders = (): Record<string, string> => {
+	const t = consulToken();
+	return t ? { "X-Consul-Token": t } : {};
+};
+
+/** A service the collector discovers and scrapes, derived from Consul tags. */
+export type ObservabilityTarget = {
+	service: string;
+	address: string;
+	/** Port from the `nomploy.metrics.port=` tag (interpolated by Nomad). */
+	port: number;
+	/** `nomploy.metrics.auth=` profile, or null for the default (no-auth) job. */
+	authProfile: string | null;
+};
+
+export type ObservabilityStatus = {
+	collector: {
+		deployed: boolean;
+		status: string | null;
+		runningAllocs: number;
+	};
+	targets: ObservabilityTarget[];
+};
+
+const METRICS_PORT_TAG = "nomploy.metrics.port=";
+const METRICS_AUTH_TAG = "nomploy.metrics.auth=";
+
+/**
+ * Live view for the Observability UI: the collector job's state plus every
+ * service the collector would scrape (discovered from Consul by the
+ * `nomploy.metrics.port=` tag), with the port and auth profile each resolves to.
+ * Best-effort — returns empty/false sections rather than throwing when Nomad or
+ * Consul is unreachable.
+ */
+export const getObservabilityStatus =
+	async (): Promise<ObservabilityStatus> => {
+		const collector = {
+			deployed: false,
+			status: null as string | null,
+			runningAllocs: 0,
+		};
+		try {
+			const jobRes = await fetch(`${NOMAD_LOCAL}/v1/job/${JOB_NAME}`, {
+				headers: nomadHeaders(),
+			});
+			if (jobRes.ok) {
+				const job = (await jobRes.json()) as {
+					Status?: string;
+					Stop?: boolean;
+				};
+				collector.deployed = job.Stop !== true;
+				collector.status = job.Status ?? null;
+				const allocRes = await fetch(
+					`${NOMAD_LOCAL}/v1/job/${JOB_NAME}/allocations`,
+					{ headers: nomadHeaders() },
+				);
+				if (allocRes.ok) {
+					const allocs = (await allocRes.json()) as {
+						ClientStatus?: string;
+					}[];
+					collector.runningAllocs = allocs.filter(
+						(a) => a.ClientStatus === "running",
+					).length;
+				}
+			}
+		} catch {
+			// leave defaults
+		}
+
+		const targets: ObservabilityTarget[] = [];
+		try {
+			const svcRes = await fetch(`${CONSUL_LOCAL}/v1/catalog/services`, {
+				headers: consulHeaders(),
+			});
+			if (svcRes.ok) {
+				const services = (await svcRes.json()) as Record<string, string[]>;
+				const metricsServices = Object.entries(services)
+					.filter(([, tags]) =>
+						(tags ?? []).some((t) => t.startsWith(METRICS_PORT_TAG)),
+					)
+					.map(([name]) => name);
+				for (const name of metricsServices) {
+					try {
+						const instRes = await fetch(
+							`${CONSUL_LOCAL}/v1/catalog/service/${encodeURIComponent(name)}`,
+							{ headers: consulHeaders() },
+						);
+						if (!instRes.ok) continue;
+						const insts = (await instRes.json()) as {
+							ServiceAddress?: string;
+							Address?: string;
+							ServiceTags?: string[];
+						}[];
+						for (const s of insts) {
+							const tags = s.ServiceTags ?? [];
+							const portTag = tags.find((t) => t.startsWith(METRICS_PORT_TAG));
+							if (!portTag) continue;
+							const port = Number.parseInt(
+								portTag.slice(METRICS_PORT_TAG.length),
+								10,
+							);
+							const authTag = tags.find((t) => t.startsWith(METRICS_AUTH_TAG));
+							targets.push({
+								service: name,
+								address: s.ServiceAddress || s.Address || "",
+								port: Number.isFinite(port) ? port : 0,
+								authProfile: authTag
+									? authTag.slice(METRICS_AUTH_TAG.length)
+									: null,
+							});
+						}
+					} catch {
+						// skip this service
+					}
+				}
+			}
+		} catch {
+			// leave targets empty
+		}
+
+		return { collector, targets };
+	};
