@@ -25,6 +25,7 @@ export const Observability = () => {
 	const [headerKey, setHeaderKey] = useState("");
 	const [headerValue, setHeaderValue] = useState("");
 	const [scrapeInterval, setScrapeInterval] = useState("30");
+	const [scrapeBearerToken, setScrapeBearerToken] = useState("");
 
 	// Prefill once the stored config loads.
 	useEffect(() => {
@@ -32,6 +33,7 @@ export const Observability = () => {
 		setEnabled(data.enabled);
 		setOtlpEndpoint(data.otlpEndpoint);
 		setScrapeInterval(String(data.scrapeIntervalSeconds));
+		setScrapeBearerToken(data.scrapeBearerToken ?? "");
 		const entries = Object.entries(data.otlpHeaders ?? {});
 		if (entries[0]) {
 			setHeaderKey(entries[0][0]);
@@ -112,6 +114,23 @@ export const Observability = () => {
 					</div>
 				</div>
 
+				<div className="flex w-full flex-col gap-2">
+					<Label htmlFor="otel-scrape-token">
+						Scrape bearer token (optional)
+					</Label>
+					<Input
+						id="otel-scrape-token"
+						type="password"
+						placeholder="Sent as Authorization: Bearer <token> to service /metrics"
+						value={scrapeBearerToken}
+						onChange={(e) => setScrapeBearerToken(e.target.value)}
+					/>
+					<span className="text-sm text-muted-foreground">
+						Used when a service's <code>/metrics</code> endpoint requires auth.
+						Not sent to the Traefik load balancer.
+					</span>
+				</div>
+
 				<div className="flex w-full flex-col gap-2 sm:max-w-xs">
 					<Label htmlFor="otel-interval">Scrape interval (s)</Label>
 					<Input
@@ -145,6 +164,7 @@ export const Observability = () => {
 									otlpEndpoint: otlpEndpoint.trim(),
 									otlpHeaders: buildHeaders(),
 									scrapeIntervalSeconds: scrapeNum,
+									scrapeBearerToken: scrapeBearerToken.trim(),
 								});
 								toast.success(
 									enabled

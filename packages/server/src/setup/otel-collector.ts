@@ -21,6 +21,10 @@ export type OtelConfig = {
 	otlpEndpoint: string;
 	otlpHeaders: Record<string, string>;
 	scrapeIntervalSeconds: number;
+	/** Bearer token sent when scraping discovered services' /metrics (for
+	 * endpoints behind auth). Applied to the tag-discovered services job; the
+	 * Traefik :8082 endpoint is scraped without it. Empty = no scrape auth. */
+	scrapeBearerToken: string;
 };
 
 const DEFAULT_OTEL_CONFIG: OtelConfig = {
@@ -28,6 +32,7 @@ const DEFAULT_OTEL_CONFIG: OtelConfig = {
 	otlpEndpoint: "",
 	otlpHeaders: {},
 	scrapeIntervalSeconds: 30,
+	scrapeBearerToken: "",
 };
 
 // The observability config lives in a sibling dir of the main Traefik config,
@@ -57,6 +62,10 @@ export const getOtelConfig = (): OtelConfig => {
 				Number.isFinite(scrape) && scrape >= 5 && scrape <= 3600
 					? Math.floor(scrape)
 					: DEFAULT_OTEL_CONFIG.scrapeIntervalSeconds,
+			scrapeBearerToken:
+				typeof parsed.scrapeBearerToken === "string"
+					? parsed.scrapeBearerToken
+					: "",
 		};
 	} catch {
 		return { ...DEFAULT_OTEL_CONFIG };
@@ -85,6 +94,10 @@ export const setOtelConfig = (cfg: OtelConfig): void => {
 				? cfg.otlpHeaders
 				: {},
 		scrapeIntervalSeconds: scrape,
+		scrapeBearerToken:
+			typeof cfg.scrapeBearerToken === "string"
+				? cfg.scrapeBearerToken.trim()
+				: "",
 	};
 	const file = otelConfigPath();
 	mkdirSync(path.dirname(file), { recursive: true });
@@ -111,6 +124,14 @@ export const generateOtelCollectorConfig = (cfg: OtelConfig): string => {
 	// Nested as a sibling of `server:` under the consul_sd_configs list item
 	// (14-space indent).
 	const tokenLine = token ? `\n              token: ${yamlQuote(token)}` : "";
+	// Bearer token for scraping discovered services whose /metrics is behind
+	// auth. Sits at the scrape_config level (10-space indent), as a sibling of
+	// `consul_sd_configs:`/`relabel_configs:`. Only applied to the tag-discovered
+	// services job — Traefik's :8082 is unauthenticated.
+	const scrapeAuth = cfg.scrapeBearerToken.trim();
+	const scrapeAuthBlock = scrapeAuth
+		? `\n          authorization:\n            type: Bearer\n            credentials: ${yamlQuote(scrapeAuth)}`
+		: "";
 	const isHttps = /^https:\/\//i.test(cfg.otlpEndpoint.trim());
 	const headerEntries = Object.entries(cfg.otlpHeaders ?? {});
 	const headersBlock =
@@ -141,7 +162,7 @@ export const generateOtelCollectorConfig = (cfg: OtelConfig): string => {
               replacement: "\${1}:8082"
             - target_label: __metrics_path__
               replacement: /metrics
-        - job_name: consul-services
+        - job_name: consul-services${scrapeAuthBlock}
           consul_sd_configs:
             - server: ${yamlQuote(CONSUL_SD_SERVER)}${tokenLine}
           relabel_configs:
