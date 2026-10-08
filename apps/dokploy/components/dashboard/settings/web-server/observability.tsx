@@ -559,6 +559,9 @@ export const Observability = () => {
 									<thead className="bg-muted/50 text-muted-foreground">
 										<tr>
 											<th className="px-3 py-2 text-left font-medium">
+												Health
+											</th>
+											<th className="px-3 py-2 text-left font-medium">
 												Service
 											</th>
 											<th className="px-3 py-2 text-left font-medium">
@@ -575,6 +578,19 @@ export const Observability = () => {
 												key={`${t.service}-${t.address}-${t.port}`}
 												className="border-t"
 											>
+												<td className="px-3 py-2">
+													{t.healthy === true ? (
+														<span className="flex items-center gap-1 text-green-600 dark:text-green-500">
+															<CheckCircle2 className="size-3.5" /> up
+														</span>
+													) : t.healthy === false ? (
+														<span className="flex items-center gap-1 text-destructive">
+															<XCircle className="size-3.5" /> failing
+														</span>
+													) : (
+														<span className="text-muted-foreground">—</span>
+													)}
+												</td>
 												<td className="px-3 py-2 font-medium">{t.service}</td>
 												<td className="px-3 py-2 font-mono text-xs">
 													{t.address}:{t.port}
@@ -593,6 +609,13 @@ export const Observability = () => {
 									</tbody>
 								</table>
 							</div>
+						)}
+						{targets.some((t) => t.healthy === false) && (
+							<AlertBlock type="warning">
+								A failing target usually means the wrong (or missing) auth
+								profile, or the service isn't serving <code>/metrics</code> on
+								the tagged port. Check the Logs tab for the exact error.
+							</AlertBlock>
 						)}
 					</TabsContent>
 

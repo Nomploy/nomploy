@@ -444,6 +444,12 @@ export type ObservabilityTarget = {
 	port: number;
 	/** `nomploy.metrics.auth=` profile, or null for the default (no-auth) job. */
 	authProfile: string | null;
+	/**
+	 * Scrape health from the collector's own recent logs: `true` = scraped OK,
+	 * `false` = the collector logged a scrape failure for this `address:port`,
+	 * `null` = unknown (collector down, or no logs yet).
+	 */
+	healthy: boolean | null;
 };
 
 export type ObservabilityStatus = {
@@ -552,6 +558,7 @@ export const getObservabilityStatus =
 								authProfile: authTag
 									? authTag.slice(METRICS_AUTH_TAG.length)
 									: null,
+								healthy: null,
 							});
 						}
 					} catch {
@@ -561,6 +568,34 @@ export const getObservabilityStatus =
 			}
 		} catch {
 			// leave targets empty
+		}
+
+		// Per-target scrape health from the collector's own recent logs: the
+		// Prometheus receiver logs `Failed to scrape … instance="<addr>:<port>"`
+		// for each failing target every scrape interval. A discovered target not in
+		// that set is being scraped OK. Unknown (null) when the collector is down.
+		if (collector.allocId && targets.length > 0) {
+			try {
+				const res = await fetch(
+					`${NOMAD_LOCAL}/v1/client/fs/logs/${collector.allocId}?task=otel&type=stderr&plain=true&origin=end&offset=40000`,
+					{ headers: nomadHeaders() },
+				);
+				if (res.ok) {
+					const text = await res.text();
+					const failed = new Set<string>();
+					const re = /Failed to scrape[^\n]*instance=\\?"([^"\\]+)\\?"/g;
+					let m: RegExpExecArray | null = re.exec(text);
+					while (m !== null) {
+						if (m[1]) failed.add(m[1]);
+						m = re.exec(text);
+					}
+					for (const t of targets) {
+						t.healthy = !failed.has(`${t.address}:${t.port}`);
+					}
+				}
+			} catch {
+				// leave healthy = null
+			}
 		}
 
 		return { collector, targets };
