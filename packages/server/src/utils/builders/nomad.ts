@@ -1304,10 +1304,23 @@ const generateResourcesBlock = (
 	// hard cap equals the reservation — e.g. a Next.js app dies at a 512 MB cap with
 	// its heap pinned near 256 MB. So reserve `memory` for scheduling but allow
 	// bursting to `memory_max` (needs cluster memory oversubscription, enabled in
-	// install.sh), mirroring the panel job's own 512→2048 pattern. An explicit compose
-	// limit (`mem_limit` → memoryMax) wins; otherwise give generous headroom.
-	const memory = resources?.memory || 512;
-	const memoryMax = resources?.memoryMax ?? Math.max(memory * 4, 2048);
+	// install.sh), mirroring the panel job's own 512→2048 pattern.
+	//
+	// Auto-size the scheduling *reservation*: a flat 512 MB default per task
+	// massively over-reserved idle tasks (seen live: a sidecar using 3 MB still
+	// reserved 512 MB), filling nodes and blocking placement/panel rolls. Reserve a
+	// modest floor and let `memory_max` absorb spikes via oversubscription. An
+	// explicit `mem_reservation` still wins; when only a `mem_limit` is given, never
+	// reserve more than that limit. Heavy, steady services should set an explicit
+	// reservation so the scheduler guarantees their working set.
+	const DEFAULT_MEM_RESERVATION = 256;
+	const declaredMax = resources?.memoryMax;
+	const memory =
+		resources?.memory ??
+		(declaredMax != null
+			? Math.min(declaredMax, DEFAULT_MEM_RESERVATION)
+			: DEFAULT_MEM_RESERVATION);
+	const memoryMax = declaredMax ?? Math.max(memory * 4, 2048);
 	const memoryMaxLine =
 		memoryMax > memory ? `\n        memory_max = ${memoryMax}` : "";
 	return `      resources {
