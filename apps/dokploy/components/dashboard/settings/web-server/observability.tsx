@@ -132,6 +132,9 @@ export const Observability = () => {
 	const [scrapeUsername, setScrapeUsername] = useState("");
 	const [scrapePassword, setScrapePassword] = useState("");
 	const [profiles, setProfiles] = useState<EditProfile[]>([]);
+	const [shipNomadMetrics, setShipNomadMetrics] = useState(false);
+	const [shipLoadBalancerLogs, setShipLoadBalancerLogs] = useState(false);
+	const [shipServiceLogs, setShipServiceLogs] = useState(false);
 
 	// Prefill ONCE, the first time the stored config loads. react-query refetches
 	// on window focus / reconnect / after our own save, and re-syncing here would
@@ -169,6 +172,9 @@ export const Observability = () => {
 			setHeaderKey(entries[0][0]);
 			setHeaderValue(entries[0][1]);
 		}
+		setShipNomadMetrics(!!data.shipNomadMetrics);
+		setShipLoadBalancerLogs(!!data.shipLoadBalancerLogs);
+		setShipServiceLogs(!!data.shipServiceLogs);
 	}, [data]);
 
 	const updateProfile = (i: number, patch: Partial<EditProfile>) =>
@@ -441,6 +447,24 @@ export const Observability = () => {
 								value={scrapeInterval}
 								onChange={(e) => setScrapeInterval(e.target.value)}
 							/>
+						</div>
+
+						<div className="flex flex-col gap-3 rounded-lg border p-3">
+							<Label>Signals to ship</Label>
+							<div className="flex items-center justify-between gap-4">
+								<div className="flex flex-col gap-0.5">
+									<span className="text-sm">Nomad / platform metrics</span>
+									<span className="text-xs text-muted-foreground">
+										Scrape the cluster's own Nomad metrics (
+										<code>/v1/metrics</code> on every node) into SigNoz — raft,
+										scheduler, client &amp; runtime health.
+									</span>
+								</div>
+								<Switch
+									checked={shipNomadMetrics}
+									onCheckedChange={setShipNomadMetrics}
+								/>
+							</div>
 						</div>
 					</TabsContent>
 
@@ -856,6 +880,9 @@ export const Observability = () => {
 									scrapeIntervalSeconds: scrapeNum,
 									scrapeAuth: buildScrapeAuth(),
 									authProfiles: buildAuthProfiles(),
+									shipNomadMetrics,
+									shipLoadBalancerLogs,
+									shipServiceLogs,
 								});
 								toast.success(
 									enabled

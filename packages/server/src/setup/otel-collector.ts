@@ -60,6 +60,13 @@ export type OtelConfig = {
 	scrapeAuth: OtelScrapeAuth;
 	/** Named credentials a service selects via `nomploy.metrics.auth=<name>`. */
 	authProfiles: OtelAuthProfile[];
+	/** Signal toggles (independent of per-service metrics scraping): */
+	/** Scrape the cluster's own Nomad metrics (/v1/metrics) into SigNoz. */
+	shipNomadMetrics: boolean;
+	/** Ship Traefik (hub + HA pool) access logs to SigNoz via OTLP. */
+	shipLoadBalancerLogs: boolean;
+	/** Ship service (alloc) stdout/stderr logs to SigNoz via a per-node agent. */
+	shipServiceLogs: boolean;
 };
 
 const DEFAULT_OTEL_CONFIG: OtelConfig = {
@@ -69,6 +76,9 @@ const DEFAULT_OTEL_CONFIG: OtelConfig = {
 	scrapeIntervalSeconds: 30,
 	scrapeAuth: { type: "none" },
 	authProfiles: [],
+	shipNomadMetrics: false,
+	shipLoadBalancerLogs: false,
+	shipServiceLogs: false,
 };
 
 /**
@@ -166,6 +176,9 @@ export const getOtelConfig = (): OtelConfig => {
 			authProfiles: normalizeAuthProfiles(
 				(parsed as { authProfiles?: unknown }).authProfiles,
 			),
+			shipNomadMetrics: parsed.shipNomadMetrics === true,
+			shipLoadBalancerLogs: parsed.shipLoadBalancerLogs === true,
+			shipServiceLogs: parsed.shipServiceLogs === true,
 		};
 	} catch {
 		return { ...DEFAULT_OTEL_CONFIG };
@@ -196,6 +209,9 @@ export const setOtelConfig = (cfg: OtelConfig): void => {
 		scrapeIntervalSeconds: scrape,
 		scrapeAuth: normalizeScrapeAuth(cfg.scrapeAuth),
 		authProfiles: normalizeAuthProfiles(cfg.authProfiles),
+		shipNomadMetrics: cfg.shipNomadMetrics === true,
+		shipLoadBalancerLogs: cfg.shipLoadBalancerLogs === true,
+		shipServiceLogs: cfg.shipServiceLogs === true,
 	};
 	const file = otelConfigPath();
 	mkdirSync(path.dirname(file), { recursive: true });
@@ -220,7 +236,10 @@ const yamlQuote = (value: string): string => `"${value.replace(/"/g, '\\"')}"`;
  *
  * Metrics flow prometheus receiver -> otlp exporter to the configured backend.
  */
-export const generateOtelCollectorConfig = (cfg: OtelConfig): string => {
+export const generateOtelCollectorConfig = (
+	cfg: OtelConfig,
+	nomadNodeIps: string[] = [],
+): string => {
 	const token = consulToken();
 	// Nested as a sibling of `server:` under the consul_sd_configs list item
 	// (14-space indent).
@@ -287,6 +306,21 @@ export const generateOtelCollectorConfig = (cfg: OtelConfig): string => {
 	const servicesJobsBlock = profileJobs
 		? `${defaultServicesJob}\n${profileJobs}`
 		: defaultServicesJob;
+
+	// Optional: scrape the cluster's own Nomad metrics (/v1/metrics) from each
+	// node. Static targets (the nodes' WG IPs, injected at deploy time) — Nomad's
+	// metrics endpoint is open (no token). Off unless shipNomadMetrics.
+	const nomadJob =
+		cfg.shipNomadMetrics && nomadNodeIps.length > 0
+			? `
+        - job_name: nomad
+          metrics_path: /v1/metrics
+          params:
+            format: [prometheus]
+          static_configs:
+            - targets: [${nomadNodeIps.map((ip) => yamlQuote(`${ip}:4646`)).join(", ")}]`
+			: "";
+
 	const isHttps = /^https:\/\//i.test(cfg.otlpEndpoint.trim());
 	const headerEntries = Object.entries(cfg.otlpHeaders ?? {});
 	const headersBlock =
@@ -317,7 +351,7 @@ export const generateOtelCollectorConfig = (cfg: OtelConfig): string => {
               replacement: "$1:8082"
             - target_label: __metrics_path__
               replacement: /metrics
-${servicesJobsBlock}
+${servicesJobsBlock}${nomadJob}
 exporters:
   otlp:
     endpoint: ${yamlQuote(cfg.otlpEndpoint)}${headersBlock}
@@ -344,8 +378,11 @@ service:
  * configured OTLP backend. The `reschedule` stanza makes it move to another
  * node unlimited times with a fixed delay, so a node death doesn't lose it.
  */
-export const generateOtelCollectorJob = (cfg: OtelConfig): string => {
-	const configYaml = generateOtelCollectorConfig(cfg);
+export const generateOtelCollectorJob = (
+	cfg: OtelConfig,
+	nomadNodeIps: string[] = [],
+): string => {
+	const configYaml = generateOtelCollectorConfig(cfg, nomadNodeIps);
 	return `job "${JOB_NAME}" {
   datacenters = ["dc1"]
   type        = "service"
@@ -412,7 +449,11 @@ ${configYaml}EOH
  * deployTraefikHaSystemJob.
  */
 export const deployOtelCollector = async (): Promise<void> => {
-	const hcl = generateOtelCollectorJob(getOtelConfig());
+	const cfg = getOtelConfig();
+	// For the Nomad metrics job we need the cluster's node IPs as static scrape
+	// targets (Nomad agents aren't in Consul catalog). Fetch ready nodes' WG IPs.
+	const nomadNodeIps = cfg.shipNomadMetrics ? await getReadyNodeWgIps() : [];
+	const hcl = generateOtelCollectorJob(cfg, nomadNodeIps);
 	const encoded = encodeBase64(hcl);
 	const jobFilePath = `/etc/nomploy/jobs/${JOB_NAME}.nomad.hcl`;
 	const command = `
@@ -447,6 +488,41 @@ const nomadHeaders = (): Record<string, string> => {
 const consulHeaders = (): Record<string, string> => {
 	const t = consulToken();
 	return t ? { "X-Consul-Token": t } : {};
+};
+
+/**
+ * WG IPs of all ready Nomad nodes (for the Nomad metrics scrape targets).
+ * Best-effort — returns [] when Nomad is unreachable.
+ */
+const getReadyNodeWgIps = async (): Promise<string[]> => {
+	try {
+		const res = await fetch(`${NOMAD_LOCAL}/v1/nodes`, {
+			headers: nomadHeaders(),
+		});
+		if (!res.ok) return [];
+		const nodes = (await res.json()) as {
+			ID?: string;
+			Status?: string;
+		}[];
+		const ips: string[] = [];
+		for (const n of nodes) {
+			if (n.Status !== "ready" || !n.ID) continue;
+			try {
+				const nr = await fetch(`${NOMAD_LOCAL}/v1/node/${n.ID}`, {
+					headers: nomadHeaders(),
+				});
+				if (!nr.ok) continue;
+				const detail = (await nr.json()) as {
+					Attributes?: Record<string, string>;
+				};
+				const ip = detail.Attributes?.["unique.network.ip-address"];
+				if (ip) ips.push(ip);
+			} catch {}
+		}
+		return ips;
+	} catch {
+		return [];
+	}
 };
 
 /** A service the collector discovers and scrapes, derived from Consul tags. */
