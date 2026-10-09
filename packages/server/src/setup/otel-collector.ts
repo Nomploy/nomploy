@@ -476,6 +476,154 @@ export const stopOtelCollector = async (): Promise<void> => {
 
 export const OTEL_COLLECTOR_JOB_NAME = JOB_NAME;
 
+// ─── Per-node log agent (service logs → SigNoz) ──────────────────────────────
+
+const LOG_AGENT_JOB = "nomploy-log-agent";
+// Nomad data_dir on the nodes is /opt/nomad, so task logs live under
+// /opt/nomad/alloc/<alloc-id>/alloc/logs/<task>.{stdout,stderr}.<n> (the .fifo
+// named pipes alongside must NOT be tailed).
+const NOMAD_ALLOC_DIR = "/opt/nomad/alloc";
+
+/** OTLP exporter YAML block shared by the collector + the log agent. */
+const otlpExporterBlock = (cfg: OtelConfig): string => {
+	const isHttps = /^https:\/\//i.test(cfg.otlpEndpoint.trim());
+	const headerEntries = Object.entries(cfg.otlpHeaders ?? {});
+	const headersBlock =
+		headerEntries.length > 0
+			? `\n    headers:\n${headerEntries
+					.map(([k, v]) => `      ${yamlQuote(k)}: ${yamlQuote(v)}`)
+					.join("\n")}`
+			: "\n    headers: {}";
+	return `exporters:
+  otlp:
+    endpoint: ${yamlQuote(cfg.otlpEndpoint)}${headersBlock}
+    tls:
+      insecure: ${isHttps ? "false" : "true"}`;
+};
+
+/**
+ * Render the log agent's OTel config: tail every alloc's stdout/stderr via the
+ * filelog receiver (excluding the .fifo pipes), tag each record with the alloc
+ * id + task + node from the file path, and ship to the OTLP backend. The alloc
+ * dir is bind-mounted read-only at /nomad-alloc.
+ */
+export const generateLogAgentConfig = (cfg: OtelConfig): string => {
+	return `receivers:
+  filelog:
+    include:
+      - /nomad-alloc/*/alloc/logs/*.stdout.*
+      - /nomad-alloc/*/alloc/logs/*.stderr.*
+    exclude:
+      - /nomad-alloc/*/alloc/logs/*.fifo
+    include_file_path: true
+    start_at: end
+    operators:
+      - type: regex_parser
+        parse_from: attributes["log.file.path"]
+        regex: '^/nomad-alloc/(?P<alloc_id>[^/]+)/alloc/logs/(?P<task>.+)\\.(?P<stream>stdout|stderr)\\.[0-9]+$'
+      - type: move
+        from: attributes.task
+        to: resource["service.name"]
+      - type: move
+        from: attributes.alloc_id
+        to: resource["nomad.alloc.id"]
+      - type: move
+        from: attributes.stream
+        to: attributes["log.iostream"]
+processors:
+  resource:
+    attributes:
+      - key: nomad.node
+        value: "$\${env:NODE_NAME}"
+        action: upsert
+  batch: {}
+${otlpExporterBlock(cfg)}
+service:
+  pipelines:
+    logs:
+      receivers: [filelog]
+      processors: [resource, batch]
+      exporters: [otlp]
+`;
+};
+
+/**
+ * A Nomad `system` job: one log agent per node (so it can read that node's
+ * local alloc logs), host-networked, with the alloc dir bind-mounted read-only.
+ * Ships all service stdout/stderr to the OTLP backend.
+ */
+export const generateLogAgentJob = (cfg: OtelConfig): string => {
+	const configYaml = generateLogAgentConfig(cfg);
+	return `job "${LOG_AGENT_JOB}" {
+  datacenters = ["dc1"]
+  type        = "system"
+
+  group "agent" {
+    network {
+      mode = "host"
+    }
+
+    task "agent" {
+      driver = "docker"
+
+      env {
+        NODE_NAME = "\${node.unique.name}"
+      }
+
+      config {
+        image        = "${OTEL_IMAGE}"
+        network_mode = "host"
+        args         = ["--config=/local/config.yaml"]
+        mount {
+          type     = "bind"
+          source   = "${NOMAD_ALLOC_DIR}"
+          target   = "/nomad-alloc"
+          readonly = true
+        }
+      }
+
+      template {
+        destination = "local/config.yaml"
+        change_mode = "restart"
+        data        = <<EOH
+${configYaml}EOH
+      }
+
+      resources {
+        cpu    = 100
+        memory = 128
+      }
+    }
+  }
+}
+`;
+};
+
+/** Deploy (or update) the per-node log agent system job on the control plane. */
+export const deployLogAgent = async (): Promise<void> => {
+	const hcl = generateLogAgentJob(getOtelConfig());
+	const encoded = encodeBase64(hcl);
+	const jobFilePath = `/etc/nomploy/jobs/${LOG_AGENT_JOB}.nomad.hcl`;
+	const command = `
+set -e
+mkdir -p /etc/nomploy/jobs
+echo "${encoded}" | base64 -d > "${jobFilePath}"
+if ! nomad job run "${jobFilePath}" 2>&1; then
+	echo "Error: log agent job deployment failed"
+	exit 1
+fi
+echo "log agent job deployed"
+`;
+	await execAsync(command);
+};
+
+/** Stop + purge the log agent job (tolerates not-found). */
+export const stopLogAgent = async (): Promise<void> => {
+	await execAsync(`nomad job stop -purge ${LOG_AGENT_JOB} 2>&1 || true`);
+};
+
+export const LOG_AGENT_JOB_NAME = LOG_AGENT_JOB;
+
 // Control-plane-local Nomad/Consul (the panel runs on the hub). Mirrors the
 // addresses other setup modules use (pack-domains.ts, resolve.ts).
 const NOMAD_LOCAL = process.env.NOMAD_ADDRESS || "http://127.0.0.1:4646";

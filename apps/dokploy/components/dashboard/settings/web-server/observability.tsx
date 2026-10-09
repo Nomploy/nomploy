@@ -465,6 +465,20 @@ export const Observability = () => {
 									onCheckedChange={setShipNomadMetrics}
 								/>
 							</div>
+							<div className="flex items-center justify-between gap-4">
+								<div className="flex flex-col gap-0.5">
+									<span className="text-sm">Service logs</span>
+									<span className="text-xs text-muted-foreground">
+										Ship every service's stdout/stderr to SigNoz via a per-node
+										log agent (tails Nomad alloc logs). Tagged with service
+										name, alloc &amp; node.
+									</span>
+								</div>
+								<Switch
+									checked={shipServiceLogs}
+									onCheckedChange={setShipServiceLogs}
+								/>
+							</div>
 						</div>
 					</TabsContent>
 

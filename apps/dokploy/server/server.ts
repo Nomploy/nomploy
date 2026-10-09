@@ -146,13 +146,18 @@ void (async () => {
 					// Ensure the OTel Collector job is running when observability is
 					// enabled — self-heals after a panel roll / node loss (the job is
 					// only otherwise (re)deployed on a saveObservability).
-					const { getOtelConfig, deployOtelCollector } = await import(
-						"@nomploy/server/setup/otel-collector"
-					);
-					if (getOtelConfig().enabled) {
+					const { getOtelConfig, deployOtelCollector, deployLogAgent } =
+						await import("@nomploy/server/setup/otel-collector");
+					const otelCfg = getOtelConfig();
+					if (otelCfg.enabled) {
 						deployOtelCollector().catch((err) =>
 							console.error("otel collector boot ensure:", err),
 						);
+						if (otelCfg.shipServiceLogs) {
+							deployLogAgent().catch((err) =>
+								console.error("otel log agent boot ensure:", err),
+							);
+						}
 					}
 				},
 				{

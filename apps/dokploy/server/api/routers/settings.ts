@@ -51,11 +51,13 @@ import {
 import { db } from "@nomploy/server/db";
 import { checkPermission } from "@nomploy/server/services/permission";
 import {
+	deployLogAgent,
 	deployOtelCollector,
 	getObservabilityLogs,
 	getObservabilityStatus,
 	getOtelConfig,
 	setOtelConfig,
+	stopLogAgent,
 	stopOtelCollector,
 } from "@nomploy/server/setup/otel-collector";
 import { deployTraefikHaSystemJob } from "@nomploy/server/setup/traefik-ha";
@@ -277,13 +279,20 @@ export const settingsRouter = createTRPCRouter({
 				shipLoadBalancerLogs: input.shipLoadBalancerLogs ?? false,
 				shipServiceLogs: input.shipServiceLogs ?? false,
 			});
-			// Deploy/stop the collector job in the background so the request returns
-			// immediately (mirrors reloadTraefik). Tolerate failure (e.g. no cluster).
+			// Deploy/stop the collector + log agent in the background so the request
+			// returns immediately (mirrors reloadTraefik). Tolerate failure (e.g. no
+			// cluster). The per-node log agent ships service logs → only when
+			// observability is enabled AND service-log shipping is on.
 			void (async () => {
 				if (input.enabled) {
 					await deployOtelCollector();
 				} else {
 					await stopOtelCollector();
+				}
+				if (input.enabled && input.shipServiceLogs) {
+					await deployLogAgent();
+				} else {
+					await stopLogAgent();
 				}
 			})().catch((err) => {
 				console.error("saveObservability background:", err);
