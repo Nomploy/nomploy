@@ -268,6 +268,10 @@ export const settingsRouter = createTRPCRouter({
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
+			// Effective LB-logs state before/after → only reconfigure the pool Traefik
+			// when it actually changes (don't restart ingress for unrelated saves).
+			const prevOtel = getOtelConfig();
+			const prevLbLogs = prevOtel.enabled && prevOtel.shipLoadBalancerLogs;
 			setOtelConfig({
 				enabled: input.enabled,
 				otlpEndpoint: input.otlpEndpoint,
@@ -279,6 +283,7 @@ export const settingsRouter = createTRPCRouter({
 				shipLoadBalancerLogs: input.shipLoadBalancerLogs ?? false,
 				shipServiceLogs: input.shipServiceLogs ?? false,
 			});
+			const nextLbLogs = input.enabled && (input.shipLoadBalancerLogs ?? false);
 			// Deploy/stop the collector + log agent in the background so the request
 			// returns immediately (mirrors reloadTraefik). Tolerate failure (e.g. no
 			// cluster). The per-node log agent ships service logs → only when
@@ -293,6 +298,12 @@ export const settingsRouter = createTRPCRouter({
 					await deployLogAgent();
 				} else {
 					await stopLogAgent();
+				}
+				// Reconfigure the pool Traefik only when LB-log shipping toggled, so
+				// unrelated observability saves don't restart ingress. The pool is a
+				// system job with rolling update + auto-revert.
+				if (prevLbLogs !== nextLbLogs) {
+					await deployTraefikHaSystemJob();
 				}
 			})().catch((err) => {
 				console.error("saveObservability background:", err);

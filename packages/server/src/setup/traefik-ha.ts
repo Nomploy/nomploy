@@ -4,6 +4,7 @@ import path from "node:path";
 import { paths } from "../constants";
 import { encodeBase64 } from "../utils/docker/utils";
 import { execAsync } from "../utils/process/execAsync";
+import { getOtelConfig } from "./otel-collector";
 import { getTraefikVersion } from "./traefik-setup";
 
 const JOB_NAME = "nomploy-traefik-ha";
@@ -60,9 +61,32 @@ const resolveAcmeEmail = (): string => {
 export const generateTraefikHaJob = (opts: {
 	consulToken?: string;
 	email?: string;
+	/** When set, pool access logs ship as structured OTLP (Traefik v3.3+ native)
+	 * to this backend instead of JSON on stdout. `endpoint` is host:port (no
+	 * scheme — gRPC); `insecure` disables TLS for a plaintext backend. */
+	lbLogs?: {
+		endpoint: string;
+		headers: Record<string, string>;
+		insecure: boolean;
+	};
 }): string => {
 	const token = opts.consulToken ?? "";
 	const email = opts.email ?? "admin@localhost";
+	// OTLP access logs (opt-in). `experimental.otlpLogs` unlocks it; the accessLog
+	// then goes to OTLP gRPC instead of stdout JSON (so it isn't also captured as a
+	// service-log line). Off → keep the stdout JSON access log.
+	const lb = opts.lbLogs;
+	const experimentalBlock = lb ? "experimental:\n  otlpLogs: true\n" : "";
+	const accessLogBlock = lb
+		? `accessLog:
+  otlp:
+    grpc:
+      endpoint: ${JSON.stringify(lb.endpoint)}
+${lb.insecure ? "      insecure: true\n" : ""}      headers:
+${Object.entries(lb.headers)
+	.map(([k, v]) => `        ${JSON.stringify(k)}: ${JSON.stringify(v)}`)
+	.join("\n")}`
+		: "accessLog:\n  format: json";
 	return `job "${JOB_NAME}" {
   datacenters = ["dc1"]
   type        = "system"
@@ -90,7 +114,7 @@ export const generateTraefikHaJob = (opts: {
         destination = "local/traefik.yml"
         change_mode = "restart"
         data        = <<EOH
-entryPoints:
+${experimentalBlock}entryPoints:
   web:
     address: ":80"
   websecure:
@@ -128,8 +152,7 @@ certificatesResolvers:
 api:
   insecure: true
   dashboard: true
-accessLog:
-  format: json
+${accessLogBlock}
 log:
   level: INFO
 EOH
@@ -325,9 +348,22 @@ export const deployTraefikHaSystemJob = async (): Promise<{
 	certCount: number;
 }> => {
 	const { certCount } = await syncTraefikCertsToConsulKV({ force: true });
+	// Structured OTLP access logs when observability + LB logs are enabled. Strip
+	// the URL scheme (Traefik gRPC endpoint is host:port) and derive TLS from it.
+	const otel = getOtelConfig();
+	const ep = (otel.otlpEndpoint ?? "").trim();
+	const lbLogs =
+		otel.enabled && otel.shipLoadBalancerLogs && ep
+			? {
+					endpoint: ep.replace(/^https?:\/\//i, ""),
+					headers: otel.otlpHeaders ?? {},
+					insecure: !/^https:\/\//i.test(ep),
+				}
+			: undefined;
 	const hcl = generateTraefikHaJob({
 		consulToken: consulToken(),
 		email: resolveAcmeEmail(),
+		lbLogs,
 	});
 	const encoded = encodeBase64(hcl);
 	const jobFilePath = `/etc/nomploy/jobs/${JOB_NAME}.nomad.hcl`;

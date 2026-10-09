@@ -479,6 +479,21 @@ export const Observability = () => {
 									onCheckedChange={setShipServiceLogs}
 								/>
 							</div>
+							<div className="flex items-center justify-between gap-4">
+								<div className="flex flex-col gap-0.5">
+									<span className="text-sm">Load balancer logs</span>
+									<span className="text-xs text-muted-foreground">
+										Ship the HA pool Traefik's access logs to SigNoz as{" "}
+										<strong>structured</strong> records (status, latency, host,
+										client IP) via native OTLP. Reconfigures the pool Traefik
+										(rolling, auto-revert-safe).
+									</span>
+								</div>
+								<Switch
+									checked={shipLoadBalancerLogs}
+									onCheckedChange={setShipLoadBalancerLogs}
+								/>
+							</div>
 						</div>
 					</TabsContent>
 
