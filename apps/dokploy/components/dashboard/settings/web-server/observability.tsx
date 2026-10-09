@@ -352,6 +352,7 @@ export const Observability = () => {
 								<Label htmlFor="otel-header-value">Header value</Label>
 								<Input
 									id="otel-header-value"
+									type="password"
 									placeholder="<your-ingestion-key>"
 									value={headerValue}
 									onChange={(e) => setHeaderValue(e.target.value)}
