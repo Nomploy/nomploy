@@ -239,6 +239,7 @@ const yamlQuote = (value: string): string => `"${value.replace(/"/g, '\\"')}"`;
 export const generateOtelCollectorConfig = (
 	cfg: OtelConfig,
 	nomadNodeIps: string[] = [],
+	lbNodeIps: string[] = [],
 ): string => {
 	const token = consulToken();
 	// Nested as a sibling of `server:` under the consul_sd_configs list item
@@ -321,6 +322,20 @@ export const generateOtelCollectorConfig = (
             - targets: [${nomadNodeIps.map((ip) => yamlQuote(`${ip}:4646`)).join(", ")}]`
 			: "";
 
+	// Traefik isn't a Consul service, so consul_sd finds nothing — scrape the LB
+	// nodes' :8082 metrics entryPoint by static target (the nodes tagged
+	// meta.nomploy_lb, injected at deploy; fall back to all nodes).
+	const traefikTargets = (lbNodeIps.length > 0 ? lbNodeIps : nomadNodeIps).map(
+		(ip) => yamlQuote(`${ip}:8082`),
+	);
+	const traefikJob =
+		traefikTargets.length > 0
+			? `        - job_name: traefik
+          metrics_path: /metrics
+          static_configs:
+            - targets: [${traefikTargets.join(", ")}]`
+			: "";
+
 	const isHttps = /^https:\/\//i.test(cfg.otlpEndpoint.trim());
 	const headerEntries = Object.entries(cfg.otlpHeaders ?? {});
 	const headersBlock =
@@ -336,22 +351,7 @@ export const generateOtelCollectorConfig = (
       global:
         scrape_interval: ${cfg.scrapeIntervalSeconds}s
       scrape_configs:
-        - job_name: traefik
-          consul_sd_configs:
-            - server: ${yamlQuote(CONSUL_SD_SERVER)}${tokenLine}
-          relabel_configs:
-            # Keep only the Traefik service instances.
-            - source_labels: [__meta_consul_service]
-              regex: (.*traefik.*)
-              action: keep
-            # Traefik is host-networked; the Consul service address is the node
-            # IP. Scrape its Prometheus metrics entryPoint on :8082.
-            - source_labels: [__meta_consul_service_address]
-              target_label: __address__
-              replacement: "$1:8082"
-            - target_label: __metrics_path__
-              replacement: /metrics
-${servicesJobsBlock}${nomadJob}
+${traefikJob ? `${traefikJob}\n` : ""}${servicesJobsBlock}${nomadJob}
 exporters:
   otlp:
     endpoint: ${yamlQuote(cfg.otlpEndpoint)}${headersBlock}
@@ -381,8 +381,9 @@ service:
 export const generateOtelCollectorJob = (
 	cfg: OtelConfig,
 	nomadNodeIps: string[] = [],
+	lbNodeIps: string[] = [],
 ): string => {
-	const configYaml = generateOtelCollectorConfig(cfg, nomadNodeIps);
+	const configYaml = generateOtelCollectorConfig(cfg, nomadNodeIps, lbNodeIps);
 	return `job "${JOB_NAME}" {
   datacenters = ["dc1"]
   type        = "service"
@@ -453,7 +454,10 @@ export const deployOtelCollector = async (): Promise<void> => {
 	// For the Nomad metrics job we need the cluster's node IPs as static scrape
 	// targets (Nomad agents aren't in Consul catalog). Fetch ready nodes' WG IPs.
 	const nomadNodeIps = cfg.shipNomadMetrics ? await getReadyNodeWgIps() : [];
-	const hcl = generateOtelCollectorJob(cfg, nomadNodeIps);
+	// Traefik metrics: scrape the LB nodes' :8082 by static target (Traefik isn't
+	// in Consul catalog). Always discovered so LB metrics flow whenever enabled.
+	const lbNodeIps = await getLbNodeWgIps();
+	const hcl = generateOtelCollectorJob(cfg, nomadNodeIps, lbNodeIps);
 	const encoded = encodeBase64(hcl);
 	const jobFilePath = `/etc/nomploy/jobs/${JOB_NAME}.nomad.hcl`;
 	const command = `
@@ -663,6 +667,41 @@ const getReadyNodeWgIps = async (): Promise<string[]> => {
 				const detail = (await nr.json()) as {
 					Attributes?: Record<string, string>;
 				};
+				const ip = detail.Attributes?.["unique.network.ip-address"];
+				if (ip) ips.push(ip);
+			} catch {}
+		}
+		return ips;
+	} catch {
+		return [];
+	}
+};
+
+/**
+ * WG IPs of the LB (pool) nodes — those tagged `meta.nomploy_lb=true`, where the
+ * pool Traefik runs and exposes :8082 metrics. Static scrape targets for the
+ * `traefik` job (Traefik isn't a Consul service). [] when none/unreachable.
+ */
+const getLbNodeWgIps = async (): Promise<string[]> => {
+	try {
+		const res = await fetch(`${NOMAD_LOCAL}/v1/nodes`, {
+			headers: nomadHeaders(),
+		});
+		if (!res.ok) return [];
+		const nodes = (await res.json()) as { ID?: string; Status?: string }[];
+		const ips: string[] = [];
+		for (const n of nodes) {
+			if (n.Status !== "ready" || !n.ID) continue;
+			try {
+				const nr = await fetch(`${NOMAD_LOCAL}/v1/node/${n.ID}`, {
+					headers: nomadHeaders(),
+				});
+				if (!nr.ok) continue;
+				const detail = (await nr.json()) as {
+					Meta?: Record<string, string>;
+					Attributes?: Record<string, string>;
+				};
+				if (detail.Meta?.nomploy_lb !== "true") continue;
 				const ip = detail.Attributes?.["unique.network.ip-address"];
 				if (ip) ips.push(ip);
 			} catch {}
