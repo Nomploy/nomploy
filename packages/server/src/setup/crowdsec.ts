@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parse, stringify } from "yaml";
 import { paths } from "../constants";
@@ -322,8 +322,112 @@ export const ensureHubAccessLog = async (): Promise<void> => {
 };
 
 /**
+ * Add or remove the CrowdSec bouncer on the HUB's standalone Traefik (which also
+ * serves a share of app traffic via the LB DNS, so it needs the bouncer too for
+ * full coverage — the pool Traefik is handled separately in traefik-ha.ts). This
+ * mutates the hub's static traefik.yml (experimental.plugins + a global
+ * web/websecure entrypoint middleware) and the dynamic middlewares.yml (the
+ * bouncer definition), then recreates the standalone Traefik. Idempotent: only
+ * rewrites + recreates when the desired state differs, so it won't needlessly
+ * blip the panel (which the hub Traefik serves). Driven by getCrowdsecBouncer()
+ * — present → add; null (disabled/enforce off) → remove.
+ */
+export const ensureHubBouncer = async (): Promise<void> => {
+	const bouncer = getCrowdsecBouncer();
+	const mainRaw = readMainConfig();
+	if (!mainRaw) return;
+	// Loose typing: the hub config is a free-form YAML object we surgically edit.
+	// biome-ignore lint/suspicious/noExplicitAny: nested YAML mutation
+	const main = (parse(mainRaw) ?? {}) as any;
+	const dynPath = path.join(paths().DYNAMIC_TRAEFIK_PATH, "middlewares.yml");
+	// biome-ignore lint/suspicious/noExplicitAny: nested YAML mutation
+	let mw: any = {};
+	try {
+		if (existsSync(dynPath)) mw = (parse(readFileSync(dynPath, "utf8")) ?? {}) as unknown;
+	} catch {}
+	mw.http = mw.http ?? {};
+	mw.http.middlewares = mw.http.middlewares ?? {};
+	let changed = false;
+
+	if (bouncer) {
+		main.experimental = main.experimental ?? {};
+		main.experimental.plugins = main.experimental.plugins ?? {};
+		const desired = {
+			moduleName: bouncer.pluginModule,
+			version: bouncer.pluginVersion,
+		};
+		if (
+			JSON.stringify(main.experimental.plugins.crowdsec) !==
+			JSON.stringify(desired)
+		) {
+			main.experimental.plugins.crowdsec = desired;
+			changed = true;
+		}
+		main.entryPoints = main.entryPoints ?? {};
+		for (const ep of ["web", "websecure"]) {
+			main.entryPoints[ep] = main.entryPoints[ep] ?? {};
+			main.entryPoints[ep].http = main.entryPoints[ep].http ?? {};
+			const cur: string[] = main.entryPoints[ep].http.middlewares ?? [];
+			if (!cur.includes("crowdsec@file")) {
+				main.entryPoints[ep].http.middlewares = [...cur, "crowdsec@file"];
+				changed = true;
+			}
+		}
+		const desiredMw = {
+			plugin: {
+				crowdsec: {
+					enabled: true,
+					crowdsecMode: "stream",
+					crowdsecLapiScheme: "http",
+					crowdsecLapiHost: bouncer.lapiHost,
+					crowdsecLapiKey: bouncer.lapiKey,
+					clientTrustedIPs: bouncer.trustedIPs,
+				},
+			},
+		};
+		if (
+			JSON.stringify(mw.http.middlewares.crowdsec) !== JSON.stringify(desiredMw)
+		) {
+			mw.http.middlewares.crowdsec = desiredMw;
+			changed = true;
+		}
+	} else {
+		if (main.experimental?.plugins?.crowdsec) {
+			delete main.experimental.plugins.crowdsec;
+			if (Object.keys(main.experimental.plugins).length === 0)
+				delete main.experimental.plugins;
+			if (Object.keys(main.experimental).length === 0)
+				delete main.experimental;
+			changed = true;
+		}
+		for (const ep of ["web", "websecure"]) {
+			const cur: string[] | undefined = main.entryPoints?.[ep]?.http?.middlewares;
+			if (Array.isArray(cur) && cur.includes("crowdsec@file")) {
+				const next = cur.filter((m) => m !== "crowdsec@file");
+				if (next.length > 0) main.entryPoints[ep].http.middlewares = next;
+				else delete main.entryPoints[ep].http.middlewares;
+				changed = true;
+			}
+		}
+		if (mw.http.middlewares.crowdsec) {
+			delete mw.http.middlewares.crowdsec;
+			changed = true;
+		}
+	}
+
+	if (!changed) return;
+	writeMainConfig(stringify(main));
+	mkdirSync(path.dirname(dynPath), { recursive: true });
+	writeFileSync(dynPath, stringify(mw), "utf8");
+	// Recreate the standalone hub Traefik so the static-config change (plugin +
+	// entrypoint middleware) takes effect. skipPull keeps the ingress blip short.
+	await initializeStandaloneTraefik({ skipPull: true });
+};
+
+/**
  * Deploy (or update) the CrowdSec detector on the hub: ensure the access log is
- * on, create the host data/acquis dirs, render the HCL and `nomad job run` it.
+ * on, create the host data/acquis dirs, render the HCL and `nomad job run` it,
+ * then reconcile the hub bouncer (add/remove per enforce state).
  */
 export const deployCrowdsec = async (): Promise<void> => {
 	const cfg = getCrowdsecConfig();
@@ -342,6 +446,8 @@ fi
 echo "CrowdSec job deployed"
 `;
 	await execAsync(command);
+	// Reconcile the hub bouncer (adds it when enforcing, removes it otherwise).
+	await ensureHubBouncer();
 };
 
 /** Stop + purge the CrowdSec job (tolerates not-found). */

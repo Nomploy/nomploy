@@ -63,6 +63,7 @@ import {
 import {
 	crowdsecUnban,
 	deployCrowdsec,
+	ensureHubBouncer,
 	getCrowdsecConfig,
 	getCrowdsecStatus,
 	setCrowdsecConfig,
@@ -377,11 +378,15 @@ export const settingsRouter = createTRPCRouter({
 					await deployCrowdsec();
 				} else {
 					await stopCrowdsec();
+					// deployCrowdsec reconciles the hub bouncer when enabled; on disable
+					// we must still remove it from the hub Traefik.
+					await ensureHubBouncer();
 				}
 				// Reconfigure the HA pool Traefik when enforcement turns on, off, or
 				// changes while on (e.g. allowlist edit) — deploy the detector first so
-				// LAPI is up before the bouncer queries it. The pool is a system job
-				// with rolling update + auto-revert, so a bad plugin config self-heals.
+				// LAPI is up before the bouncer queries it. (The pool is a system job;
+				// system jobs have no auto_revert, so a bad config needs enforce toggled
+				// off to recover — the panel runs on the independent hub Traefik.)
 				if (prevActive || nextActive) {
 					await deployTraefikHaSystemJob();
 				}
