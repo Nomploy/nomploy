@@ -176,10 +176,6 @@ export const generateCrowdsecJob = (cfg: CrowdsecConfig): string => {
       delay_function = "constant"
     }
 
-    network {
-      mode = "host"
-    }
-
     task "crowdsec" {
       driver = "docker"
 
@@ -189,8 +185,15 @@ export const generateCrowdsecJob = (cfg: CrowdsecConfig): string => {
       }
 
       config {
+        # Bridge (NOT host) networking: the hub Traefik already owns :8080 on the
+        # host (api.insecure dashboard), and CrowdSec's LAPI defaults to :8080 —
+        # host networking would collide and the container would crash-loop on
+        # bind failure. In bridge mode the LAPI + local agent talk over the
+        # container's own localhost; Phase 1 needs no external access to LAPI (a
+        # later enforcement phase will publish it for cluster-wide bouncers). The
+        # access-log bind mount below is unaffected by the network mode.
         image        = "${CROWDSEC_IMAGE}"
-        network_mode = "host"
+        network_mode = "bridge"
         volumes = [
           "/etc/nomploy/traefik/dynamic:${CONTAINER_LOG_DIR}:ro",
           "/etc/nomploy/crowdsec/data:/var/lib/crowdsec/data",
@@ -389,7 +392,7 @@ export const getCrowdsecStatus = async (): Promise<CrowdsecStatus> => {
 	if (out.allocId && ALLOC_ID_RE.test(out.allocId)) {
 		try {
 			const { stdout } = await execAsync(
-				`nomad alloc exec -task crowdsec ${out.allocId} cscli decisions list -o json 2>/dev/null`,
+				`nomad alloc exec -i=false -t=false -task crowdsec ${out.allocId} cscli decisions list -o json 2>/dev/null`,
 			);
 			out.decisions = parseDecisions(stdout || "[]");
 		} catch {
@@ -414,7 +417,7 @@ export const crowdsecUnban = async (ip: string): Promise<void> => {
 		throw new Error("CrowdSec is not running");
 	}
 	await execAsync(
-		`nomad alloc exec -task crowdsec ${status.allocId} cscli decisions delete --ip ${value} 2>&1`,
+		`nomad alloc exec -i=false -t=false -task crowdsec ${status.allocId} cscli decisions delete --ip ${value} 2>&1`,
 	);
 };
 
