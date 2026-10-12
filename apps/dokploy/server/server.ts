@@ -159,6 +159,16 @@ void (async () => {
 							);
 						}
 					}
+					// Ensure the CrowdSec detector is running when enabled — same
+					// self-heal rationale as the OTel collector above.
+					const { getCrowdsecConfig, deployCrowdsec } = await import(
+						"@nomploy/server/setup/crowdsec"
+					);
+					if (getCrowdsecConfig().enabled) {
+						deployCrowdsec().catch((err) =>
+							console.error("crowdsec boot ensure:", err),
+						);
+					}
 				},
 				{
 					onWait: () =>

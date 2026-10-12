@@ -60,6 +60,12 @@ import {
 	stopLogAgent,
 	stopOtelCollector,
 } from "@nomploy/server/setup/otel-collector";
+import {
+	deployCrowdsec,
+	getCrowdsecConfig,
+	setCrowdsecConfig,
+	stopCrowdsec,
+} from "@nomploy/server/setup/crowdsec";
 import { deployTraefikHaSystemJob } from "@nomploy/server/setup/traefik-ha";
 import {
 	getTraefikVersion,
@@ -312,6 +318,51 @@ export const settingsRouter = createTRPCRouter({
 				action: "update",
 				resourceType: "settings",
 				resourceName: "otel-collector",
+			});
+			return true;
+		}),
+	getCrowdsec: adminProcedure.query(() => {
+		// Never return the bouncer key to the client; expose only whether one is set.
+		const cfg = getCrowdsecConfig();
+		const { bouncerKey, ...rest } = cfg;
+		return { ...rest, hasBouncerKey: bouncerKey !== "" };
+	}),
+	saveCrowdsec: adminProcedure
+		.input(
+			z.object({
+				enabled: z.boolean(),
+				// Detection-only while false (no bouncer enforces yet — Phase 1).
+				enforce: z.boolean().optional(),
+				// Anti-lockout allowlist (CIDRs/IPs). The WG overlay subnet is always
+				// added server-side, so the cluster can't ban itself.
+				allowlist: z.array(z.string()).optional(),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			// Preserve the generated bouncer key across saves (not a client input).
+			const prev = getCrowdsecConfig();
+			setCrowdsecConfig({
+				enabled: input.enabled,
+				enforce: input.enforce ?? false,
+				bouncerKey: prev.bouncerKey,
+				allowlist: input.allowlist ?? [],
+			});
+			// Deploy/stop the detector in the background so the request returns
+			// immediately (mirrors saveObservability). Tolerate failure (e.g. no
+			// cluster).
+			void (async () => {
+				if (input.enabled) {
+					await deployCrowdsec();
+				} else {
+					await stopCrowdsec();
+				}
+			})().catch((err) => {
+				console.error("saveCrowdsec background:", err);
+			});
+			await audit(ctx, {
+				action: "update",
+				resourceType: "settings",
+				resourceName: "crowdsec",
 			});
 			return true;
 		}),
