@@ -47,6 +47,7 @@ export const Crowdsec = () => {
 	const { mutateAsync: unban } = api.settings.crowdsecUnban.useMutation();
 
 	const [enabled, setEnabled] = useState(false);
+	const [enforce, setEnforce] = useState(false);
 	const [allowlist, setAllowlist] = useState<string[]>([]);
 	const [newEntry, setNewEntry] = useState("");
 
@@ -57,6 +58,7 @@ export const Crowdsec = () => {
 	useEffect(() => {
 		if (!data || prefilled.current) return;
 		setEnabled(data.enabled);
+		setEnforce(data.enforce);
 		setAllowlist(data.allowlist ?? []);
 		prefilled.current = true;
 	}, [data]);
@@ -80,9 +82,8 @@ export const Crowdsec = () => {
 		try {
 			await saveCrowdsec({
 				enabled,
-				// Enforcement (blocking) ships in a later phase — keep whatever is
-				// persisted; detection-only for now.
-				enforce: data?.enforce ?? false,
+				// Only enforce when enabled; blocking applies on the load balancer.
+				enforce: enabled && enforce,
 				allowlist,
 			});
 			toast.success("CrowdSec settings saved");
@@ -129,13 +130,22 @@ export const Crowdsec = () => {
 				</div>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-6">
-				<AlertBlock type="info">
-					Detection-only: CrowdSec collects decisions (bans) but <b>nothing is
-					blocked yet</b>. Enforcement (the Traefik bouncer, global or per
-					app/service) ships in a later phase. The WireGuard subnet{" "}
-					<code>{WG_OVERLAY_CIDR}</code> is always allowlisted so the cluster can
-					never lock itself out.
-				</AlertBlock>
+				{enforce ? (
+					<AlertBlock type="warning">
+						Enforcing: the CrowdSec bouncer <b>blocks banned IPs on the load
+						balancer</b> (app traffic, stream mode). Make sure your admin IP is
+						in the allowlist below — the WireGuard subnet{" "}
+						<code>{WG_OVERLAY_CIDR}</code> and the allowlist always bypass the
+						bouncer, so the cluster can never lock itself out.
+					</AlertBlock>
+				) : (
+					<AlertBlock type="info">
+						Detection-only: CrowdSec collects decisions (bans) but <b>nothing is
+						blocked</b>. Turn on <b>Enforce</b> to block banned IPs on the load
+						balancer. The WireGuard subnet <code>{WG_OVERLAY_CIDR}</code> and the
+						allowlist always bypass the bouncer.
+					</AlertBlock>
+				)}
 
 				{/* Enable + status */}
 				<div className="flex flex-row items-center justify-between rounded-lg border p-4">
@@ -162,6 +172,22 @@ export const Crowdsec = () => {
 						<span className="text-muted-foreground">image: {status.image}</span>
 					</div>
 				)}
+
+				{/* Enforce */}
+				<div className="flex flex-row items-center justify-between rounded-lg border p-4">
+					<div className="flex flex-col gap-1">
+						<Label className="text-base">Enforce (block on the load balancer)</Label>
+						<span className="text-sm text-muted-foreground">
+							Apply the CrowdSec bouncer globally on the HA pool (app traffic),
+							stream mode. Off = detection-only.
+						</span>
+					</div>
+					<Switch
+						checked={enforce}
+						onCheckedChange={setEnforce}
+						disabled={!enabled}
+					/>
+				</div>
 
 				{/* Allowlist */}
 				<div className="flex flex-col gap-2">

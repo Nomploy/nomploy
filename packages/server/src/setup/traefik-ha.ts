@@ -4,6 +4,7 @@ import path from "node:path";
 import { paths } from "../constants";
 import { encodeBase64 } from "../utils/docker/utils";
 import { execAsync } from "../utils/process/execAsync";
+import { getCrowdsecBouncer } from "./crowdsec";
 import { getOtelConfig } from "./otel-collector";
 import { getTraefikVersion } from "./traefik-setup";
 
@@ -69,6 +70,16 @@ export const generateTraefikHaJob = (opts: {
 		headers: Record<string, string>;
 		insecure: boolean;
 	};
+	/** When set, enforce the CrowdSec bouncer plugin globally on web+websecure
+	 * (stream mode). `trustedIPs` bypass the bouncer (anti-lockout: WG subnet +
+	 * allowlist). Null/omitted → no plugin, no middleware (detection-only). */
+	crowdsec?: {
+		lapiHost: string;
+		lapiKey: string;
+		trustedIPs: string[];
+		pluginModule: string;
+		pluginVersion: string;
+	};
 }): string => {
 	const token = opts.consulToken ?? "";
 	const email = opts.email ?? "admin@localhost";
@@ -76,7 +87,36 @@ export const generateTraefikHaJob = (opts: {
 	// then goes to OTLP gRPC instead of stdout JSON (so it isn't also captured as a
 	// service-log line). Off → keep the stdout JSON access log.
 	const lb = opts.lbLogs;
-	const experimentalBlock = lb ? "experimental:\n  otlpLogs: true\n" : "";
+	const cs = opts.crowdsec;
+	// experimental: merge otlpLogs (LB logs) and the CrowdSec bouncer plugin into
+	// one block — Traefik only accepts a single `experimental:` key.
+	const expLines: string[] = [];
+	if (lb) expLines.push("  otlpLogs: true");
+	if (cs)
+		expLines.push(
+			`  plugins:\n    crowdsec:\n      moduleName: ${JSON.stringify(
+				cs.pluginModule,
+			)}\n      version: ${JSON.stringify(cs.pluginVersion)}`,
+		);
+	const experimentalBlock =
+		expLines.length > 0 ? `experimental:\n${expLines.join("\n")}\n` : "";
+	// Attach the bouncer globally on web+websecure when enforcing.
+	const entrypointMw = cs
+		? "\n    http:\n      middlewares:\n        - crowdsec@file"
+		: "";
+	// The bouncer middleware definition (file provider) — appended to dynamic.yml.
+	const crowdsecMiddleware = cs
+		? `\n    crowdsec:
+      plugin:
+        crowdsec:
+          enabled: true
+          crowdsecMode: stream
+          crowdsecLapiScheme: http
+          crowdsecLapiHost: ${JSON.stringify(cs.lapiHost)}
+          crowdsecLapiKey: ${JSON.stringify(cs.lapiKey)}
+          clientTrustedIPs:
+${cs.trustedIPs.map((ip) => `            - ${JSON.stringify(ip)}`).join("\n")}`
+		: "";
 	const accessLogBlock = lb
 		? `accessLog:
   otlp:
@@ -94,6 +134,16 @@ ${Object.entries(lb.headers)
   constraint {
     attribute = "\${meta.nomploy_lb}"
     value     = "true"
+  }
+
+  # Roll one LB node at a time with a brief stagger. System jobs don't create
+  # deployments, so auto_revert/health-gating don't apply — this just limits the
+  # blast radius of a bad config (e.g. a CrowdSec plugin that fails to load) to a
+  # single node at a time instead of all LB nodes at once. Recovery is to toggle
+  # enforcement off (the panel runs on the hub Traefik, independent of this pool).
+  update {
+    max_parallel = 1
+    stagger      = "15s"
   }
 
   group "traefik" {
@@ -116,9 +166,9 @@ ${Object.entries(lb.headers)
         data        = <<EOH
 ${experimentalBlock}entryPoints:
   web:
-    address: ":80"
+    address: ":80"${entrypointMw}
   websecure:
-    address: ":443"
+    address: ":443"${entrypointMw}
   metrics:
     address: ":8082"
 metrics:
@@ -167,7 +217,7 @@ http:
     redirect-to-https:
       redirectScheme:
         scheme: https
-        permanent: true
+        permanent: true${crowdsecMiddleware}
 EOH
       }
 
@@ -364,6 +414,7 @@ export const deployTraefikHaSystemJob = async (): Promise<{
 		consulToken: consulToken(),
 		email: resolveAcmeEmail(),
 		lbLogs,
+		crowdsec: getCrowdsecBouncer() ?? undefined,
 	});
 	const encoded = encodeBase64(hcl);
 	const jobFilePath = `/etc/nomploy/jobs/${JOB_NAME}.nomad.hcl`;

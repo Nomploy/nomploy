@@ -22,6 +22,21 @@ const CROWDSEC_IMAGE = "crowdsecurity/crowdsec:v1.6.8";
 const CONTAINER_LOG_DIR = "/logs/traefik";
 const HUB_ACCESS_LOG = "/etc/nomploy/traefik/dynamic/access.log";
 
+// The control-plane (hub) WireGuard IP, where CrowdSec is pinned. The LAPI is
+// published on a static host port here so bouncers cluster-wide (hub + LB nodes)
+// reach it over the mesh. Mirrors HUB_DNS_IP in loadbalancer-dns.ts.
+const CONTROL_PLANE_WG_IP = "10.10.0.1";
+// Host port that publishes the container's LAPI (:8080). NOT :8080 on the host —
+// that's the hub Traefik dashboard. Reachable at CONTROL_PLANE_WG_IP:LAPI_HOST_PORT.
+const LAPI_HOST_PORT = 8083;
+
+// The Traefik CrowdSec bouncer plugin (fetched from plugins.traefik.io by Yaegi
+// at Traefik startup). Pinned; bump deliberately and re-verify Traefik still
+// starts (a bad version fails the plugin load — the pool's auto-revert saves us).
+const CROWDSEC_PLUGIN_MODULE =
+	"github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin";
+const CROWDSEC_PLUGIN_VERSION = "v1.4.7";
+
 /**
  * Persisted CrowdSec settings.
  *
@@ -140,6 +155,42 @@ labels:
 `;
 
 /**
+ * `config.yaml.local` override merged over the image's config.yaml. We only
+ * change the LAPI listen address to 0.0.0.0 so the published host port can reach
+ * it (the default binds loopback, which a bridge port map can't DNAT to). The
+ * local agent in the same container still connects over loopback, unaffected.
+ */
+export const generateCrowdsecLocalConfig = (): string =>
+	`api:
+  server:
+    listen_uri: 0.0.0.0:8080
+`;
+
+/**
+ * Params the Traefik bouncer plugin needs to enforce, or null when enforcement
+ * is off (disabled, `enforce` off, or no bouncer key yet). `trustedIPs` always
+ * includes the WG overlay subnet so the cluster/panel can never be blocked, plus
+ * the operator allowlist. `lapiHost` is the hub's published LAPI.
+ */
+export const getCrowdsecBouncer = (): {
+	lapiHost: string;
+	lapiKey: string;
+	trustedIPs: string[];
+	pluginModule: string;
+	pluginVersion: string;
+} | null => {
+	const cfg = getCrowdsecConfig();
+	if (!cfg.enabled || !cfg.enforce || cfg.bouncerKey === "") return null;
+	return {
+		lapiHost: `${CONTROL_PLANE_WG_IP}:${LAPI_HOST_PORT}`,
+		lapiKey: cfg.bouncerKey,
+		trustedIPs: [WG_OVERLAY_CIDR, ...cfg.allowlist],
+		pluginModule: CROWDSEC_PLUGIN_MODULE,
+		pluginVersion: CROWDSEC_PLUGIN_VERSION,
+	};
+};
+
+/**
  * A Nomad `service` job running CrowdSec (LAPI + agent) pinned to the hub. It
  * binds the hub's dynamic dir read-only to tail access.log, persists its data
  * dir on the hub (sqlite DB + downloaded hub items), and renders the Traefik
@@ -149,8 +200,9 @@ labels:
  */
 export const generateCrowdsecJob = (cfg: CrowdsecConfig): string => {
 	const acquis = generateCrowdsecAcquis();
-	// Pre-register the Traefik bouncer so a later phase can enforce without
-	// re-registering; harmless while no bouncer connects.
+	const localConfig = generateCrowdsecLocalConfig();
+	// Pre-register the Traefik bouncer so the enforcement phase can authenticate
+	// without re-registering; harmless while no bouncer connects.
 	const bouncerEnv = cfg.bouncerKey
 		? `\n        BOUNCER_KEY_traefik = "${cfg.bouncerKey}"`
 		: "";
@@ -176,6 +228,22 @@ export const generateCrowdsecJob = (cfg: CrowdsecConfig): string => {
       delay_function = "constant"
     }
 
+    # Nomad bridge networking (NOT host): the hub Traefik already owns :8080 on
+    # the host (api.insecure dashboard), and CrowdSec's LAPI binds :8080 — host
+    # networking collides and the container crash-loops on bind failure. In
+    # bridge mode LAPI + the local agent talk over the container's localhost. The
+    # LAPI is published on a STATIC host port (8083 -> 8080) so bouncers across
+    # the mesh (hub + LB nodes) can reach it at the hub's WG IP; the DNAT is on
+    # the host, so it's routable even though alloc IPs are not. Bind mounts are
+    # unaffected by the network mode.
+    network {
+      mode = "bridge"
+      port "lapi" {
+        static = ${LAPI_HOST_PORT}
+        to     = 8080
+      }
+    }
+
     task "crowdsec" {
       driver = "docker"
 
@@ -185,15 +253,8 @@ export const generateCrowdsecJob = (cfg: CrowdsecConfig): string => {
       }
 
       config {
-        # Bridge (NOT host) networking: the hub Traefik already owns :8080 on the
-        # host (api.insecure dashboard), and CrowdSec's LAPI defaults to :8080 —
-        # host networking would collide and the container would crash-loop on
-        # bind failure. In bridge mode the LAPI + local agent talk over the
-        # container's own localhost; Phase 1 needs no external access to LAPI (a
-        # later enforcement phase will publish it for cluster-wide bouncers). The
-        # access-log bind mount below is unaffected by the network mode.
-        image        = "${CROWDSEC_IMAGE}"
-        network_mode = "bridge"
+        image = "${CROWDSEC_IMAGE}"
+        ports = ["lapi"]
         volumes = [
           "/etc/nomploy/traefik/dynamic:${CONTAINER_LOG_DIR}:ro",
           "/etc/nomploy/crowdsec/data:/var/lib/crowdsec/data",
@@ -204,6 +265,12 @@ export const generateCrowdsecJob = (cfg: CrowdsecConfig): string => {
           target   = "/etc/crowdsec/acquis.d/traefik.yaml"
           readonly = true
         }
+        mount {
+          type     = "bind"
+          source   = "local/config.yaml.local"
+          target   = "/etc/crowdsec/config.yaml.local"
+          readonly = true
+        }
       }
 
       template {
@@ -211,6 +278,13 @@ export const generateCrowdsecJob = (cfg: CrowdsecConfig): string => {
         change_mode = "restart"
         data        = <<EOH
 ${acquis}EOH
+      }
+
+      template {
+        destination = "local/config.yaml.local"
+        change_mode = "restart"
+        data        = <<EOH
+${localConfig}EOH
       }
 
       resources {

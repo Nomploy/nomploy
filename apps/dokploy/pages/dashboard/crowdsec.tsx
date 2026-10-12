@@ -11,9 +11,9 @@ const CrowdsecDashboard = () => {
 			<div>
 				<h1 className="text-2xl font-semibold tracking-tight">Security</h1>
 				<p className="text-sm text-muted-foreground">
-					CrowdSec detects malicious traffic from the hub Traefik access log and
-					lists the bans it would apply. Detection-only for now — enforcement
-					(global or per app/service) ships in a later phase.
+					CrowdSec detects malicious traffic from the hub Traefik access log.
+					Detection-only by default; turn on Enforce to block banned IPs on the
+					load balancer (the WireGuard subnet and allowlist always bypass it).
 				</p>
 			</div>
 			<Crowdsec />

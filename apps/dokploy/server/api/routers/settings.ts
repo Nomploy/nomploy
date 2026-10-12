@@ -357,20 +357,33 @@ export const settingsRouter = createTRPCRouter({
 		.mutation(async ({ input, ctx }) => {
 			// Preserve the generated bouncer key across saves (not a client input).
 			const prev = getCrowdsecConfig();
+			const nextEnforce = input.enforce ?? false;
 			setCrowdsecConfig({
 				enabled: input.enabled,
-				enforce: input.enforce ?? false,
+				enforce: nextEnforce,
 				bouncerKey: prev.bouncerKey,
 				allowlist: input.allowlist ?? [],
 			});
-			// Deploy/stop the detector in the background so the request returns
-			// immediately (mirrors saveObservability). Tolerate failure (e.g. no
-			// cluster).
+			// Whether the pool Traefik bouncer should be active before vs after. The
+			// key is present after setCrowdsecConfig when enabled (generated on first
+			// enable), so gate on enabled+enforce.
+			const prevActive = prev.enabled && prev.enforce && prev.bouncerKey !== "";
+			const nextActive = input.enabled && nextEnforce;
+			// Deploy/stop the detector + (re)configure the pool bouncer in the
+			// background so the request returns immediately (mirrors
+			// saveObservability). Tolerate failure (e.g. no cluster).
 			void (async () => {
 				if (input.enabled) {
 					await deployCrowdsec();
 				} else {
 					await stopCrowdsec();
+				}
+				// Reconfigure the HA pool Traefik when enforcement turns on, off, or
+				// changes while on (e.g. allowlist edit) — deploy the detector first so
+				// LAPI is up before the bouncer queries it. The pool is a system job
+				// with rolling update + auto-revert, so a bad plugin config self-heals.
+				if (prevActive || nextActive) {
+					await deployTraefikHaSystemJob();
 				}
 			})().catch((err) => {
 				console.error("saveCrowdsec background:", err);
