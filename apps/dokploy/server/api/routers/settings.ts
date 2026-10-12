@@ -61,8 +61,10 @@ import {
 	stopOtelCollector,
 } from "@nomploy/server/setup/otel-collector";
 import {
+	crowdsecUnban,
 	deployCrowdsec,
 	getCrowdsecConfig,
+	getCrowdsecStatus,
 	setCrowdsecConfig,
 	stopCrowdsec,
 } from "@nomploy/server/setup/crowdsec";
@@ -327,6 +329,20 @@ export const settingsRouter = createTRPCRouter({
 		const { bouncerKey, ...rest } = cfg;
 		return { ...rest, hasBouncerKey: bouncerKey !== "" };
 	}),
+	getCrowdsecStatus: adminProcedure.query(() => {
+		return getCrowdsecStatus();
+	}),
+	crowdsecUnban: adminProcedure
+		.input(z.object({ ip: z.string() }))
+		.mutation(async ({ input, ctx }) => {
+			await crowdsecUnban(input.ip);
+			await audit(ctx, {
+				action: "update",
+				resourceType: "settings",
+				resourceName: "crowdsec-unban",
+			});
+			return true;
+		}),
 	saveCrowdsec: adminProcedure
 		.input(
 			z.object({

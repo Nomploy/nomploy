@@ -272,4 +272,150 @@ export const stopCrowdsec = async (): Promise<void> => {
 	await execAsync(`nomad job stop -purge ${JOB_NAME} 2>&1 || true`);
 };
 
+// ─── Status + decisions (for the Security UI) ────────────────────────────────
+
+const NOMAD_LOCAL = process.env.NOMAD_ADDRESS || "http://127.0.0.1:4646";
+const nomadHeaders = (): Record<string, string> => {
+	const t = process.env.NOMAD_TOKEN || "";
+	return t ? { "X-Nomad-Token": t } : {};
+};
+
+// Shell-safety: only ever interpolate a Nomad alloc id / IP into a command after
+// it matches one of these, so a value that reached us can't inject shell.
+const ALLOC_ID_RE = /^[a-f0-9-]{36}$/i;
+
+export type CrowdsecDecision = {
+	id: number | null;
+	value: string; // the banned IP/range
+	scope: string; // "Ip" | "Range" | ...
+	type: string; // "ban" | "captcha" | ...
+	scenario: string;
+	origin: string; // "crowdsec" | "cscli" | "lists:..." | ...
+	duration: string; // e.g. "3h59m"
+};
+
+export type CrowdsecStatus = {
+	deployed: boolean;
+	status: string | null;
+	runningAllocs: number;
+	node: string | null;
+	allocId: string | null;
+	image: string;
+	/** Active decisions from LAPI (null = couldn't read them). */
+	decisions: CrowdsecDecision[] | null;
+	enforce: boolean;
+};
+
+/** Flatten `cscli decisions list -o json` output into a flat decision list. */
+const parseDecisions = (raw: string): CrowdsecDecision[] => {
+	let data: unknown;
+	try {
+		data = JSON.parse(raw);
+	} catch {
+		return [];
+	}
+	if (!Array.isArray(data)) return [];
+	const toDecision = (d: Record<string, unknown>): CrowdsecDecision => ({
+		id: typeof d.id === "number" ? d.id : null,
+		value: typeof d.value === "string" ? d.value : "",
+		scope: typeof d.scope === "string" ? d.scope : "",
+		type: typeof d.type === "string" ? d.type : "",
+		scenario: typeof d.scenario === "string" ? d.scenario : "",
+		origin: typeof d.origin === "string" ? d.origin : "",
+		duration: typeof d.duration === "string" ? d.duration : "",
+	});
+	const out: CrowdsecDecision[] = [];
+	for (const item of data as Record<string, unknown>[]) {
+		// `decisions list` returns alerts, each carrying a `decisions` array; older
+		// shapes return flat decisions — handle both.
+		if (Array.isArray(item?.decisions)) {
+			for (const d of item.decisions as Record<string, unknown>[]) {
+				if (d?.value) out.push(toDecision(d));
+			}
+		} else if (item?.value) {
+			out.push(toDecision(item));
+		}
+	}
+	return out;
+};
+
+/**
+ * Current CrowdSec job status plus the active decisions (read with `cscli
+ * decisions list` inside the running alloc). Best-effort: decisions is null when
+ * the alloc isn't running or the exec fails.
+ */
+export const getCrowdsecStatus = async (): Promise<CrowdsecStatus> => {
+	const cfg = getCrowdsecConfig();
+	const out: CrowdsecStatus = {
+		deployed: false,
+		status: null,
+		runningAllocs: 0,
+		node: null,
+		allocId: null,
+		image: CROWDSEC_IMAGE,
+		decisions: null,
+		enforce: cfg.enforce,
+	};
+	try {
+		const jobRes = await fetch(`${NOMAD_LOCAL}/v1/job/${JOB_NAME}`, {
+			headers: nomadHeaders(),
+		});
+		if (jobRes.ok) {
+			const job = (await jobRes.json()) as { Status?: string; Stop?: boolean };
+			out.deployed = job.Stop !== true;
+			out.status = job.Status ?? null;
+			const allocRes = await fetch(
+				`${NOMAD_LOCAL}/v1/job/${JOB_NAME}/allocations`,
+				{ headers: nomadHeaders() },
+			);
+			if (allocRes.ok) {
+				const allocs = (await allocRes.json()) as {
+					ClientStatus?: string;
+					NodeName?: string;
+					ID?: string;
+				}[];
+				const running = allocs.filter((a) => a.ClientStatus === "running");
+				out.runningAllocs = running.length;
+				if (running[0]) {
+					out.node = running[0].NodeName ?? null;
+					out.allocId = running[0].ID ?? null;
+				}
+			}
+		}
+	} catch {
+		// leave defaults
+	}
+
+	if (out.allocId && ALLOC_ID_RE.test(out.allocId)) {
+		try {
+			const { stdout } = await execAsync(
+				`nomad alloc exec -task crowdsec ${out.allocId} cscli decisions list -o json 2>/dev/null`,
+			);
+			out.decisions = parseDecisions(stdout || "[]");
+		} catch {
+			out.decisions = null;
+		}
+	}
+	return out;
+};
+
+/**
+ * Remove all CrowdSec decisions for an IP (operator "unban"). Validates the IP
+ * before it reaches the shell. Returns the number of decisions deleted (best
+ * effort).
+ */
+export const crowdsecUnban = async (ip: string): Promise<void> => {
+	const value = (ip ?? "").trim();
+	if (!IP_OR_CIDR_RE.test(value)) {
+		throw new Error("invalid IP/range");
+	}
+	const status = await getCrowdsecStatus();
+	if (!status.allocId || !ALLOC_ID_RE.test(status.allocId)) {
+		throw new Error("CrowdSec is not running");
+	}
+	await execAsync(
+		`nomad alloc exec -task crowdsec ${status.allocId} cscli decisions delete --ip ${value} 2>&1`,
+	);
+};
+
 export const CROWDSEC_JOB_NAME = JOB_NAME;

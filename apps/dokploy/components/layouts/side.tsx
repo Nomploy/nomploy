@@ -242,6 +242,15 @@ const MENU: Menu = {
 		},
 		{
 			isSingle: true,
+			title: "Security",
+			url: "/dashboard/crowdsec",
+			icon: ShieldCheck,
+			// Admin-only cluster CrowdSec config; non-cloud only.
+			isEnabled: ({ permissions, isCloud }) =>
+				!!(permissions?.docker.read && !isCloud),
+		},
+		{
+			isSingle: true,
 			title: "Alerts",
 			url: "/dashboard/alerts",
 			icon: Bell,
