@@ -1,8 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { asc, gte, lt } from "drizzle-orm";
 import { parse, stringify } from "yaml";
 import { paths } from "../constants";
+import { db } from "../db";
+import { crowdsecBanSample } from "../db/schema";
 import { encodeBase64 } from "../utils/docker/utils";
 import { execAsync } from "../utils/process/execAsync";
 import { readMainConfig, writeMainConfig } from "../utils/traefik/web-server";
@@ -631,6 +634,66 @@ export const crowdsecUnban = async (ip: string): Promise<void> => {
 	await execAsync(
 		`nomad alloc exec -i=false -t=false -task crowdsec ${allocId} cscli decisions delete ${flag} ${value} 2>&1`,
 	);
+};
+
+// ─── Ban-count history (for the Security chart + active-bans alert) ───────────
+
+const BAN_SAMPLE_RETENTION_DAYS = 7;
+
+export type CrowdsecBanPoint = { ts: number; bans: number };
+
+/**
+ * Sample the current active-ban count once and persist a row. The single
+ * `cscli decisions list` exec that reads the count lives here — the Security
+ * chart and the `crowdsec_active_bans` alert both read from this sampled series
+ * rather than exec-ing again. No-op (returns null) when CrowdSec is disabled or
+ * the count can't be read; prunes rows past the retention window.
+ */
+export const sampleCrowdsecBans = async (): Promise<number | null> => {
+	if (!getCrowdsecConfig().enabled) return null;
+	const status = await getCrowdsecStatus();
+	const bans = status.decisions?.length;
+	if (bans === undefined) return null; // couldn't read — don't record a false 0
+	await db.insert(crowdsecBanSample).values({ activeBans: bans });
+	const cutoff = new Date(Date.now() - BAN_SAMPLE_RETENTION_DAYS * 86400_000);
+	await db.delete(crowdsecBanSample).where(lt(crowdsecBanSample.ts, cutoff));
+	return bans;
+};
+
+/** Active-ban time series over the last `minutes`, oldest first. */
+export const getCrowdsecBanHistory = async (
+	minutes: number,
+): Promise<CrowdsecBanPoint[]> => {
+	const since = new Date(Date.now() - minutes * 60_000);
+	const rows = await db
+		.select()
+		.from(crowdsecBanSample)
+		.where(gte(crowdsecBanSample.ts, since))
+		.orderBy(asc(crowdsecBanSample.ts));
+	return rows.map((r) => ({ ts: r.ts.getTime(), bans: r.activeBans }));
+};
+
+/** The most recent sampled ban count within `minutes`, or null if none. */
+export const getLatestCrowdsecBanCount = async (
+	minutes: number,
+): Promise<number | null> => {
+	const points = await getCrowdsecBanHistory(minutes);
+	return points.length ? (points[points.length - 1]?.bans ?? null) : null;
+};
+
+/** Sample the active-ban count on an interval (control-plane leader only). */
+export const startCrowdsecBanSampler = (
+	intervalSeconds = 60,
+): NodeJS.Timeout => {
+	const tick = async () => {
+		try {
+			await sampleCrowdsecBans();
+		} catch (e) {
+			console.error("crowdsec: ban sampler error:", e);
+		}
+	};
+	void tick();
+	return setInterval(tick, intervalSeconds * 1000);
 };
 
 export const CROWDSEC_JOB_NAME = JOB_NAME;

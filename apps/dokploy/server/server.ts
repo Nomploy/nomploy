@@ -161,14 +161,19 @@ void (async () => {
 					}
 					// Ensure the CrowdSec detector is running when enabled — same
 					// self-heal rationale as the OTel collector above.
-					const { getCrowdsecConfig, deployCrowdsec } = await import(
-						"@nomploy/server/setup/crowdsec"
-					);
+					const {
+						getCrowdsecConfig,
+						deployCrowdsec,
+						startCrowdsecBanSampler,
+					} = await import("@nomploy/server/setup/crowdsec");
 					if (getCrowdsecConfig().enabled) {
 						deployCrowdsec().catch((err) =>
 							console.error("crowdsec boot ensure:", err),
 						);
 					}
+					// Sample the active-ban count into a rolling series for the Security
+					// chart + active-bans alert (the tick itself no-ops when disabled).
+					startCrowdsecBanSampler(60);
 				},
 				{
 					onWait: () =>

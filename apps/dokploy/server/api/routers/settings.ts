@@ -64,6 +64,7 @@ import {
 	crowdsecUnban,
 	deployCrowdsec,
 	ensureHubBouncer,
+	getCrowdsecBanHistory,
 	getCrowdsecConfig,
 	getCrowdsecStatus,
 	setCrowdsecConfig,
@@ -333,6 +334,9 @@ export const settingsRouter = createTRPCRouter({
 	getCrowdsecStatus: adminProcedure.query(() => {
 		return getCrowdsecStatus();
 	}),
+	getCrowdsecBanHistory: adminProcedure
+		.input(z.object({ minutes: z.number().int().min(5).max(10_080).optional() }))
+		.query(({ input }) => getCrowdsecBanHistory(input.minutes ?? 360)),
 	crowdsecUnban: adminProcedure
 		.input(z.object({ ip: z.string() }))
 		.mutation(async ({ input, ctx }) => {

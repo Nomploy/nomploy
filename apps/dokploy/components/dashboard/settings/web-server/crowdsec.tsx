@@ -24,6 +24,7 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { api } from "@/utils/api";
+import { CrowdsecBansChart } from "./crowdsec-bans-chart";
 
 // The WG overlay subnet is always allowlisted server-side (mirror of
 // WG_OVERLAY_CIDR in packages/server/src/setup/crowdsec.ts) — shown read-only so
@@ -238,6 +239,9 @@ export const Crowdsec = () => {
 						Save
 					</Button>
 				</div>
+
+				{/* Bans over time */}
+				{data?.enabled && <CrowdsecBansChart />}
 
 				{/* Decisions */}
 				<div className="flex flex-col gap-2">

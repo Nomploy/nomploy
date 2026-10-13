@@ -13,9 +13,10 @@ import {
 	serviceMetricSample,
 } from "../db/schema";
 import {
+	getCrowdsecBanHistory,
 	getCrowdsecConfig,
 	getCrowdsecJobInfo,
-	getCrowdsecStatus,
+	getLatestCrowdsecBanCount,
 } from "../setup/crowdsec";
 import { getLoadBalancerMetricsHistory } from "../setup/loadbalancer-dns";
 import {
@@ -135,8 +136,8 @@ const computeValue = async (rule: AlertRule): Promise<number | null> => {
 	// off / unreachable) so the rule is skipped rather than fired.
 	if (rule.metric === "crowdsec_active_bans") {
 		if (!getCrowdsecConfig().enabled) return null;
-		const status = await getCrowdsecStatus();
-		return status.decisions?.length ?? null;
+		// Read the sampled series (the sampler owns the single cscli exec).
+		return getLatestCrowdsecBanCount(minutes);
 	}
 	if (rule.metric === "crowdsec_detector_up") {
 		if (!getCrowdsecConfig().enabled) return null;
@@ -215,6 +216,10 @@ export const getMetricHistory = async (
 					? p.reqPerSec
 					: p.latencyMs;
 		return { points: series.map((p) => ({ ts: p.ts, value: pick(p) })), unit };
+	}
+	if (metric === "crowdsec_active_bans") {
+		const series = await getCrowdsecBanHistory(minutes);
+		return { points: series.map((p) => ({ ts: p.ts, value: p.bans })), unit };
 	}
 	if (!target) return { points: [], unit };
 	const since = new Date(Date.now() - minutes * 60_000).toISOString();
