@@ -16,6 +16,21 @@ You can skip a registry entirely when:
 - **You only run pre-built images** (templates like `postgres`, `redis`, or
   `image: ghcr.io/you/app`) — every node pulls from the public source directly.
 
+## One-click self-hosted (zot + S3/R2)
+
+**Settings → Registry → Self-hosted (zot + S3)** provisions an internal
+[zot](https://zotregistry.dev/) OCI registry whose storage is backed by an
+**S3-compatible bucket** (AWS S3, Cloudflare R2, …). Because the blobs live in
+object storage rather than on one node's disk, the registry is stateless and every
+node can pull from it. It's fronted by Traefik with a real TLS cert issued via
+**DNS-01**, so there's **no per-node `insecure-registries` tweak** — the cluster
+trusts it out of the box, and build-from-source apps push here on deploy and run
+cluster-wide.
+
+You provide an S3/R2 bucket + credentials and a hostname (with a DNS provider
+configured for DNS-01); nomploy provisions zot, wires the cert, and registers it so
+builds use it automatically.
+
 ## Run a registry (zot) via the pack
 
 The quickest internal option is the **zot** pack from

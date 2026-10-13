@@ -16,8 +16,11 @@ the topic you need.
 | **[Deploying](deploying.md)** | Compose → Nomad HCL, native Nomad job files, and Nomad Pack. |
 | **[Autoscaling](autoscaling.md)** | Horizontal autoscaling for applications and compose services. |
 | **[Load Balancer](load-balancer.md)** | HA Traefik pool, DNS health-prune, shared certs, metrics & logs tabs. |
+| **[Telemetry](telemetry.md)** | Built-in OpenTelemetry Collector → any OTLP backend (SigNoz, Grafana, Datadog); service auto-discovery and signal toggles. |
+| **[Monitoring & Alerts](alerts.md)** | Metric alert rules (LB, service, and security/observability health) → cluster-alert notifications, with silences. |
 | **[Security](security.md)** | Built-in CrowdSec: detect malicious traffic and block offending IPs at the ingress (detection vs enforce, anti-lockout). |
-| **[Container registry](registry.md)** | Run your own OCI registry + Add Registry; credentials distributed cluster-wide. |
+| **[Container registry](registry.md)** | One-click self-hosted zot+S3/R2, or run your own + Add Registry; credentials distributed cluster-wide. |
+| **[Overview](overview.md)** | Org-wide dashboard aggregating services, domains, backups and deployments across every project. |
 | **[GPU workloads](gpu.md)** | Requesting NVIDIA GPUs for a job. |
 
 ## Quick reference
