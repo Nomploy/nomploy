@@ -1946,12 +1946,19 @@ fi`;
 				allocId: z.string(),
 				taskName: z.string(),
 				logType: z.enum(["stdout", "stderr"]).default("stdout"),
+				// Tail the last N bytes instead of streaming the whole file — a large
+				// log otherwise returns megabytes and the viewer stalls. Overridable
+				// (e.g. "load more"); capped so a huge request can't hang the panel.
+				tailBytes: z.number().int().min(1000).max(5_000_000).optional(),
 			}),
 		)
 		.query(async ({ input, ctx }) => {
 			const cfg = await resolveNomad(ctx, input.serverId);
+			const offset = input.tailBytes ?? 200_000;
 			const res = await nomadClient(cfg).request(
-				`/client/fs/logs/${input.allocId}?task=${input.taskName}&type=${input.logType}&plain=true`,
+				`/client/fs/logs/${input.allocId}?task=${encodeURIComponent(
+					input.taskName,
+				)}&type=${input.logType}&plain=true&origin=end&offset=${offset}`,
 			);
 			if (!res.ok) return "";
 			return res.text();
