@@ -429,24 +429,56 @@ export const runAlertEvaluations = async (): Promise<void> => {
 
 			const value = await computeValue(rule);
 			if (value === null) continue;
-			const violates =
+			const now = new Date();
+			const rawViolates =
 				rule.comparator === "gt"
 					? value > rule.threshold
 					: value < rule.threshold;
+
+			// Debounce instantaneous (no-window) metrics: a raw breach must hold for
+			// the full `forMinutes` before it fires, so a transient dip (e.g. a
+			// collector/detector restart during a panel roll) doesn't flap the alert.
+			// Windowed metrics (lb_/service_) already average over the window in
+			// computeValue, so they fire on the raw comparison as before.
+			const windowed =
+				rule.metric.startsWith("lb_") || rule.metric.startsWith("service_");
+			let violates = rawViolates;
+			// `undefined` = leave pendingSince untouched; Date/null = write it.
+			let pendingUpdate: Date | null | undefined;
+			if (!windowed) {
+				if (rawViolates && rule.state !== "firing") {
+					const since = rule.pendingSince ?? now;
+					if (!rule.pendingSince) pendingUpdate = now; // start the timer
+					violates =
+						now.getTime() - since.getTime() >= rule.forMinutes * 60_000;
+				} else if (!rawViolates && rule.pendingSince) {
+					pendingUpdate = null; // breach cleared before holding — reset
+				}
+			}
+
 			const nextState = violates ? "firing" : "ok";
 			// Always record the latest value; only act on a transition.
 			if (nextState === rule.state) {
 				await db
 					.update(alertRule)
-					.set({ lastValue: value })
+					.set({
+						lastValue: value,
+						...(pendingUpdate !== undefined
+							? { pendingSince: pendingUpdate }
+							: {}),
+					})
 					.where(eq(alertRule.alertRuleId, rule.alertRuleId));
 				continue;
 			}
 
-			const now = new Date();
 			await db
 				.update(alertRule)
-				.set({ state: nextState, lastValue: value, lastStateChangeAt: now })
+				.set({
+					state: nextState,
+					lastValue: value,
+					lastStateChangeAt: now,
+					pendingSince: null, // clear the debounce timer on any transition
+				})
 				.where(eq(alertRule.alertRuleId, rule.alertRuleId));
 			await emitAlertTransition(
 				rule,

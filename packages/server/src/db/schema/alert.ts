@@ -70,6 +70,11 @@ export const alertRule = pgTable("alert_rule", {
 	seriesState: jsonb("seriesState").$type<Record<string, "firing" | "ok">>(),
 	lastValue: doublePrecision("lastValue"),
 	lastStateChangeAt: timestamp("lastStateChangeAt"),
+	// Debounce for instantaneous (no-window) metrics: when set, the breach began
+	// at this time and the rule won't fire until it has held for `forMinutes`.
+	// Cleared when the breach clears or on a state transition. Unused for windowed
+	// (lb_/service_) metrics, which average over the window in computeValue.
+	pendingSince: timestamp("pendingSince"),
 	createdAt: timestamp("createdAt").notNull().defaultNow(),
 });
 
