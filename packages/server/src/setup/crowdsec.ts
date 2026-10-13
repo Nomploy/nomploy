@@ -32,7 +32,9 @@ const LAPI_HOST_PORT = 8083;
 
 // The Traefik CrowdSec bouncer plugin (fetched from plugins.traefik.io by Yaegi
 // at Traefik startup). Pinned; bump deliberately and re-verify Traefik still
-// starts (a bad version fails the plugin load — the pool's auto-revert saves us).
+// starts — a bad version fails the plugin load, and the pool is a Nomad system
+// job with NO auto_revert, so recovery is toggling enforcement off (the panel
+// runs on the independent hub Traefik).
 const CROWDSEC_PLUGIN_MODULE =
 	"github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin";
 const CROWDSEC_PLUGIN_VERSION = "v1.4.7";
@@ -40,11 +42,10 @@ const CROWDSEC_PLUGIN_VERSION = "v1.4.7";
 /**
  * Persisted CrowdSec settings.
  *
- * Phase 1 only uses `enabled` (run the detector on the hub) — `enforce`,
- * `bouncerKey` and `allowlist` are persisted now so a later phase can turn on
- * the Traefik bouncer middleware (globally or per app/service) without a
- * migration. `bouncerKey` is generated on first enable and pre-registered with
- * LAPI (`BOUNCER_KEY_traefik`) so the bouncer can authenticate when we wire it.
+ * `enabled` runs the detector on the hub; `enforce` turns on the Traefik bouncer
+ * (globally on the pool + hub) that blocks banned IPs. `bouncerKey` is generated
+ * on first enable and registered with LAPI (`BOUNCER_KEY_traefik`) so the bouncer
+ * authenticates; `allowlist` IPs/CIDRs always bypass the bouncer (anti-lockout).
  */
 export type CrowdsecConfig = {
 	/** Run CrowdSec (LAPI + agent) on the hub, parsing the hub access log. */
@@ -193,10 +194,10 @@ export const getCrowdsecBouncer = (): {
 /**
  * A Nomad `service` job running CrowdSec (LAPI + agent) pinned to the hub. It
  * binds the hub's dynamic dir read-only to tail access.log, persists its data
- * dir on the hub (sqlite DB + downloaded hub items), and renders the Traefik
- * acquisition into the container. Detection-only: no bouncer consumes its
- * decisions yet. Pinned to the control plane because the log it reads is the
- * hub's local file; the data volume therefore always lands on the same node.
+ * dir on the hub (sqlite DB + downloaded hub items), publishes LAPI on a static
+ * host port, and renders the Traefik acquisition into the container. Pinned to
+ * the control plane because the log it reads is the hub's local file; the data
+ * volume therefore always lands on the same node.
  */
 export const generateCrowdsecJob = (cfg: CrowdsecConfig): string => {
 	const acquis = generateCrowdsecAcquis();
@@ -347,7 +348,11 @@ export const ensureHubBouncer = async (): Promise<void> => {
 	} catch {}
 	mw.http = mw.http ?? {};
 	mw.http.middlewares = mw.http.middlewares ?? {};
-	let changed = false;
+	// Track static (traefik.yml) vs dynamic (middlewares.yml) changes separately:
+	// the file provider hot-reloads middlewares.yml, so only a static change needs
+	// a Traefik recreate. An allowlist-only edit touches just the middleware def.
+	let staticChanged = false;
+	let mwChanged = false;
 
 	if (bouncer) {
 		main.experimental = main.experimental ?? {};
@@ -361,7 +366,7 @@ export const ensureHubBouncer = async (): Promise<void> => {
 			JSON.stringify(desired)
 		) {
 			main.experimental.plugins.crowdsec = desired;
-			changed = true;
+			staticChanged = true;
 		}
 		main.entryPoints = main.entryPoints ?? {};
 		for (const ep of ["web", "websecure"]) {
@@ -370,7 +375,7 @@ export const ensureHubBouncer = async (): Promise<void> => {
 			const cur: string[] = main.entryPoints[ep].http.middlewares ?? [];
 			if (!cur.includes("crowdsec@file")) {
 				main.entryPoints[ep].http.middlewares = [...cur, "crowdsec@file"];
-				changed = true;
+				staticChanged = true;
 			}
 		}
 		const desiredMw = {
@@ -389,7 +394,7 @@ export const ensureHubBouncer = async (): Promise<void> => {
 			JSON.stringify(mw.http.middlewares.crowdsec) !== JSON.stringify(desiredMw)
 		) {
 			mw.http.middlewares.crowdsec = desiredMw;
-			changed = true;
+			mwChanged = true;
 		}
 	} else {
 		if (main.experimental?.plugins?.crowdsec) {
@@ -398,7 +403,7 @@ export const ensureHubBouncer = async (): Promise<void> => {
 				delete main.experimental.plugins;
 			if (Object.keys(main.experimental).length === 0)
 				delete main.experimental;
-			changed = true;
+			staticChanged = true;
 		}
 		for (const ep of ["web", "websecure"]) {
 			const cur: string[] | undefined = main.entryPoints?.[ep]?.http?.middlewares;
@@ -406,22 +411,27 @@ export const ensureHubBouncer = async (): Promise<void> => {
 				const next = cur.filter((m) => m !== "crowdsec@file");
 				if (next.length > 0) main.entryPoints[ep].http.middlewares = next;
 				else delete main.entryPoints[ep].http.middlewares;
-				changed = true;
+				staticChanged = true;
 			}
 		}
 		if (mw.http.middlewares.crowdsec) {
 			delete mw.http.middlewares.crowdsec;
-			changed = true;
+			mwChanged = true;
 		}
 	}
 
-	if (!changed) return;
-	writeMainConfig(stringify(main));
-	mkdirSync(path.dirname(dynPath), { recursive: true });
-	writeFileSync(dynPath, stringify(mw), "utf8");
-	// Recreate the standalone hub Traefik so the static-config change (plugin +
-	// entrypoint middleware) takes effect. skipPull keeps the ingress blip short.
-	await initializeStandaloneTraefik({ skipPull: true });
+	if (!staticChanged && !mwChanged) return;
+	if (mwChanged) {
+		mkdirSync(path.dirname(dynPath), { recursive: true });
+		writeFileSync(dynPath, stringify(mw), "utf8");
+	}
+	// Only a static-config change (plugin decl + entrypoint middleware) needs a
+	// Traefik recreate; a middlewares.yml-only change (e.g. allowlist edit) is
+	// hot-reloaded by the file provider, so skip the ingress blip for those.
+	if (staticChanged) {
+		writeMainConfig(stringify(main));
+		await initializeStandaloneTraefik({ skipPull: true });
+	}
 };
 
 /**
@@ -522,22 +532,26 @@ const parseDecisions = (raw: string): CrowdsecDecision[] => {
 	return out;
 };
 
+type CrowdsecJobInfo = {
+	deployed: boolean;
+	status: string | null;
+	runningAllocs: number;
+	node: string | null;
+	allocId: string | null;
+};
+
 /**
- * Current CrowdSec job status plus the active decisions (read with `cscli
- * decisions list` inside the running alloc). Best-effort: decisions is null when
- * the alloc isn't running or the exec fails.
+ * Nomad job + running-alloc info for the CrowdSec job (no cscli exec). Shared by
+ * getCrowdsecStatus and crowdsecUnban so unban doesn't pay for a decisions list
+ * it doesn't need. Best-effort: all-null/zero when Nomad is unreachable.
  */
-export const getCrowdsecStatus = async (): Promise<CrowdsecStatus> => {
-	const cfg = getCrowdsecConfig();
-	const out: CrowdsecStatus = {
+const getCrowdsecJobInfo = async (): Promise<CrowdsecJobInfo> => {
+	const info: CrowdsecJobInfo = {
 		deployed: false,
 		status: null,
 		runningAllocs: 0,
 		node: null,
 		allocId: null,
-		image: CROWDSEC_IMAGE,
-		decisions: null,
-		enforce: cfg.enforce,
 	};
 	try {
 		const jobRes = await fetch(`${NOMAD_LOCAL}/v1/job/${JOB_NAME}`, {
@@ -545,8 +559,8 @@ export const getCrowdsecStatus = async (): Promise<CrowdsecStatus> => {
 		});
 		if (jobRes.ok) {
 			const job = (await jobRes.json()) as { Status?: string; Stop?: boolean };
-			out.deployed = job.Stop !== true;
-			out.status = job.Status ?? null;
+			info.deployed = job.Stop !== true;
+			info.status = job.Status ?? null;
 			const allocRes = await fetch(
 				`${NOMAD_LOCAL}/v1/job/${JOB_NAME}/allocations`,
 				{ headers: nomadHeaders() },
@@ -558,17 +572,33 @@ export const getCrowdsecStatus = async (): Promise<CrowdsecStatus> => {
 					ID?: string;
 				}[];
 				const running = allocs.filter((a) => a.ClientStatus === "running");
-				out.runningAllocs = running.length;
+				info.runningAllocs = running.length;
 				if (running[0]) {
-					out.node = running[0].NodeName ?? null;
-					out.allocId = running[0].ID ?? null;
+					info.node = running[0].NodeName ?? null;
+					info.allocId = running[0].ID ?? null;
 				}
 			}
 		}
 	} catch {
 		// leave defaults
 	}
+	return info;
+};
 
+/**
+ * Current CrowdSec job status plus the active decisions (read with `cscli
+ * decisions list` inside the running alloc). Best-effort: decisions is null when
+ * the alloc isn't running or the exec fails.
+ */
+export const getCrowdsecStatus = async (): Promise<CrowdsecStatus> => {
+	const cfg = getCrowdsecConfig();
+	const info = await getCrowdsecJobInfo();
+	const out: CrowdsecStatus = {
+		...info,
+		image: CROWDSEC_IMAGE,
+		decisions: null,
+		enforce: cfg.enforce,
+	};
 	if (out.allocId && ALLOC_ID_RE.test(out.allocId)) {
 		try {
 			const { stdout } = await execAsync(
@@ -583,21 +613,22 @@ export const getCrowdsecStatus = async (): Promise<CrowdsecStatus> => {
 };
 
 /**
- * Remove all CrowdSec decisions for an IP (operator "unban"). Validates the IP
- * before it reaches the shell. Returns the number of decisions deleted (best
- * effort).
+ * Remove all CrowdSec decisions for an IP or range (operator "unban"). Validates
+ * the value before it reaches the shell, and picks `--range` for a CIDR vs `--ip`
+ * for a bare address (range-scoped decisions reject `--ip`).
  */
 export const crowdsecUnban = async (ip: string): Promise<void> => {
 	const value = (ip ?? "").trim();
 	if (!IP_OR_CIDR_RE.test(value)) {
 		throw new Error("invalid IP/range");
 	}
-	const status = await getCrowdsecStatus();
-	if (!status.allocId || !ALLOC_ID_RE.test(status.allocId)) {
+	const { allocId } = await getCrowdsecJobInfo();
+	if (!allocId || !ALLOC_ID_RE.test(allocId)) {
 		throw new Error("CrowdSec is not running");
 	}
+	const flag = value.includes("/") ? "--range" : "--ip";
 	await execAsync(
-		`nomad alloc exec -i=false -t=false -task crowdsec ${status.allocId} cscli decisions delete --ip ${value} 2>&1`,
+		`nomad alloc exec -i=false -t=false -task crowdsec ${allocId} cscli decisions delete ${flag} ${value} 2>&1`,
 	);
 };
 
