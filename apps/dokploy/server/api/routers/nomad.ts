@@ -192,6 +192,32 @@ const withNs = (path: string, namespace: string) => {
 // (which skips these keys) and the config-file handlers key off this prefix.
 const CONFIG_FILE_PREFIX = "nmplcfg_";
 
+// Parse the runtime-secrets editor text into KEY=VALUE items for the Nomad
+// Variable (the values the template injects). Mirrors the editor's own parse:
+// skip blank / `#` comment lines, split on the first `=`, keep the rest as the
+// value. Order and comments are NOT preserved here — that's what the raw-text
+// DB column is for (display); this map is only what gets injected as env.
+const parseSecretItems = (text: string): Record<string, string> => {
+	const items: Record<string, string> = {};
+	for (const raw of text.split("\n")) {
+		const line = raw.trim();
+		if (!line || line.startsWith("#")) continue;
+		const eq = line.indexOf("=");
+		if (eq === -1) continue;
+		const key = line.slice(0, eq).trim();
+		if (key) items[key] = line.slice(eq + 1);
+	}
+	return items;
+};
+
+// Reconstruct editor text from a variable's items — the legacy fallback for a
+// service whose secrets predate the raw-text column (alphabetical, no comments).
+const serializeSecretItems = (items: Record<string, string>): string =>
+	Object.entries(items)
+		.filter(([k]) => !k.startsWith(CONFIG_FILE_PREFIX))
+		.map(([k, v]) => `${k}=${v}`)
+		.join("\n");
+
 type NomadHttpClient = ReturnType<typeof nomadClient>;
 
 // Read a Nomad Variable's Items map (empty when the variable doesn't exist yet).
@@ -2269,15 +2295,21 @@ fi`;
 				envVars: ["read"],
 			});
 			const application = await findApplicationById(input.applicationId);
+			// The raw-text column is the source of truth for display (preserves the
+			// author's order + comments). Only fall back to reading the variable for
+			// a service whose secrets predate this column.
+			if (application.nomadSecretsText !== null) {
+				return {
+					raw: application.nomadSecretsText,
+					enabled: application.nomadSecretsEnabled,
+				};
+			}
 			const cfg = await resolveNomad(ctx, application.serverId ?? undefined);
 			const res = await nomadClient(cfg).request(
 				withNs(`/var/nomad/jobs/${application.appName}`, cfg.namespace),
 			);
 			if (res.status === 404) {
-				return {
-					items: {} as Record<string, string>,
-					enabled: application.nomadSecretsEnabled,
-				};
+				return { raw: "", enabled: application.nomadSecretsEnabled };
 			}
 			if (!res.ok) {
 				throw new TRPCError({
@@ -2288,13 +2320,8 @@ fi`;
 			const v = (await res.json()) as { Items?: Record<string, string> };
 			// Config-file content shares this variable under nmplcfg_* keys (see
 			// setAppConfigFiles) — never surface those as env secrets.
-			const items = Object.fromEntries(
-				Object.entries(v.Items ?? {}).filter(
-					([k]) => !k.startsWith(CONFIG_FILE_PREFIX),
-				),
-			);
 			return {
-				items,
+				raw: serializeSecretItems(v.Items ?? {}),
 				enabled: application.nomadSecretsEnabled,
 			};
 		}),
@@ -2306,7 +2333,7 @@ fi`;
 		.input(
 			z.object({
 				applicationId: z.string(),
-				items: z.record(z.string(), z.string()),
+				raw: z.string(),
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
@@ -2317,7 +2344,8 @@ fi`;
 			const cfg = await resolveNomad(ctx, application.serverId ?? undefined);
 			const client = nomadClient(cfg);
 			const path = `/var/nomad/jobs/${application.appName}`;
-			const keys = Object.keys(input.items);
+			const items = parseSecretItems(input.raw);
+			const keys = Object.keys(items);
 
 			// Read-modify-write: the same variable also holds config-file content
 			// (nmplcfg_* keys, see setAppConfigFiles). Replace only the secret keys
@@ -2329,7 +2357,7 @@ fi`;
 					k.startsWith(CONFIG_FILE_PREFIX),
 				),
 			);
-			const merged = { ...preserved, ...input.items };
+			const merged = { ...preserved, ...items };
 
 			await writeOrDeleteVariable(
 				client,
@@ -2340,6 +2368,8 @@ fi`;
 			);
 			await updateApplication(input.applicationId, {
 				nomadSecretsEnabled: keys.length > 0,
+				// Keep the author's exact text for display; null it out when empty.
+				nomadSecretsText: input.raw.trim() ? input.raw : null,
 			});
 
 			await audit(ctx, {
@@ -2448,15 +2478,18 @@ fi`;
 				envVars: ["read"],
 			});
 			const compose = await findComposeById(input.composeId);
+			if (compose.nomadSecretsText !== null) {
+				return {
+					raw: compose.nomadSecretsText,
+					enabled: compose.nomadSecretsEnabled,
+				};
+			}
 			const cfg = await resolveNomad(ctx, compose.serverId ?? undefined);
 			const res = await nomadClient(cfg).request(
 				withNs(`/var/nomad/jobs/${compose.appName}`, cfg.namespace),
 			);
 			if (res.status === 404) {
-				return {
-					items: {} as Record<string, string>,
-					enabled: compose.nomadSecretsEnabled,
-				};
+				return { raw: "", enabled: compose.nomadSecretsEnabled };
 			}
 			if (!res.ok) {
 				throw new TRPCError({
@@ -2465,19 +2498,17 @@ fi`;
 				});
 			}
 			const v = (await res.json()) as { Items?: Record<string, string> };
-			const items = Object.fromEntries(
-				Object.entries(v.Items ?? {}).filter(
-					([k]) => !k.startsWith(CONFIG_FILE_PREFIX),
-				),
-			);
-			return { items, enabled: compose.nomadSecretsEnabled };
+			return {
+				raw: serializeSecretItems(v.Items ?? {}),
+				enabled: compose.nomadSecretsEnabled,
+			};
 		}),
 
 	setComposeSecrets: protectedProcedure
 		.input(
 			z.object({
 				composeId: z.string(),
-				items: z.record(z.string(), z.string()),
+				raw: z.string(),
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
@@ -2488,14 +2519,15 @@ fi`;
 			const cfg = await resolveNomad(ctx, compose.serverId ?? undefined);
 			const client = nomadClient(cfg);
 			const path = `/var/nomad/jobs/${compose.appName}`;
-			const keys = Object.keys(input.items);
+			const items = parseSecretItems(input.raw);
+			const keys = Object.keys(items);
 			const existing = await readVariableItems(client, path, cfg.namespace);
 			const preserved = Object.fromEntries(
 				Object.entries(existing).filter(([k]) =>
 					k.startsWith(CONFIG_FILE_PREFIX),
 				),
 			);
-			const merged = { ...preserved, ...input.items };
+			const merged = { ...preserved, ...items };
 			await writeOrDeleteVariable(
 				client,
 				path,
@@ -2505,6 +2537,7 @@ fi`;
 			);
 			await updateCompose(input.composeId, {
 				nomadSecretsEnabled: keys.length > 0,
+				nomadSecretsText: input.raw.trim() ? input.raw : null,
 			});
 			await audit(ctx, {
 				action: "update",

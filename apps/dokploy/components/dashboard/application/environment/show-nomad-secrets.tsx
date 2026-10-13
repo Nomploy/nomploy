@@ -15,24 +15,9 @@ type Schema = z.infer<typeof schema>;
 
 // Runtime secrets live in a Nomad Variable (nomad/jobs/<appName>), injected into
 // the container as env via a template block — the values never appear in the job
-// spec. One KEY=VALUE per line, same editor as the env card.
-const parseSecrets = (text: string): Record<string, string> => {
-	const items: Record<string, string> = {};
-	for (const raw of text.split("\n")) {
-		const line = raw.trim();
-		if (!line || line.startsWith("#")) continue;
-		const eq = line.indexOf("=");
-		if (eq === -1) continue;
-		const key = line.slice(0, eq).trim();
-		if (key) items[key] = line.slice(eq + 1);
-	}
-	return items;
-};
-
-const serializeSecrets = (items: Record<string, string>): string =>
-	Object.entries(items)
-		.map(([k, v]) => `${k}=${v}`)
-		.join("\n");
+// spec. One KEY=VALUE per line, same editor as the env card. The server keeps the
+// raw editor text verbatim (order + comments preserved); it parses it into the
+// variable's individual keys only for injection.
 
 // Works for an application OR a compose (compose-wide secrets). Exactly one id
 // is passed; the matching Nomad-Variable API is used.
@@ -65,25 +50,24 @@ export const ShowNomadSecrets = ({ applicationId, composeId }: Props) => {
 	});
 
 	const current = form.watch("secrets");
-	const loaded = data ? serializeSecrets(data.items) : "";
+	const loaded = data?.raw ?? "";
 	const hasChanges = current !== loaded;
 
 	useEffect(() => {
-		if (data) form.reset({ secrets: serializeSecrets(data.items) });
+		if (data) form.reset({ secrets: data.raw });
 	}, [data, form]);
 
 	const onSubmit = async (formData: Schema) => {
-		const items = parseSecrets(formData.secrets);
 		const wasEnabled = data?.enabled ?? false;
 		try {
 			const res = isCompose
 				? await composeMut.mutateAsync({
 						composeId: composeId as string,
-						items,
+						raw: formData.secrets,
 					})
 				: await appMut.mutateAsync({
 						applicationId: applicationId as string,
-						items,
+						raw: formData.secrets,
 					});
 			await refetch();
 			// The template that reads the variable is only added to the job on
@@ -127,7 +111,7 @@ export const ShowNomadSecrets = ({ applicationId, composeId }: Props) => {
 						}
 						placeholder={["DB_PASSWORD=s3cr3t", "API_KEY=xyz"].join("\n")}
 					/>
-					{data && !data.enabled && Object.keys(data.items).length === 0 && (
+					{data && !data.enabled && !data.raw.trim() && (
 						<AlertBlock type="info">
 							The first time you add secrets you must redeploy to activate them.
 							After that, changes roll the task automatically.

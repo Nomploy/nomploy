@@ -183,6 +183,12 @@ export const applications = pgTable("application", {
 	// This flag gates emitting that template — opt-in per app so a cluster without
 	// workload-identity variable access can't break every deploy at once.
 	nomadSecretsEnabled: boolean("nomadSecretsEnabled").notNull().default(false),
+	// Raw editor text of the runtime secrets (KEY=VALUE lines, comments, blanks,
+	// in the author's order). The injected values still live in the Nomad Variable
+	// nomad/jobs/<appName> as individual keys (Go sorts those alphabetically on
+	// read, and drops comments), so this column is the source of truth for DISPLAY
+	// — it keeps the editor faithful across saves. Null = never set via this path.
+	nomadSecretsText: text("nomadSecretsText"),
 	// Config files mounted into the container from a Nomad Variable. Each file's
 	// CONTENT lives in the Variable nomad/jobs/<appName> under its `varKey` (never
 	// in the job HCL); only the mount metadata (target path + varKey) is stored

@@ -144,6 +144,7 @@ const baseApp: ApplicationNested = {
 	metricsPort: null,
 	metricsAuthProfile: null,
 	nomadSecretsEnabled: false,
+	nomadSecretsText: null,
 	updateMaxParallel: 1,
 	canaryCount: 0,
 	autoPromote: false,

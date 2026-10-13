@@ -96,6 +96,10 @@ export const compose = pgTable("compose", {
 	// configFiles holds only the mount metadata. See getComposeSecrets /
 	// getComposeConfigFiles and the injection in generateNomadJob (compose path).
 	nomadSecretsEnabled: boolean("nomadSecretsEnabled").notNull().default(false),
+	// Raw editor text of the runtime secrets (order + comments preserved for
+	// display). Injected values live in the Nomad Variable; see the matching
+	// field on `applications` for why this column exists.
+	nomadSecretsText: text("nomadSecretsText"),
 	configFiles: jsonb("configFiles")
 		.$type<{ mountPath: string; varKey: string }[]>()
 		.notNull()
