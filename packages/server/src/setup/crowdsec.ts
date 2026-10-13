@@ -542,10 +542,11 @@ type CrowdsecJobInfo = {
 
 /**
  * Nomad job + running-alloc info for the CrowdSec job (no cscli exec). Shared by
- * getCrowdsecStatus and crowdsecUnban so unban doesn't pay for a decisions list
- * it doesn't need. Best-effort: all-null/zero when Nomad is unreachable.
+ * getCrowdsecStatus, crowdsecUnban (so unban doesn't pay for a decisions list)
+ * and the alert engine (detector-up check). Best-effort: all-null/zero when Nomad
+ * is unreachable.
  */
-const getCrowdsecJobInfo = async (): Promise<CrowdsecJobInfo> => {
+export const getCrowdsecJobInfo = async (): Promise<CrowdsecJobInfo> => {
 	const info: CrowdsecJobInfo = {
 		deployed: false,
 		status: null,

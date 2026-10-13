@@ -678,6 +678,52 @@ const getReadyNodeWgIps = async (): Promise<string[]> => {
 };
 
 /**
+ * Health of the per-node log agent for the alert engine. The agent is a `system`
+ * job (one alloc per ready node), so health = running allocs / ready nodes:
+ * 1.0 = every node has it, <1 = some node's agent is down, 0 = none running.
+ * Returns null (metric skipped) when log shipping is off or Nomad is unreachable
+ * / reports no ready nodes — "off" is not "down".
+ */
+export const getLogAgentHealth = async (): Promise<number | null> => {
+	const cfg = getOtelConfig();
+	if (!cfg.enabled || !cfg.shipServiceLogs) return null;
+	try {
+		const expected = (await getReadyNodeWgIps()).length;
+		if (expected === 0) return null;
+		const res = await fetch(
+			`${NOMAD_LOCAL}/v1/job/${LOG_AGENT_JOB}/allocations`,
+			{ headers: nomadHeaders() },
+		);
+		if (!res.ok) return null;
+		const allocs = (await res.json()) as { ClientStatus?: string }[];
+		const running = allocs.filter((a) => a.ClientStatus === "running").length;
+		return Math.min(1, running / expected);
+	} catch {
+		return null;
+	}
+};
+
+/**
+ * Collector up/down for the alert engine — a cheap running-allocs check (no
+ * :8888 telemetry scrape, unlike getObservabilityStatus). 1 = running, 0 =
+ * deployed but nothing running, null (metric skipped) when observability is off
+ * or Nomad is unreachable.
+ */
+export const getOtelCollectorHealth = async (): Promise<number | null> => {
+	if (!getOtelConfig().enabled) return null;
+	try {
+		const res = await fetch(`${NOMAD_LOCAL}/v1/job/${JOB_NAME}/allocations`, {
+			headers: nomadHeaders(),
+		});
+		if (!res.ok) return null;
+		const allocs = (await res.json()) as { ClientStatus?: string }[];
+		return allocs.some((a) => a.ClientStatus === "running") ? 1 : 0;
+	} catch {
+		return null;
+	}
+};
+
+/**
  * WG IPs of the LB (pool) nodes — those tagged `meta.nomploy_lb=true`, where the
  * pool Traefik runs and exposes :8082 metrics. Static scrape targets for the
  * `traefik` job (Traefik isn't a Consul service). [] when none/unreachable.

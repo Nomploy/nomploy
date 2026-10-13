@@ -21,6 +21,11 @@ export const ALERT_METRICS = [
 	"lb_latency_ms",
 	"service_cpu_pct",
 	"service_mem_pct",
+	// Cluster-wide security / observability health (no target).
+	"crowdsec_active_bans",
+	"crowdsec_detector_up",
+	"otel_collector_up",
+	"log_agent_up",
 ] as const;
 export type AlertMetric = (typeof ALERT_METRICS)[number];
 

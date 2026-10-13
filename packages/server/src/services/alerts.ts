@@ -12,7 +12,16 @@ import {
 	projects,
 	serviceMetricSample,
 } from "../db/schema";
+import {
+	getCrowdsecConfig,
+	getCrowdsecJobInfo,
+	getCrowdsecStatus,
+} from "../setup/crowdsec";
 import { getLoadBalancerMetricsHistory } from "../setup/loadbalancer-dns";
+import {
+	getLogAgentHealth,
+	getOtelCollectorHealth,
+} from "../setup/otel-collector";
 import { sendClusterAlertNotifications } from "../utils/notifications/cluster-alert";
 
 export type MetricMeta = {
@@ -66,6 +75,38 @@ export const AVAILABLE_METRICS: MetricMeta[] = [
 		defaultComparator: "gt",
 		defaultThreshold: 85,
 	},
+	{
+		metric: "crowdsec_active_bans",
+		label: "Security — active bans (CrowdSec)",
+		unit: "bans",
+		needsTarget: false,
+		defaultComparator: "gt",
+		defaultThreshold: 20,
+	},
+	{
+		metric: "crowdsec_detector_up",
+		label: "Security — detector up (CrowdSec)",
+		unit: "up",
+		needsTarget: false,
+		defaultComparator: "lt",
+		defaultThreshold: 1,
+	},
+	{
+		metric: "otel_collector_up",
+		label: "Observability — OTel collector up",
+		unit: "up",
+		needsTarget: false,
+		defaultComparator: "lt",
+		defaultThreshold: 1,
+	},
+	{
+		metric: "log_agent_up",
+		label: "Observability — log agents up (fraction)",
+		unit: "ratio",
+		needsTarget: false,
+		defaultComparator: "lt",
+		defaultThreshold: 1,
+	},
 ];
 
 const avg = (xs: number[]): number | null =>
@@ -88,6 +129,22 @@ const computeValue = async (rule: AlertRule): Promise<number | null> => {
 			return avg(series.map((p) => p.latencyMs));
 		return null;
 	}
+
+	// Cluster-wide security / observability health. Instantaneous (no window):
+	// these report a current state, and a null means "not applicable" (feature
+	// off / unreachable) so the rule is skipped rather than fired.
+	if (rule.metric === "crowdsec_active_bans") {
+		if (!getCrowdsecConfig().enabled) return null;
+		const status = await getCrowdsecStatus();
+		return status.decisions?.length ?? null;
+	}
+	if (rule.metric === "crowdsec_detector_up") {
+		if (!getCrowdsecConfig().enabled) return null;
+		const info = await getCrowdsecJobInfo();
+		return info.runningAllocs > 0 ? 1 : 0;
+	}
+	if (rule.metric === "otel_collector_up") return getOtelCollectorHealth();
+	if (rule.metric === "log_agent_up") return getLogAgentHealth();
 
 	// Service metrics — scoped to a Nomad job id (appName). "All services" rules
 	// are handled per-service in the loop, not here.
