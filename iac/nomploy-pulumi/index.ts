@@ -22,13 +22,15 @@ const project = new Project("demo", {
 	description: "Provisioned by Pulumi",
 });
 
-// 2. Application in that environment. (Source/build config + deploy are a later
-//    increment — this creates the app record; configure the image in the panel or
-//    extend the provider with application.saveDockerProvider + application.deploy.)
+// 2. Application in that environment, running a prebuilt public image, deployed.
+//    (For a private registry add registryUrl/registryUsername/registryPassword;
+//    git sources are a follow-up — see the README.)
 const app = new Application("demo-app", {
 	...conn,
 	name: "api",
 	environmentId: project.environmentId,
+	dockerImage: "nginxdemos/hello:latest",
+	deploy: true,
 });
 
 // 3. Domain routed to the application (only when a host is configured).
@@ -37,7 +39,7 @@ export const domainId = host
 			...conn,
 			host,
 			applicationId: app.applicationId,
-			port: 3000,
+			port: 80,
 			https: true,
 			certificateType: "letsencrypt",
 		}).domainId

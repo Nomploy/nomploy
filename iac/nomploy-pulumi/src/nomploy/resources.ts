@@ -106,12 +106,38 @@ export interface ApplicationArgs {
 	appName?: pulumi.Input<string>;
 	description?: pulumi.Input<string>;
 	serverId?: pulumi.Input<string>;
+	/** Run a prebuilt image (sets the Docker source via application.saveDockerProvider). */
+	dockerImage?: pulumi.Input<string>;
+	/** Private registry for `dockerImage` (omit for public images). */
+	registryUrl?: pulumi.Input<string>;
+	registryUsername?: pulumi.Input<string>;
+	registryPassword?: pulumi.Input<string>;
+	/** Deploy on create, and redeploy whenever the image/source changes. */
+	deploy?: pulumi.Input<boolean>;
+}
+
+/** Push the Docker source config when a dockerImage is set. */
+async function applyDockerSource(conn: Conn, applicationId: string, p: any) {
+	if (!p.dockerImage) return;
+	await call(
+		conn,
+		"application.saveDockerProvider",
+		{
+			applicationId,
+			dockerImage: p.dockerImage,
+			username: p.registryUsername ?? null,
+			password: p.registryPassword ?? null,
+			registryUrl: p.registryUrl ?? null,
+		},
+		"POST",
+	);
 }
 
 const applicationProvider: pulumi.dynamic.ResourceProvider = {
 	async create(inputs) {
+		const conn = connOf(inputs);
 		const r = await call(
-			connOf(inputs),
+			conn,
 			"application.create",
 			{
 				name: inputs.name,
@@ -122,9 +148,19 @@ const applicationProvider: pulumi.dynamic.ResourceProvider = {
 			},
 			"POST",
 		);
+		const applicationId: string = r.applicationId;
+		await applyDockerSource(conn, applicationId, inputs);
+		if (inputs.deploy) {
+			await call(
+				conn,
+				"application.deploy",
+				{ applicationId, title: "Pulumi deploy" },
+				"POST",
+			);
+		}
 		return {
-			id: r.applicationId,
-			outs: { ...inputs, applicationId: r.applicationId, appName: r.appName },
+			id: applicationId,
+			outs: { ...inputs, applicationId, appName: r.appName },
 		};
 	},
 	async read(id, props) {
@@ -145,8 +181,14 @@ const applicationProvider: pulumi.dynamic.ResourceProvider = {
 		};
 	},
 	async diff(_id, olds, news) {
+		const sourceKeys = [
+			"dockerImage",
+			"registryUrl",
+			"registryUsername",
+			"registryPassword",
+		];
 		return {
-			changes: changed(olds, news, ["name", "description"]),
+			changes: changed(olds, news, ["name", "description", "deploy", ...sourceKeys]),
 			// environmentId / appName are fixed at create → changing them replaces.
 			replaces: changed(olds, news, ["environmentId", "appName"])
 				? ["environmentId", "appName"]
@@ -154,13 +196,30 @@ const applicationProvider: pulumi.dynamic.ResourceProvider = {
 			deleteBeforeReplace: true,
 		};
 	},
-	async update(id, _olds, news) {
+	async update(id, olds, news) {
+		const conn = connOf(news);
 		await call(
-			connOf(news),
+			conn,
 			"application.update",
 			{ applicationId: id, name: news.name, description: news.description },
 			"POST",
 		);
+		const sourceChanged = changed(olds, news, [
+			"dockerImage",
+			"registryUrl",
+			"registryUsername",
+			"registryPassword",
+		]);
+		if (sourceChanged) await applyDockerSource(conn, id, news);
+		// Redeploy when the source changed (new image), if deploy is on.
+		if (news.deploy && sourceChanged) {
+			await call(
+				conn,
+				"application.deploy",
+				{ applicationId: id, title: "Pulumi redeploy" },
+				"POST",
+			);
+		}
 		return { outs: { ...news, applicationId: id } };
 	},
 	async delete(id, props) {

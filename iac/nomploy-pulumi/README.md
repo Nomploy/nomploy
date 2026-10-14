@@ -6,8 +6,9 @@ no Go toolchain. It's a prototype that demonstrates the `project → application
 domain` lifecycle; extend it from there.
 
 > **Status:** prototype. It creates/reads/updates/deletes the three core resources
-> over the REST API. Source/build config and deploy triggers are intentionally
-> left out of the first cut (see *Extending* below).
+> over the REST API, and an `Application` can set a **Docker image source** and
+> **deploy** (create + redeploy-on-image-change). Git sources and databases are the
+> next increment (see *Extending* below).
 
 ## How it works
 
@@ -24,6 +25,19 @@ procedures:
 
 `project.create` auto-creates a production environment and returns its id, exposed
 as `project.environmentId` — pass it to `Application`.
+
+An `Application` can also run a prebuilt image and deploy itself:
+
+```ts
+new nomploy.Application("api", {
+  ...conn,
+  name: "api",
+  environmentId: project.environmentId,
+  dockerImage: "nginxdemos/hello:latest",   // application.saveDockerProvider
+  // registryUrl / registryUsername / registryPassword for a private registry
+  deploy: true,                              // application.deploy on create + on image change
+});
+```
 
 ## Prerequisites
 
@@ -52,10 +66,11 @@ pulumi destroy     # tear it all down
 
 ## Extending
 
-- **Source + deploy:** after `application.create`, call `application.saveDockerProvider`
-  / `application.saveGithubProvider` + `application.saveBuildType`, then
-  `application.deploy`. Add these to the `Application` provider (e.g. a `deploy: true`
-  flag, or a dedicated `Deployment` resource).
+- **Docker source + deploy:** done — `Application` accepts `dockerImage` (+ optional
+  registry creds) and `deploy: true`.
+- **Git sources:** add `application.saveGithubProvider` / `saveGitProvider` +
+  `application.saveBuildType` (buildType: dockerfile/nixpacks/heroku/railpack) to the
+  `Application` provider, alongside the Docker path.
 - **Databases:** `postgres` / `mysql` / `mariadb` / `mongo` / `redis` share the same
   `create / one / update / remove` shape — add resources the same way as `Application`.
 - **Compose:** `compose.create` mirrors `application.create` (needs `environmentId`).
