@@ -5,10 +5,10 @@ in TypeScript that talks to the panel's existing REST API — no separate API la
 no Go toolchain. It's a prototype that demonstrates the `project → application →
 domain` lifecycle; extend it from there.
 
-> **Status:** prototype. It creates/reads/updates/deletes the three core resources
-> over the REST API, and an `Application` can set a **Docker image source** and
-> **deploy** (create + redeploy-on-image-change). Git sources and databases are the
-> next increment (see *Extending* below).
+> **Status:** prototype. It creates/reads/updates/deletes projects, applications
+> (**Docker image or generic git source**, with **deploy**), domains, and the five
+> **databases** (postgres / mysql / mariadb / mongo / redis). Compose and codegen
+> from the OpenAPI spec are the remaining increments (see *Extending*).
 
 ## How it works
 
@@ -22,6 +22,11 @@ procedures:
 | `Project` | `project.create` | `project.one` | `project.update` | `project.remove` |
 | `Application` | `application.create` | `application.one` | `application.update` | `application.delete` |
 | `Domain` | `domain.create` | `domain.one` | `domain.update` | `domain.delete` |
+| `Postgres` / `Mysql` / `Mariadb` / `Mongo` / `Redis` (`Database`) | `<engine>.create` | `<engine>.one` | `<engine>.update` | `<engine>.remove` |
+
+`Application` sets its source via `application.saveDockerProvider` (image) **or**
+`application.saveGitProvider` + `application.saveBuildType` (git), and deploys with
+`application.deploy`. Each `Database` likewise deploys with `<engine>.deploy`.
 
 `project.create` auto-creates a production environment and returns its id, exposed
 as `project.environmentId` — pass it to `Application`.
@@ -66,14 +71,13 @@ pulumi destroy     # tear it all down
 
 ## Extending
 
-- **Docker source + deploy:** done — `Application` accepts `dockerImage` (+ optional
-  registry creds) and `deploy: true`.
-- **Git sources:** add `application.saveGithubProvider` / `saveGitProvider` +
-  `application.saveBuildType` (buildType: dockerfile/nixpacks/heroku/railpack) to the
-  `Application` provider, alongside the Docker path.
-- **Databases:** `postgres` / `mysql` / `mariadb` / `mongo` / `redis` share the same
-  `create / one / update / remove` shape — add resources the same way as `Application`.
-- **Compose:** `compose.create` mirrors `application.create` (needs `environmentId`).
+- **Docker / git source + deploy:** done — `Application` accepts `dockerImage`
+  (+ registry creds) **or** `gitUrl`/`gitBranch` (+ `buildType`, `gitSshKeyId` for
+  private), plus `deploy: true`.
+- **Databases:** done — `Postgres` / `Mysql` / `Mariadb` / `Mongo` / `Redis` (or the
+  generic `Database` with an `engine`), each with `deploy`.
+- **Compose:** `compose.create` mirrors `application.create` (needs `environmentId`) —
+  add a `Compose` resource the same way.
 - **Codegen:** the full surface is in the generated `openapi.json`
   (`apps/dokploy/scripts/generate-openapi.ts`) — a future version can generate typed
   resources from it instead of hand-writing each.

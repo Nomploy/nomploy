@@ -112,25 +112,83 @@ export interface ApplicationArgs {
 	registryUrl?: pulumi.Input<string>;
 	registryUsername?: pulumi.Input<string>;
 	registryPassword?: pulumi.Input<string>;
+	/** Build from a generic git repo (application.saveGitProvider + saveBuildType). */
+	gitUrl?: pulumi.Input<string>;
+	gitBranch?: pulumi.Input<string>;
+	gitBuildPath?: pulumi.Input<string>;
+	/** SSH key id for a private repo (from the panel's SSH keys). */
+	gitSshKeyId?: pulumi.Input<string>;
+	/** Build type for a git source (default "nixpacks"). */
+	buildType?: pulumi.Input<string>;
+	dockerfile?: pulumi.Input<string>;
+	dockerContextPath?: pulumi.Input<string>;
 	/** Deploy on create, and redeploy whenever the image/source changes. */
 	deploy?: pulumi.Input<boolean>;
 }
 
-/** Push the Docker source config when a dockerImage is set. */
-async function applyDockerSource(conn: Conn, applicationId: string, p: any) {
-	if (!p.dockerImage) return;
-	await call(
-		conn,
-		"application.saveDockerProvider",
-		{
-			applicationId,
-			dockerImage: p.dockerImage,
-			username: p.registryUsername ?? null,
-			password: p.registryPassword ?? null,
-			registryUrl: p.registryUrl ?? null,
-		},
-		"POST",
-	);
+const APP_SOURCE_KEYS = [
+	"dockerImage",
+	"registryUrl",
+	"registryUsername",
+	"registryPassword",
+	"gitUrl",
+	"gitBranch",
+	"gitBuildPath",
+	"gitSshKeyId",
+	"buildType",
+	"dockerfile",
+	"dockerContextPath",
+];
+
+/** Push the configured source (Docker image OR generic git) for an application. */
+async function applyAppSource(conn: Conn, applicationId: string, p: any) {
+	if (p.dockerImage) {
+		await call(
+			conn,
+			"application.saveDockerProvider",
+			{
+				applicationId,
+				dockerImage: p.dockerImage,
+				username: p.registryUsername ?? null,
+				password: p.registryPassword ?? null,
+				registryUrl: p.registryUrl ?? null,
+			},
+			"POST",
+		);
+		return;
+	}
+	if (p.gitUrl) {
+		await call(
+			conn,
+			"application.saveGitProvider",
+			{
+				applicationId,
+				customGitUrl: p.gitUrl,
+				customGitBranch: p.gitBranch ?? "main",
+				customGitBuildPath: p.gitBuildPath ?? "/",
+				customGitSSHKeyId: p.gitSshKeyId ?? null,
+				watchPaths: null,
+				enableSubmodules: false,
+			},
+			"POST",
+		);
+		await call(
+			conn,
+			"application.saveBuildType",
+			{
+				applicationId,
+				buildType: p.buildType ?? "nixpacks",
+				dockerfile: p.dockerfile ?? null,
+				dockerContextPath: p.dockerContextPath ?? null,
+				dockerBuildStage: null,
+				herokuVersion: null,
+				railpackVersion: null,
+				publishDirectory: null,
+				isStaticSpa: null,
+			},
+			"POST",
+		);
+	}
 }
 
 const applicationProvider: pulumi.dynamic.ResourceProvider = {
@@ -149,7 +207,7 @@ const applicationProvider: pulumi.dynamic.ResourceProvider = {
 			"POST",
 		);
 		const applicationId: string = r.applicationId;
-		await applyDockerSource(conn, applicationId, inputs);
+		await applyAppSource(conn, applicationId, inputs);
 		if (inputs.deploy) {
 			await call(
 				conn,
@@ -181,14 +239,13 @@ const applicationProvider: pulumi.dynamic.ResourceProvider = {
 		};
 	},
 	async diff(_id, olds, news) {
-		const sourceKeys = [
-			"dockerImage",
-			"registryUrl",
-			"registryUsername",
-			"registryPassword",
-		];
 		return {
-			changes: changed(olds, news, ["name", "description", "deploy", ...sourceKeys]),
+			changes: changed(olds, news, [
+				"name",
+				"description",
+				"deploy",
+				...APP_SOURCE_KEYS,
+			]),
 			// environmentId / appName are fixed at create → changing them replaces.
 			replaces: changed(olds, news, ["environmentId", "appName"])
 				? ["environmentId", "appName"]
@@ -204,13 +261,8 @@ const applicationProvider: pulumi.dynamic.ResourceProvider = {
 			{ applicationId: id, name: news.name, description: news.description },
 			"POST",
 		);
-		const sourceChanged = changed(olds, news, [
-			"dockerImage",
-			"registryUrl",
-			"registryUsername",
-			"registryPassword",
-		]);
-		if (sourceChanged) await applyDockerSource(conn, id, news);
+		const sourceChanged = changed(olds, news, APP_SOURCE_KEYS);
+		if (sourceChanged) await applyAppSource(conn, id, news);
 		// Redeploy when the source changed (new image), if deploy is on.
 		if (news.deploy && sourceChanged) {
 			await call(
@@ -342,3 +394,150 @@ export class Domain extends pulumi.dynamic.Resource {
 		);
 	}
 }
+
+// ─── Databases (postgres / mysql / mariadb / mongo / redis) ───────────────────
+// All five engines share the same router verb set (create/one/update/remove/deploy)
+// and a `<engine>Id` key, so one provider handles them all, parameterised by `engine`.
+
+export type DatabaseEngine =
+	| "postgres"
+	| "mysql"
+	| "mariadb"
+	| "mongo"
+	| "redis";
+
+export interface DatabaseArgs {
+	endpoint: pulumi.Input<string>;
+	apiKey: pulumi.Input<string>;
+	engine: pulumi.Input<DatabaseEngine>;
+	name: pulumi.Input<string>;
+	environmentId: pulumi.Input<string>;
+	appName?: pulumi.Input<string>;
+	description?: pulumi.Input<string>;
+	serverId?: pulumi.Input<string>;
+	dockerImage?: pulumi.Input<string>;
+	databaseName?: pulumi.Input<string>;
+	databaseUser?: pulumi.Input<string>;
+	databasePassword?: pulumi.Input<string>;
+	/** mysql / mariadb only. */
+	databaseRootPassword?: pulumi.Input<string>;
+	/** mongo only. */
+	replicaSets?: pulumi.Input<boolean>;
+	/** Deploy on create, and redeploy when config changes. */
+	deploy?: pulumi.Input<boolean>;
+}
+
+// Fields forwarded to <engine>.create / .update (extras are stripped by the API's
+// per-engine zod schema, so one superset is safe for all five).
+const DB_FIELDS = [
+	"name",
+	"appName",
+	"description",
+	"serverId",
+	"dockerImage",
+	"databaseName",
+	"databaseUser",
+	"databasePassword",
+	"databaseRootPassword",
+	"replicaSets",
+];
+
+const dbBody = (p: any): Record<string, unknown> => {
+	const body: Record<string, unknown> = {};
+	for (const k of DB_FIELDS) if (p[k] !== undefined) body[k] = p[k];
+	return body;
+};
+
+const databaseProvider: pulumi.dynamic.ResourceProvider = {
+	async create(inputs) {
+		const conn = connOf(inputs);
+		const engine: DatabaseEngine = inputs.engine;
+		const idKey = `${engine}Id`;
+		const r = await call(
+			conn,
+			`${engine}.create`,
+			{ ...dbBody(inputs), environmentId: inputs.environmentId },
+			"POST",
+		);
+		const id: string = r[idKey];
+		if (inputs.deploy) {
+			await call(conn, `${engine}.deploy`, { [idKey]: id }, "POST");
+		}
+		return { id, outs: { ...inputs, databaseId: id, appName: r.appName } };
+	},
+	async read(id, props) {
+		const engine: DatabaseEngine = props.engine;
+		const r = await call(
+			connOf(props),
+			`${engine}.one`,
+			{ [`${engine}Id`]: id },
+			"GET",
+		);
+		return {
+			id,
+			props: { ...props, databaseId: id, name: r?.name ?? props.name },
+		};
+	},
+	async diff(_id, olds, news) {
+		return {
+			changes: changed(olds, news, [...DB_FIELDS, "deploy"]),
+			// engine / environmentId / appName are fixed at create → replace.
+			replaces: changed(olds, news, ["engine", "environmentId", "appName"])
+				? ["engine", "environmentId", "appName"]
+				: [],
+			deleteBeforeReplace: true,
+		};
+	},
+	async update(id, olds, news) {
+		const conn = connOf(news);
+		const engine: DatabaseEngine = news.engine;
+		const idKey = `${engine}Id`;
+		await call(
+			conn,
+			`${engine}.update`,
+			{ [idKey]: id, ...dbBody(news) },
+			"POST",
+		);
+		if (news.deploy && changed(olds, news, DB_FIELDS)) {
+			await call(conn, `${engine}.deploy`, { [idKey]: id }, "POST");
+		}
+		return { outs: { ...news, databaseId: id } };
+	},
+	async delete(id, props) {
+		const engine: DatabaseEngine = props.engine;
+		await call(connOf(props), `${engine}.remove`, { [`${engine}Id`]: id }, "POST");
+	},
+};
+
+export class Database extends pulumi.dynamic.Resource {
+	/** The engine-specific id (postgresId / mysqlId / …). */
+	public readonly databaseId!: pulumi.Output<string>;
+	public readonly appName!: pulumi.Output<string>;
+	constructor(
+		name: string,
+		args: DatabaseArgs,
+		opts?: pulumi.CustomResourceOptions,
+	) {
+		super(
+			databaseProvider,
+			name,
+			{ databaseId: undefined, appName: undefined, ...args },
+			{ ...opts, additionalSecretOutputs: ["apiKey"] },
+		);
+	}
+}
+
+// Convenience subclasses that pin the engine.
+type DbArgs = Omit<DatabaseArgs, "engine">;
+const dbClass = (engine: DatabaseEngine) =>
+	class extends Database {
+		constructor(name: string, args: DbArgs, opts?: pulumi.CustomResourceOptions) {
+			super(name, { ...args, engine }, opts);
+		}
+	};
+
+export const Postgres = dbClass("postgres");
+export const Mysql = dbClass("mysql");
+export const Mariadb = dbClass("mariadb");
+export const Mongo = dbClass("mongo");
+export const Redis = dbClass("redis");

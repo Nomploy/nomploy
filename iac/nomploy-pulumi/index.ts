@@ -6,7 +6,7 @@
 //   nomploy-iac-demo:host       app.example.com    (the domain to route)
 
 import * as pulumi from "@pulumi/pulumi";
-import { Application, Domain, Project } from "./src/nomploy";
+import { Application, Domain, Postgres, Project } from "./src/nomploy";
 
 const config = new pulumi.Config();
 const endpoint = config.require("endpoint");
@@ -22,9 +22,18 @@ const project = new Project("demo", {
 	description: "Provisioned by Pulumi",
 });
 
-// 2. Application in that environment, running a prebuilt public image, deployed.
-//    (For a private registry add registryUrl/registryUsername/registryPassword;
-//    git sources are a follow-up — see the README.)
+// 2a. A Postgres database in the same environment, deployed.
+const db = new Postgres("demo-db", {
+	...conn,
+	name: "db",
+	environmentId: project.environmentId,
+	databaseName: "app",
+	databaseUser: "app",
+	databasePassword: config.requireSecret("dbPassword"),
+	deploy: true,
+});
+
+// 2b. Application in that environment. Either a prebuilt image (shown) …
 const app = new Application("demo-app", {
 	...conn,
 	name: "api",
@@ -32,6 +41,16 @@ const app = new Application("demo-app", {
 	dockerImage: "nginxdemos/hello:latest",
 	deploy: true,
 });
+
+// … or a generic git repo (application.saveGitProvider + saveBuildType):
+//   new Application("web", {
+//     ...conn, name: "web", environmentId: project.environmentId,
+//     gitUrl: "https://github.com/you/repo.git", gitBranch: "main",
+//     buildType: "nixpacks", // or "dockerfile" (+ dockerfile/dockerContextPath)
+//     deploy: true,
+//   });
+
+export const databaseId = db.databaseId;
 
 // 3. Domain routed to the application (only when a host is configured).
 export const domainId = host
