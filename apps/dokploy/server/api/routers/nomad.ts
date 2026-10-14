@@ -536,6 +536,72 @@ export const nomadRouter = createTRPCRouter({
 			return per.flat();
 		}),
 
+	// Why a job's allocations aren't placed — the latest evaluation's placement
+	// failures (constraints that filtered every node, exhausted dimensions like a
+	// reserved-port collision or not enough memory/cpu). Lets the UI explain a
+	// "No allocations yet" / wedged deploy in-panel instead of needing
+	// `nomad job status` over SSH.
+	getJobPlacement: withPermission("server", "read")
+		.input(serverInput.extend({ jobId: z.string() }))
+		.query(async ({ input, ctx }) => {
+			const cfg = await resolveNomad(ctx, input.serverId);
+			const client = nomadClient(cfg);
+			type Failed = {
+				NodesEvaluated?: number;
+				NodesExhausted?: number;
+				DimensionExhausted?: Record<string, number> | null;
+				ConstraintFiltered?: Record<string, number> | null;
+			};
+			type Failure = {
+				taskGroup: string;
+				constraints: string[];
+				exhausted: string[];
+				nodesEvaluated: number;
+				nodesExhausted: number;
+			};
+			const ids = [input.jobId, ...(await resolvePackJobIds(cfg, input.jobId))];
+			const failures: Failure[] = [];
+			for (const id of ids) {
+				const er = await client.request(
+					withNs(`/job/${id}/evaluations`, cfg.namespace),
+				);
+				if (!er.ok) continue;
+				const evals = (await er.json()) as {
+					CreateIndex?: number;
+					FailedTGAllocs?: Record<string, Failed> | null;
+				}[];
+				const latest = (evals ?? [])
+					.filter(
+						(e) => e.FailedTGAllocs && Object.keys(e.FailedTGAllocs).length > 0,
+					)
+					.sort((a, b) => (b.CreateIndex ?? 0) - (a.CreateIndex ?? 0))[0];
+				if (!latest?.FailedTGAllocs) continue;
+				for (const [tg, f] of Object.entries(latest.FailedTGAllocs)) {
+					failures.push({
+						taskGroup: tg,
+						constraints: Object.keys(f.ConstraintFiltered ?? {}),
+						exhausted: Object.keys(f.DimensionExhausted ?? {}),
+						nodesEvaluated: f.NodesEvaluated ?? 0,
+						nodesExhausted: f.NodesExhausted ?? 0,
+					});
+				}
+				if (failures.length) break; // first job with failures is enough
+			}
+			const f = failures[0];
+			let blockedReason: string | null = null;
+			if (f) {
+				const parts: string[] = [];
+				if (f.exhausted.length) parts.push(f.exhausted.join("; "));
+				if (f.constraints.length)
+					parts.push(`filtered by ${f.constraints.join("; ")}`);
+				if (!parts.length && f.nodesExhausted)
+					parts.push("no node has capacity");
+				if (parts.length)
+					blockedReason = `Can't place allocation — ${parts.join("; ")}.`;
+			}
+			return { blockedReason, failures };
+		}),
+
 	// Live per-service resource usage from Nomad telemetry (publish_allocation_metrics).
 	// Metrics are per-agent (no central TSDB), so scrape every ready node's
 	// /v1/metrics and sum the job's per-task cpu%/memory by task group. Current

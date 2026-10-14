@@ -1,6 +1,7 @@
 import { Loader2 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+import { AlertBlock } from "@/components/shared/alert-block";
 import { Badge } from "@/components/ui/badge";
 import {
 	Card,
@@ -74,6 +75,17 @@ const NomadAppLogs = ({ appName }: { appName: string; serverId?: string }) => {
 		{ jobId: appName },
 		{ enabled: !!appName, refetchInterval: 10000 },
 	);
+	// When a job has no allocation, it usually failed to PLACE (constraint filtered
+	// every node, or an exhausted dimension like a reserved-port collision / not
+	// enough memory). Nomad keeps that in the latest evaluation, not in logs — so
+	// surface it here instead of a bare "No allocations yet".
+	const { data: placement } = api.nomad.getJobPlacement.useQuery(
+		{ jobId: appName },
+		{
+			enabled: !!appName && (allocs?.length ?? 0) === 0,
+			refetchInterval: 15000,
+		},
+	);
 	// Show EVERY allocation, newest first — not just running ones. A database (or
 	// app) that is still starting or that crash-looped on boot has no running
 	// alloc, and its logs are exactly what explains why; filtering to running hid
@@ -131,6 +143,24 @@ const NomadAppLogs = ({ appName }: { appName: string; serverId?: string }) => {
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
+				{sorted.length === 0 && placement?.blockedReason && (
+					<AlertBlock type="error">
+						<div className="flex flex-col gap-1">
+							<span className="font-medium">
+								Deployment can&apos;t be scheduled
+							</span>
+							<span className="text-sm">{placement.blockedReason}</span>
+							{placement.failures?.[0] && (
+								<span className="text-xs text-muted-foreground">
+									{placement.failures[0].nodesEvaluated} node(s) evaluated,{" "}
+									{placement.failures[0].nodesExhausted} exhausted. Fix the
+									constraint/resource (e.g. free the port, target another node,
+									or lower the requested resources) and redeploy.
+								</span>
+							)}
+						</div>
+					</AlertBlock>
+				)}
 				<div className="flex flex-row gap-2 items-center flex-wrap">
 					<Select onValueChange={setAllocId} value={allocId}>
 						<SelectTrigger className="flex-1 min-w-[240px]">
