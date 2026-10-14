@@ -7,9 +7,9 @@ your services **as code** instead of clicking through the UI.
 
 - **Repo:** [github.com/Nomploy/pulumi-nomploy](https://github.com/Nomploy/pulumi-nomploy)
 
-It's a TypeScript **dynamic provider** over the REST API — no separate API layer
-and no Go toolchain. (Prototype: resources are complete and type-checked; APIs may
-still change.)
+A Pulumi **dynamic provider** over the REST API — no separate API layer and no Go
+toolchain. Available in **TypeScript** (repo root) and **Python** (`python/`).
+(Prototype: resources are complete and type-checked; APIs may still change.)
 
 ## Resources
 
@@ -43,8 +43,7 @@ Mint an API key in the panel under **Settings → API / Swagger**.
 See the repo's README for the full resource reference, the generated typed API
 client, and notes (database node placement, synchronous deploys, and more).
 
-> **Other languages (Python, Go, …):** the current provider is a *TypeScript*
-> dynamic provider, which Pulumi can only use from a TS/JS program. A Python (or
-> any-language) version needs either a parallel Python dynamic provider, or a
-> schema-based multi-language provider that emits SDKs for every language — see the
-> repo for status.
+> **Languages:** Pulumi dynamic providers are language-specific, so TypeScript and
+> Python each have their own implementation of the same resources (see the repo's
+> `python/`). For other languages (Go, C#, …) a schema-based multi-language provider
+> would be needed.
