@@ -18,4 +18,12 @@ export type {
 	DatabaseEngine,
 	ComposeArgs,
 } from "./resources";
-export type { Conn } from "./client";
+export { call, get, post } from "./client";
+export type {
+	Conn,
+	ApiPath,
+	ApiBody,
+	ApiQuery,
+	ApiResponse,
+} from "./client";
+export type { paths, operations } from "./api-types";

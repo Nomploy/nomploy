@@ -93,9 +93,16 @@ pulumi destroy     # tear it all down
   generic `Database` with an `engine`), each with `deploy`.
 - **Compose:** done — `Compose` takes a raw `composeFile` (composeType "nomad") or a
   `nomadPack` + `nomadPackRegistry` (composeType "nomad-pack"), with `deploy`.
-- **Codegen:** the full surface is in the generated `openapi.json`
-  (`apps/dokploy/scripts/generate-openapi.ts`) — a future version can generate typed
-  resources from it instead of hand-writing each.
+- **Codegen (done):** `src/nomploy/api-types.ts` is generated from the panel's
+  OpenAPI spec (`npm run gen:types`, which runs `openapi-typescript` over the
+  repo-root `openapi.json`). `client.ts` exposes typed `get`/`post` helpers plus
+  `ApiBody<P>` / `ApiQuery<P>` / `ApiResponse<P>` for any spec path `P` (e.g.
+  `post(conn, "/project.create", { name })` type-checks the body). Note: the spec's
+  **response** schemas are thin, so the providers still read create responses via the
+  untyped `call` (which also builds the DB engine's runtime paths); the typed helpers
+  are for typed request bodies/queries and new code.
+  Regenerate against a live/updated instance with
+  `apps/dokploy/scripts/generate-openapi.ts` (the committed `openapi.json` can lag).
 
 ## Notes / caveats
 

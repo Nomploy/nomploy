@@ -4,8 +4,13 @@
 	"version": "0.1.0",
 	"description": "Pulumi prototype: manage nomploy services as code over the REST API.",
 	"main": "index.ts",
+	"scripts": {
+		"gen:types": "openapi-typescript ../../openapi.json -o src/nomploy/api-types.ts",
+		"typecheck": "tsc --noEmit"
+	},
 	"devDependencies": {
 		"@types/node": "^22.0.0",
+		"openapi-typescript": "^7.4.0",
 		"typescript": "^5.6.0"
 	},
 	"dependencies": {
