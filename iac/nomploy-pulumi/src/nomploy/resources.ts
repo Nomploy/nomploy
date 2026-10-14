@@ -541,3 +541,123 @@ export const Mysql = dbClass("mysql");
 export const Mariadb = dbClass("mariadb");
 export const Mongo = dbClass("mongo");
 export const Redis = dbClass("redis");
+
+// ─── Compose ──────────────────────────────────────────────────────────────────
+// A compose service: a raw compose file (translated to a Nomad job) or a Nomad Pack.
+
+export interface ComposeArgs {
+	endpoint: pulumi.Input<string>;
+	apiKey: pulumi.Input<string>;
+	name: pulumi.Input<string>;
+	environmentId: pulumi.Input<string>;
+	appName?: pulumi.Input<string>;
+	description?: pulumi.Input<string>;
+	serverId?: pulumi.Input<string>;
+	/** "nomad" (compose→Nomad, default) or "nomad-pack". */
+	composeType?: pulumi.Input<"nomad" | "nomad-pack">;
+	/** Raw compose YAML (composeType "nomad"). */
+	composeFile?: pulumi.Input<string>;
+	/** Pack name + git registry (composeType "nomad-pack"). */
+	nomadPack?: pulumi.Input<string>;
+	nomadPackRegistry?: pulumi.Input<string>;
+	/** Remove volumes when the resource is destroyed (default false — keeps data). */
+	deleteVolumesOnDestroy?: pulumi.Input<boolean>;
+	/** Deploy on create, and redeploy when the compose file / pack changes. */
+	deploy?: pulumi.Input<boolean>;
+}
+
+const COMPOSE_FIELDS = [
+	"name",
+	"description",
+	"composeType",
+	"composeFile",
+	"nomadPack",
+	"nomadPackRegistry",
+];
+
+const composeBody = (p: any): Record<string, unknown> => {
+	const body: Record<string, unknown> = {
+		composeType: p.composeType ?? (p.nomadPack ? "nomad-pack" : "nomad"),
+	};
+	for (const k of ["name", "description", "appName", "serverId", ...COMPOSE_FIELDS])
+		if (p[k] !== undefined) body[k] = p[k];
+	return body;
+};
+
+const composeProvider: pulumi.dynamic.ResourceProvider = {
+	async create(inputs) {
+		const conn = connOf(inputs);
+		const r = await call(
+			conn,
+			"compose.create",
+			{ ...composeBody(inputs), environmentId: inputs.environmentId },
+			"POST",
+		);
+		const composeId: string = r.composeId;
+		if (inputs.deploy) {
+			await call(
+				conn,
+				"compose.deploy",
+				{ composeId, title: "Pulumi deploy" },
+				"POST",
+			);
+		}
+		return { id: composeId, outs: { ...inputs, composeId, appName: r.appName } };
+	},
+	async read(id, props) {
+		const r = await call(connOf(props), "compose.one", { composeId: id }, "GET");
+		return { id, props: { ...props, composeId: id, name: r?.name ?? props.name } };
+	},
+	async diff(_id, olds, news) {
+		return {
+			changes: changed(olds, news, [...COMPOSE_FIELDS, "deploy"]),
+			replaces: changed(olds, news, ["environmentId", "appName"])
+				? ["environmentId", "appName"]
+				: [],
+			deleteBeforeReplace: true,
+		};
+	},
+	async update(id, olds, news) {
+		const conn = connOf(news);
+		await call(
+			conn,
+			"compose.update",
+			{ composeId: id, ...composeBody(news) },
+			"POST",
+		);
+		if (news.deploy && changed(olds, news, COMPOSE_FIELDS)) {
+			await call(
+				conn,
+				"compose.deploy",
+				{ composeId: id, title: "Pulumi redeploy" },
+				"POST",
+			);
+		}
+		return { outs: { ...news, composeId: id } };
+	},
+	async delete(id, props) {
+		await call(
+			connOf(props),
+			"compose.delete",
+			{ composeId: id, deleteVolumes: props.deleteVolumesOnDestroy ?? false },
+			"POST",
+		);
+	},
+};
+
+export class Compose extends pulumi.dynamic.Resource {
+	public readonly composeId!: pulumi.Output<string>;
+	public readonly appName!: pulumi.Output<string>;
+	constructor(
+		name: string,
+		args: ComposeArgs,
+		opts?: pulumi.CustomResourceOptions,
+	) {
+		super(
+			composeProvider,
+			name,
+			{ composeId: undefined, appName: undefined, ...args },
+			{ ...opts, additionalSecretOutputs: ["apiKey"] },
+		);
+	}
+}

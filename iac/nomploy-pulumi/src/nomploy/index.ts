@@ -8,6 +8,7 @@ export {
 	Mariadb,
 	Mongo,
 	Redis,
+	Compose,
 } from "./resources";
 export type {
 	ProjectArgs,
@@ -15,5 +16,6 @@ export type {
 	DomainArgs,
 	DatabaseArgs,
 	DatabaseEngine,
+	ComposeArgs,
 } from "./resources";
 export type { Conn } from "./client";

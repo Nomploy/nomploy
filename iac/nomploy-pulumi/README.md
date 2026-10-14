@@ -6,9 +6,10 @@ no Go toolchain. It's a prototype that demonstrates the `project → application
 domain` lifecycle; extend it from there.
 
 > **Status:** prototype. It creates/reads/updates/deletes projects, applications
-> (**Docker image or generic git source**, with **deploy**), domains, and the five
-> **databases** (postgres / mysql / mariadb / mongo / redis). Compose and codegen
-> from the OpenAPI spec are the remaining increments (see *Extending*).
+> (**Docker image or generic git source**, with **deploy**), domains, the five
+> **databases** (postgres / mysql / mariadb / mongo / redis), and **compose**
+> services (raw compose file or Nomad Pack). Codegen from the OpenAPI spec is the
+> remaining increment (see *Extending*).
 
 ## How it works
 
@@ -23,6 +24,7 @@ procedures:
 | `Application` | `application.create` | `application.one` | `application.update` | `application.delete` |
 | `Domain` | `domain.create` | `domain.one` | `domain.update` | `domain.delete` |
 | `Postgres` / `Mysql` / `Mariadb` / `Mongo` / `Redis` (`Database`) | `<engine>.create` | `<engine>.one` | `<engine>.update` | `<engine>.remove` |
+| `Compose` | `compose.create` | `compose.one` | `compose.update` | `compose.delete` |
 
 `Application` sets its source via `application.saveDockerProvider` (image) **or**
 `application.saveGitProvider` + `application.saveBuildType` (git), and deploys with
@@ -42,6 +44,19 @@ new nomploy.Application("api", {
   // registryUrl / registryUsername / registryPassword for a private registry
   deploy: true,                              // application.deploy on create + on image change
 });
+```
+
+A `Compose` service from a raw compose file (translated to a Nomad job), deployed:
+
+```ts
+new nomploy.Compose("stack", {
+  ...conn,
+  name: "stack",
+  environmentId: project.environmentId,
+  composeFile: fs.readFileSync("docker-compose.yml", "utf8"),
+  deploy: true,
+});
+// …or a Nomad Pack: { nomadPack: "traefik", nomadPackRegistry: "github.com/Nomploy/nomad-packs" }
 ```
 
 ## Prerequisites
@@ -76,8 +91,8 @@ pulumi destroy     # tear it all down
   private), plus `deploy: true`.
 - **Databases:** done — `Postgres` / `Mysql` / `Mariadb` / `Mongo` / `Redis` (or the
   generic `Database` with an `engine`), each with `deploy`.
-- **Compose:** `compose.create` mirrors `application.create` (needs `environmentId`) —
-  add a `Compose` resource the same way.
+- **Compose:** done — `Compose` takes a raw `composeFile` (composeType "nomad") or a
+  `nomadPack` + `nomadPackRegistry` (composeType "nomad-pack"), with `deploy`.
 - **Codegen:** the full surface is in the generated `openapi.json`
   (`apps/dokploy/scripts/generate-openapi.ts`) — a future version can generate typed
   resources from it instead of hand-writing each.
