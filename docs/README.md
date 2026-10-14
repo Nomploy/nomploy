@@ -21,6 +21,7 @@ the topic you need.
 | **[Security](security.md)** | Built-in CrowdSec: detect malicious traffic and block offending IPs at the ingress (detection vs enforce, anti-lockout). |
 | **[Container registry](registry.md)** | One-click self-hosted zot+S3/R2, or run your own + Add Registry; credentials distributed cluster-wide. |
 | **[Overview](overview.md)** | Org-wide dashboard aggregating services, domains, backups and deployments across every project. |
+| **[Infrastructure as Code](iac.md)** | Manage services as code with the Pulumi provider, over the REST API. |
 | **[GPU workloads](gpu.md)** | Requesting NVIDIA GPUs for a job. |
 
 ## Quick reference
