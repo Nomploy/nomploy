@@ -1,4 +1,5 @@
 import { db } from "@nomploy/server/db";
+import { pickServerForNewDatabase } from "./database-placement";
 import {
 	type apiCreateRedis,
 	buildAppName,
@@ -31,6 +32,9 @@ export const createRedis = async (input: z.infer<typeof apiCreateRedis>) => {
 		.insert(redis)
 		.values({
 			...input,
+			serverId: input.serverId
+				? input.serverId
+				: await pickServerForNewDatabase("redis"),
 			databasePassword: input.databasePassword
 				? input.databasePassword
 				: generatePassword(),

@@ -1,4 +1,5 @@
 import { db } from "@nomploy/server/db";
+import { pickServerForNewDatabase } from "./database-placement";
 import {
 	type apiCreatePostgres,
 	backups,
@@ -42,10 +43,15 @@ export const createPostgres = async (
 		});
 	}
 
+	const serverId = input.serverId
+		? input.serverId
+		: await pickServerForNewDatabase("postgres");
+
 	const newPostgres = await db
 		.insert(postgres)
 		.values({
 			...input,
+			serverId,
 			databasePassword: input.databasePassword
 				? input.databasePassword
 				: generatePassword(),

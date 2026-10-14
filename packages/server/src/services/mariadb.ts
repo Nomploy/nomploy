@@ -1,4 +1,5 @@
 import { db } from "@nomploy/server/db";
+import { pickServerForNewDatabase } from "./database-placement";
 import {
 	type apiCreateMariaDB,
 	backups,
@@ -33,6 +34,9 @@ export const createMariadb = async (
 		.insert(mariadb)
 		.values({
 			...input,
+			serverId: input.serverId
+				? input.serverId
+				: await pickServerForNewDatabase("mariadb"),
 			databasePassword: input.databasePassword
 				? input.databasePassword
 				: generatePassword(),

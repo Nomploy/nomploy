@@ -1,4 +1,5 @@
 import { db } from "@nomploy/server/db";
+import { pickServerForNewDatabase } from "./database-placement";
 import {
 	type apiCreateMongo,
 	backups,
@@ -32,6 +33,9 @@ export const createMongo = async (input: z.infer<typeof apiCreateMongo>) => {
 		.insert(mongo)
 		.values({
 			...input,
+			serverId: input.serverId
+				? input.serverId
+				: await pickServerForNewDatabase("mongo"),
 			databasePassword: input.databasePassword
 				? input.databasePassword
 				: generatePassword(),

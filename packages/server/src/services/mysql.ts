@@ -1,4 +1,5 @@
 import { db } from "@nomploy/server/db";
+import { pickServerForNewDatabase } from "./database-placement";
 import {
 	type apiCreateMySql,
 	backups,
@@ -31,6 +32,9 @@ export const createMysql = async (input: z.infer<typeof apiCreateMySql>) => {
 		.insert(mysql)
 		.values({
 			...input,
+			serverId: input.serverId
+				? input.serverId
+				: await pickServerForNewDatabase("mysql"),
 			databasePassword: input.databasePassword
 				? input.databasePassword
 				: generatePassword(),

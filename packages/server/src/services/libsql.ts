@@ -1,4 +1,5 @@
 import { db } from "@nomploy/server/db";
+import { pickServerForNewDatabase } from "./database-placement";
 import {
 	type apiCreateLibsql,
 	backups,
@@ -31,6 +32,9 @@ export const createLibsql = async (input: z.infer<typeof apiCreateLibsql>) => {
 		.insert(libsql)
 		.values({
 			...input,
+			serverId: input.serverId
+				? input.serverId
+				: await pickServerForNewDatabase("libsql"),
 			databasePassword: input.databasePassword
 				? input.databasePassword
 				: generatePassword(),
