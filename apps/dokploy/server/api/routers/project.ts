@@ -25,6 +25,8 @@ import {
 	findMySqlById,
 	findPostgresById,
 	findProjectById,
+	findProjectServiceTargets,
+	removeService,
 	findRedisById,
 	findUserById,
 	IS_CLOUD,
@@ -797,6 +799,15 @@ export const projectRouter = createTRPCRouter({
 					});
 				}
 				await checkProjectAccess(ctx, "delete", input.projectId);
+
+				// Stop each member service's Nomad job before dropping the project row.
+				// Deleting the project FK-cascades the service rows but NOT their Nomad
+				// jobs, which would otherwise keep running and hold their reserved ports.
+				const targets = await findProjectServiceTargets(input.projectId);
+				await Promise.allSettled(
+					targets.map((t) => removeService(t.appName, t.serverId)),
+				);
+
 				const deletedProject = await deleteProject(input.projectId);
 
 				await audit(ctx, {

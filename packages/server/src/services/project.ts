@@ -2,6 +2,7 @@ import { db } from "@nomploy/server/db";
 import {
 	type apiCreateProject,
 	applications,
+	environments,
 	libsql,
 	mariadb,
 	mongo,
@@ -175,6 +176,52 @@ export const deleteProject = async (projectId: string) => {
 		.then((value) => value[0]);
 
 	return project;
+};
+
+/**
+ * Every service in a project, as `{ appName, serverId }` — the targets whose Nomad
+ * jobs must be stopped before the project row is deleted (Postgres FK-cascades the
+ * service rows, but not their Nomad jobs, which would otherwise be orphaned and
+ * keep their ports reserved). Focused columns only (no 100-arg query blowup).
+ */
+export const findProjectServiceTargets = async (
+	projectId: string,
+): Promise<{ appName: string; serverId: string | null }[]> => {
+	const cols = { columns: { appName: true, serverId: true } } as const;
+	const envs = await db.query.environments.findMany({
+		where: eq(environments.projectId, projectId),
+		columns: { environmentId: true },
+		with: {
+			applications: cols,
+			compose: cols,
+			postgres: cols,
+			mysql: cols,
+			mariadb: cols,
+			mongo: cols,
+			redis: cols,
+			libsql: cols,
+		},
+	});
+	const keys = [
+		"applications",
+		"compose",
+		"postgres",
+		"mysql",
+		"mariadb",
+		"mongo",
+		"redis",
+		"libsql",
+	] as const;
+	const targets: { appName: string; serverId: string | null }[] = [];
+	for (const env of envs) {
+		for (const key of keys) {
+			for (const svc of (env as Record<string, any>)[key] ?? []) {
+				if (svc?.appName)
+					targets.push({ appName: svc.appName, serverId: svc.serverId ?? null });
+			}
+		}
+	}
+	return targets;
 };
 
 export const updateProjectById = async (
