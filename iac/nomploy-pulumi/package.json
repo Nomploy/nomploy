@@ -1,0 +1,14 @@
+{
+	"name": "nomploy-iac-demo",
+	"private": true,
+	"version": "0.1.0",
+	"description": "Pulumi prototype: manage nomploy services as code over the REST API.",
+	"main": "index.ts",
+	"devDependencies": {
+		"@types/node": "^22.0.0",
+		"typescript": "^5.6.0"
+	},
+	"dependencies": {
+		"@pulumi/pulumi": "^3.140.0"
+	}
+}

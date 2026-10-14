@@ -1,0 +1,7 @@
+name: nomploy-iac-demo
+runtime:
+  name: nodejs
+  options:
+    typescript: true
+description: Manage nomploy services (project / application / domain) as code via the REST API.
+main: index.ts

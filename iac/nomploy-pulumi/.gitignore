@@ -1,0 +1,5 @@
+node_modules/
+bin/
+*.log
+# Pulumi local/login state (never commit backend state)
+.pulumi/
