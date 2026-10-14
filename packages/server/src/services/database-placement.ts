@@ -26,6 +26,17 @@ const ENGINE_TABLE = {
 	libsql,
 } as const;
 
+/** The standard host port each engine listens on (the default when a database
+ * has no explicitly assigned internalPort). */
+export const ENGINE_DEFAULT_PORT: Record<DatabaseEngine, number> = {
+	postgres: 5432,
+	mysql: 3306,
+	mariadb: 3306,
+	mongo: 27017,
+	redis: 6379,
+	libsql: 8080,
+};
+
 /**
  * Pick the registered server a NEW database of `engine` should pin to, so
  * databases **spread across worker nodes** instead of all piling onto the control
@@ -63,4 +74,37 @@ export const pickServerForNewDatabase = async (
 		}
 	}
 	return best;
+};
+
+/**
+ * Pick a free host port for a NEW database of `engine` on the node it's pinned to
+ * (`serverId`, null = control plane). Each database binds its own static host
+ * port so several of the same engine can share a node; the connection endpoint
+ * stays stable (the port is persisted). Starts at the engine's standard port and
+ * climbs past any port already used by another database on that same node
+ * (counting each one's `internalPort ?? engine default`, and its `externalPort`).
+ */
+export const pickInternalPort = async (
+	serverId: string | null | undefined,
+	engine: DatabaseEngine,
+): Promise<number> => {
+	const target = serverId ?? null;
+	const used = new Set<number>();
+	for (const [eng, table] of Object.entries(ENGINE_TABLE)) {
+		const rows = await db
+			.select({
+				serverId: table.serverId,
+				internalPort: table.internalPort,
+				externalPort: table.externalPort,
+			})
+			.from(table);
+		for (const r of rows) {
+			if ((r.serverId ?? null) !== target) continue; // only ports on this node
+			used.add(r.internalPort ?? ENGINE_DEFAULT_PORT[eng as DatabaseEngine]);
+			if (r.externalPort) used.add(r.externalPort);
+		}
+	}
+	let port = ENGINE_DEFAULT_PORT[engine];
+	while (used.has(port)) port++;
+	return port;
 };

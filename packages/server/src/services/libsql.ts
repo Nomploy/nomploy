@@ -1,5 +1,5 @@
 import { db } from "@nomploy/server/db";
-import { pickServerForNewDatabase } from "./database-placement";
+import { pickInternalPort, pickServerForNewDatabase } from "./database-placement";
 import {
 	type apiCreateLibsql,
 	backups,
@@ -28,13 +28,17 @@ export const createLibsql = async (input: z.infer<typeof apiCreateLibsql>) => {
 		});
 	}
 
+	const serverId = input.serverId
+		? input.serverId
+		: await pickServerForNewDatabase("libsql");
+	const internalPort = await pickInternalPort(serverId, "libsql");
+
 	const newLibsql = await db
 		.insert(libsql)
 		.values({
 			...input,
-			serverId: input.serverId
-				? input.serverId
-				: await pickServerForNewDatabase("libsql"),
+			serverId,
+			internalPort,
 			databasePassword: input.databasePassword
 				? input.databasePassword
 				: generatePassword(),
@@ -156,6 +160,7 @@ export const deployLibsql = async (
 					appName: libsql.appName,
 					image: libsql.dockerImage,
 					containerPort: 8080,
+					hostPort: libsql.internalPort,
 					extraPorts: [5001],
 					externalPort: libsql.externalPort,
 					dataPath: "/var/lib/sqld",

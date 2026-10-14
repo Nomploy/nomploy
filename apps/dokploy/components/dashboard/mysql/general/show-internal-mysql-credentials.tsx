@@ -89,7 +89,7 @@ export const ShowInternalMysqlCredentials = ({ mysqlId }: Props) => {
 								<Label>Internal Connection URL </Label>
 								<ToggleVisibilityInput
 									disabled
-									value={`mysql://${data?.databaseUser}:${data?.databasePassword}@${data?.appName}.service.consul:3306/${data?.databaseName}`}
+									value={`mysql://${data?.databaseUser}:${data?.databasePassword}@${data?.appName}.service.consul:${data?.internalPort ?? 3306}/${data?.databaseName}`}
 								/>
 							</div>
 						</div>

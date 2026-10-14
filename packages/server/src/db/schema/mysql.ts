@@ -44,6 +44,7 @@ export const mysql = pgTable("mysql", {
 	cpuReservation: text("cpuReservation"),
 	cpuLimit: text("cpuLimit"),
 	externalPort: integer("externalPort"),
+	internalPort: integer("internalPort"),
 	applicationStatus: applicationStatus("applicationStatus")
 		.notNull()
 		.default("idle"),

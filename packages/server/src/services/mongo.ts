@@ -1,5 +1,5 @@
 import { db } from "@nomploy/server/db";
-import { pickServerForNewDatabase } from "./database-placement";
+import { pickInternalPort, pickServerForNewDatabase } from "./database-placement";
 import {
 	type apiCreateMongo,
 	backups,
@@ -29,13 +29,17 @@ export const createMongo = async (input: z.infer<typeof apiCreateMongo>) => {
 		});
 	}
 
+	const serverId = input.serverId
+		? input.serverId
+		: await pickServerForNewDatabase("mongo");
+	const internalPort = await pickInternalPort(serverId, "mongo");
+
 	const newMongo = await db
 		.insert(mongo)
 		.values({
 			...input,
-			serverId: input.serverId
-				? input.serverId
-				: await pickServerForNewDatabase("mongo"),
+			serverId,
+			internalPort,
 			databasePassword: input.databasePassword
 				? input.databasePassword
 				: generatePassword(),
@@ -171,6 +175,7 @@ export const deployMongo = async (
 				appName: mongo.appName,
 				image: mongo.dockerImage,
 				containerPort: 27017,
+				hostPort: mongo.internalPort,
 				externalPort: mongo.externalPort,
 				dataPath: "/data/db",
 				env: `MONGO_INITDB_ROOT_USERNAME="${mongo.databaseUser}"\nMONGO_INITDB_ROOT_PASSWORD="${mongo.databasePassword}"${mongo.replicaSets ? "\nMONGO_INITDB_DATABASE=admin" : ""}${mongo.env ? `\n${mongo.env}` : ""}`,

@@ -40,6 +40,7 @@ export const postgres = pgTable("postgres", {
 	env: text("env"),
 	memoryReservation: text("memoryReservation"),
 	externalPort: integer("externalPort"),
+	internalPort: integer("internalPort"),
 	memoryLimit: text("memoryLimit"),
 	cpuReservation: text("cpuReservation"),
 	cpuLimit: text("cpuLimit"),

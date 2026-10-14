@@ -34,6 +34,7 @@ export const redis = pgTable("redis", {
 	cpuReservation: text("cpuReservation"),
 	cpuLimit: text("cpuLimit"),
 	externalPort: integer("externalPort"),
+	internalPort: integer("internalPort"),
 	createdAt: text("createdAt")
 		.notNull()
 		.$defaultFn(() => new Date().toISOString()),

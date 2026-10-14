@@ -89,7 +89,7 @@ export const ShowInternalMariadbCredentials = ({ mariadbId }: Props) => {
 								<Label>Internal Connection URL </Label>
 								<ToggleVisibilityInput
 									disabled
-									value={`mariadb://${data?.databaseUser}:${data?.databasePassword}@${data?.appName}.service.consul:3306/${data?.databaseName}`}
+									value={`mariadb://${data?.databaseUser}:${data?.databasePassword}@${data?.appName}.service.consul:${data?.internalPort ?? 3306}/${data?.databaseName}`}
 								/>
 							</div>
 						</div>

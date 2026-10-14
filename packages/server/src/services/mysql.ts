@@ -1,5 +1,5 @@
 import { db } from "@nomploy/server/db";
-import { pickServerForNewDatabase } from "./database-placement";
+import { pickInternalPort, pickServerForNewDatabase } from "./database-placement";
 import {
 	type apiCreateMySql,
 	backups,
@@ -28,13 +28,17 @@ export const createMysql = async (input: z.infer<typeof apiCreateMySql>) => {
 		});
 	}
 
+	const serverId = input.serverId
+		? input.serverId
+		: await pickServerForNewDatabase("mysql");
+	const internalPort = await pickInternalPort(serverId, "mysql");
+
 	const newMysql = await db
 		.insert(mysql)
 		.values({
 			...input,
-			serverId: input.serverId
-				? input.serverId
-				: await pickServerForNewDatabase("mysql"),
+			serverId,
+			internalPort,
 			databasePassword: input.databasePassword
 				? input.databasePassword
 				: generatePassword(),
@@ -154,6 +158,7 @@ export const deployMySql = async (
 				appName: mysql.appName,
 				image: mysql.dockerImage,
 				containerPort: 3306,
+				hostPort: mysql.internalPort,
 				externalPort: mysql.externalPort,
 				dataPath: "/var/lib/mysql",
 				env:

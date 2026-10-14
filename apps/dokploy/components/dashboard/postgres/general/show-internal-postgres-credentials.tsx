@@ -69,7 +69,7 @@ export const ShowInternalPostgresCredentials = ({ postgresId }: Props) => {
 								<Label>Internal Connection URL </Label>
 								<ToggleVisibilityInput
 									disabled
-									value={`postgresql://${data?.databaseUser}:${data?.databasePassword}@${data?.appName}.service.consul:5432/${data?.databaseName}`}
+									value={`postgresql://${data?.databaseUser}:${data?.databasePassword}@${data?.appName}.service.consul:${data?.internalPort ?? 5432}/${data?.databaseName}`}
 								/>
 							</div>
 						</div>

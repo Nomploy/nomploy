@@ -1,5 +1,5 @@
 import { db } from "@nomploy/server/db";
-import { pickServerForNewDatabase } from "./database-placement";
+import { pickInternalPort, pickServerForNewDatabase } from "./database-placement";
 import {
 	type apiCreateMariaDB,
 	backups,
@@ -30,13 +30,17 @@ export const createMariadb = async (
 		});
 	}
 
+	const serverId = input.serverId
+		? input.serverId
+		: await pickServerForNewDatabase("mariadb");
+	const internalPort = await pickInternalPort(serverId, "mariadb");
+
 	const newMariadb = await db
 		.insert(mariadb)
 		.values({
 			...input,
-			serverId: input.serverId
-				? input.serverId
-				: await pickServerForNewDatabase("mariadb"),
+			serverId,
+			internalPort,
 			databasePassword: input.databasePassword
 				? input.databasePassword
 				: generatePassword(),
@@ -156,6 +160,7 @@ export const deployMariadb = async (
 				appName: mariadb.appName,
 				image: mariadb.dockerImage,
 				containerPort: 3306,
+				hostPort: mariadb.internalPort,
 				externalPort: mariadb.externalPort,
 				dataPath: "/var/lib/mysql",
 				env: `MARIADB_DATABASE="${mariadb.databaseName}"\nMARIADB_USER="${mariadb.databaseUser}"\nMARIADB_PASSWORD="${mariadb.databasePassword}"\nMARIADB_ROOT_PASSWORD="${mariadb.databaseRootPassword}"${mariadb.env ? `\n${mariadb.env}` : ""}`,

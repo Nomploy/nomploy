@@ -105,7 +105,7 @@ export const ShowInternalLibsqlCredentials = ({ libsqlId }: Props) => {
 								<Label>Internal Connection URL </Label>
 								<ToggleVisibilityInput
 									disabled
-									value={`http://${data?.databaseUser}:${data?.databasePassword}@${data?.appName}.service.consul:8080`}
+									value={`http://${data?.databaseUser}:${data?.databasePassword}@${data?.appName}.service.consul:${data?.internalPort ?? 8080}`}
 								/>
 							</div>
 							<div className="flex flex-col gap-2 md:col-span-2">

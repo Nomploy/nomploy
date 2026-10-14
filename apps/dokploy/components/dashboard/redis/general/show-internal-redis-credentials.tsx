@@ -63,7 +63,7 @@ export const ShowInternalRedisCredentials = ({ redisId }: Props) => {
 								<Label>Internal Connection URL </Label>
 								<ToggleVisibilityInput
 									disabled
-									value={`redis://default:${data?.databasePassword}@${data?.appName}.service.consul:6379`}
+									value={`redis://default:${data?.databasePassword}@${data?.appName}.service.consul:${data?.internalPort ?? 6379}`}
 								/>
 							</div>
 						</div>

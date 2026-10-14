@@ -1,5 +1,5 @@
 import { db } from "@nomploy/server/db";
-import { pickServerForNewDatabase } from "./database-placement";
+import { pickInternalPort, pickServerForNewDatabase } from "./database-placement";
 import {
 	type apiCreateRedis,
 	buildAppName,
@@ -28,13 +28,17 @@ export const createRedis = async (input: z.infer<typeof apiCreateRedis>) => {
 		});
 	}
 
+	const serverId = input.serverId
+		? input.serverId
+		: await pickServerForNewDatabase("redis");
+	const internalPort = await pickInternalPort(serverId, "redis");
+
 	const newRedis = await db
 		.insert(redis)
 		.values({
 			...input,
-			serverId: input.serverId
-				? input.serverId
-				: await pickServerForNewDatabase("redis"),
+			serverId,
+			internalPort,
 			databasePassword: input.databasePassword
 				? input.databasePassword
 				: generatePassword(),
@@ -126,6 +130,7 @@ export const deployRedis = async (
 				appName: redis.appName,
 				image: redis.dockerImage,
 				containerPort: 6379,
+				hostPort: redis.internalPort,
 				externalPort: redis.externalPort,
 				dataPath: "/data",
 				env: `REDIS_PASSWORD="${redis.databasePassword}"${

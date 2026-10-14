@@ -40,6 +40,7 @@ export const libsql = pgTable("libsql", {
 	cpuLimit: text("cpuLimit"),
 	//
 	externalPort: integer("externalPort"),
+	internalPort: integer("internalPort"),
 	externalGRPCPort: integer("externalGRPCPort"),
 	externalAdminPort: integer("externalAdminPort"),
 	applicationStatus: applicationStatus("applicationStatus")

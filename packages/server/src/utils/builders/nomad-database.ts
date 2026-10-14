@@ -11,6 +11,10 @@ export interface NomadDatabaseInput {
 	image: string;
 	/** In-container port the engine listens on (5432, 3306, 6379, …). */
 	containerPort: number;
+	/** Static host port this database binds for in-cluster discovery, mapped to
+	 * containerPort. Per-database and persisted, so several of the same engine can
+	 * share a node. Defaults to containerPort (the standard port) when unset. */
+	hostPort?: number | null;
 	/** Optional fixed host port for external access (psql from outside, etc.). */
 	externalPort?: number | null;
 	/**
@@ -110,13 +114,16 @@ export const generateDatabaseNomadJob = (db: NomadDatabaseInput): string => {
 		: "";
 	const mountsBlock = mountBlocks.length ? `\n${mountBlocks.join("\n")}` : "";
 
-	// The engine listens on its standard port as a STATIC host port bound on the
-	// WireGuard overlay, so other services reach it at "<appName>:<containerPort>"
-	// (Consul resolves <appName> to this node). An optional extra external port can
-	// be published too. (Two databases of the same engine pinned to one node would
-	// clash on the static port — Nomad surfaces that as a placement failure.)
+	// The engine is reachable at a STATIC host port bound on the WireGuard overlay,
+	// so other services connect at "<appName>:<hostPort>" (Consul resolves <appName>
+	// to this node and registers the port). Each database gets its OWN host port
+	// (persisted), so several of the same engine can share a node without clashing;
+	// it defaults to the standard engine port (containerPort) for backward compat.
+	const hostPort = db.hostPort ?? db.containerPort;
 	const ports = [
-		`        port "db" {\n          static = ${db.containerPort}\n        }`,
+		hostPort === db.containerPort
+			? `        port "db" {\n          static = ${db.containerPort}\n        }`
+			: `        port "db" {\n          static = ${hostPort}\n          to     = ${db.containerPort}\n        }`,
 	];
 	if (db.externalPort && db.externalPort !== db.containerPort)
 		ports.push(

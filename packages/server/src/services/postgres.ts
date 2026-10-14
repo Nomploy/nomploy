@@ -1,5 +1,5 @@
 import { db } from "@nomploy/server/db";
-import { pickServerForNewDatabase } from "./database-placement";
+import { pickInternalPort, pickServerForNewDatabase } from "./database-placement";
 import {
 	type apiCreatePostgres,
 	backups,
@@ -46,12 +46,14 @@ export const createPostgres = async (
 	const serverId = input.serverId
 		? input.serverId
 		: await pickServerForNewDatabase("postgres");
+	const internalPort = await pickInternalPort(serverId, "postgres");
 
 	const newPostgres = await db
 		.insert(postgres)
 		.values({
 			...input,
 			serverId,
+			internalPort,
 			databasePassword: input.databasePassword
 				? input.databasePassword
 				: generatePassword(),
@@ -169,6 +171,7 @@ export const deployPostgres = async (
 				appName: postgres.appName,
 				image: postgres.dockerImage,
 				containerPort: 5432,
+				hostPort: postgres.internalPort,
 				externalPort: postgres.externalPort,
 				dataPath: getMountPath(postgres.dockerImage),
 				env: `POSTGRES_DB="${postgres.databaseName}"\nPOSTGRES_USER="${postgres.databaseUser}"\nPOSTGRES_PASSWORD="${postgres.databasePassword}"${

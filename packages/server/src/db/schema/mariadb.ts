@@ -46,6 +46,7 @@ export const mariadb = pgTable("mariadb", {
 	cpuLimit: text("cpuLimit"),
 	//
 	externalPort: integer("externalPort"),
+	internalPort: integer("internalPort"),
 	applicationStatus: applicationStatus("applicationStatus")
 		.notNull()
 		.default("idle"),
