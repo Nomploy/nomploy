@@ -8,6 +8,51 @@ import {
 	redis,
 	server,
 } from "../db/schema";
+import { resolveNomadNodeName } from "../utils/databases/nomad-deploy";
+
+const NOMAD_ADDR = process.env.NOMAD_ADDRESS || "http://127.0.0.1:4646";
+const nomadHeaders = (): Record<string, string> =>
+	process.env.NOMAD_TOKEN ? { "X-Nomad-Token": process.env.NOMAD_TOKEN } : {};
+
+/**
+ * Host ports actually reserved by running allocations on the node a database would
+ * pin to — the authoritative source (catches orphaned jobs, non-database services,
+ * or any DB-record/Nomad drift that counting our own rows would miss). Best-effort:
+ * returns an empty set when Nomad is unreachable, so placement still proceeds.
+ */
+const nomadReservedPortsOnNode = async (
+	serverId: string | null | undefined,
+): Promise<Set<number>> => {
+	const used = new Set<number>();
+	try {
+		const nodeName = await resolveNomadNodeName(serverId);
+		const nodesRes = await fetch(`${NOMAD_ADDR}/v1/nodes`, {
+			headers: nomadHeaders(),
+		});
+		if (!nodesRes.ok) return used;
+		const nodes = (await nodesRes.json()) as { ID?: string; Name?: string }[];
+		const node = nodes.find((n) => n.Name === nodeName);
+		if (!node?.ID) return used;
+		const allocRes = await fetch(
+			`${NOMAD_ADDR}/v1/node/${node.ID}/allocations`,
+			{ headers: nomadHeaders() },
+		);
+		if (!allocRes.ok) return used;
+		const allocs = (await allocRes.json()) as {
+			DesiredStatus?: string;
+			AllocatedResources?: { Shared?: { Ports?: { Value?: number }[] } };
+		}[];
+		for (const a of allocs) {
+			if (a.DesiredStatus !== "run") continue; // only allocs holding ports now
+			for (const p of a.AllocatedResources?.Shared?.Ports ?? []) {
+				if (p.Value) used.add(p.Value);
+			}
+		}
+	} catch {
+		// Nomad unreachable — fall back to DB-record counting only.
+	}
+	return used;
+};
 
 export type DatabaseEngine =
 	| "postgres"
@@ -89,7 +134,10 @@ export const pickInternalPort = async (
 	engine: DatabaseEngine,
 ): Promise<number> => {
 	const target = serverId ?? null;
-	const used = new Set<number>();
+	// Start from the host ports actually reserved on the node (authoritative —
+	// catches orphans / non-DB services), then add our own records (covers
+	// databases created but not yet placed, so they aren't absent from Nomad yet).
+	const used = await nomadReservedPortsOnNode(target);
 	for (const [eng, table] of Object.entries(ENGINE_TABLE)) {
 		const rows = await db
 			.select({
