@@ -32,6 +32,7 @@ import { AddAiAssistant } from "@/components/dashboard/project/add-ai-assistant"
 import { AddApplication } from "@/components/dashboard/project/add-application";
 import { AddCompose } from "@/components/dashboard/project/add-compose";
 import { AddDatabase } from "@/components/dashboard/project/add-database";
+import { AddDeployStack } from "@/components/dashboard/project/add-deploy-stack";
 import { AddImport } from "@/components/dashboard/project/add-import";
 import { AddPack } from "@/components/dashboard/project/add-pack";
 import { AdvancedEnvironmentSelector } from "@/components/dashboard/project/advanced-environment-selector";
@@ -1111,6 +1112,10 @@ const EnvironmentPage = (
 													From a catalog
 												</DropdownMenuLabel>
 												<AddPack
+													projectName={projectData?.name}
+													environmentId={environmentId}
+												/>
+												<AddDeployStack
 													projectName={projectData?.name}
 													environmentId={environmentId}
 												/>

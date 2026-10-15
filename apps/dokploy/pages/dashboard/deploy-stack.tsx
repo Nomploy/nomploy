@@ -4,8 +4,8 @@ import { CheckCircle2, Layers, Loader2, XCircle } from "lucide-react";
 import type { GetServerSidePropsContext } from "next";
 import { useRouter } from "next/router";
 import { type ReactElement, useEffect, useMemo, useState } from "react";
-import superjson from "superjson";
 import { toast } from "sonner";
+import superjson from "superjson";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,38 +23,14 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { genSecretsVarFile } from "@/lib/pack-secrets";
 import { slugify } from "@/lib/slug";
 import { appRouter } from "@/server/api/root";
 import { api } from "@/utils/api";
 
 const DEFAULT_REGISTRY = "github.com/Nomploy/nomad-packs";
 // The community default registry is addressed by a blank nomadPackRegistry.
-const COMMUNITY_REGISTRY =
-	"github.com/hashicorp/nomad-pack-community-registry";
-
-// A strong random secret. When the pack's default looks like a fixed-length hex
-// token (e.g. a 64-char encryption key), match that so format constraints hold;
-// otherwise a 32-char alphanumeric (safe in HCL and in URLs/DSNs).
-function genSecret(def: string): string {
-	const rand = (n: number) => {
-		const a = new Uint8Array(n);
-		crypto.getRandomValues(a);
-		return a;
-	};
-	if (/^[0-9a-f]+$/i.test(def) && (def.length === 32 || def.length === 64)) {
-		return Array.from(rand(def.length / 2))
-			.map((b) => b.toString(16).padStart(2, "0"))
-			.join("");
-	}
-	const ALPH =
-		"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-	return Array.from(rand(32))
-		.map((b) => ALPH[b % ALPH.length])
-		.join("");
-}
-
-const hclEscape = (s: string) =>
-	s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+const COMMUNITY_REGISTRY = "github.com/hashicorp/nomad-pack-community-registry";
 
 type Phase = "pending" | "creating" | "deploying" | "done" | "error";
 
@@ -140,17 +116,7 @@ const DeployStack = () => {
 						registryUrl: registry,
 						id,
 					});
-					const lines = (meta?.variables ?? [])
-						.filter(
-							(v) => v.sensitive && (v.kind ?? "string") === "string",
-						)
-						.map(
-							(v) =>
-								`${v.name} = "${hclEscape(
-									genSecret(String(v.default ?? "")),
-								)}"`,
-						);
-					if (lines.length) composeFile = `${lines.join("\n")}\n`;
+					composeFile = genSecretsVarFile(meta?.variables);
 				} catch {
 					// Registry fetch failed — fall back to the pack's own defaults.
 				}
@@ -173,9 +139,7 @@ const DeployStack = () => {
 				ok++;
 			} catch (e) {
 				setPhases((p) => ({ ...p, [id]: "error" }));
-				toast.error(
-					`${id}: ${e instanceof Error ? e.message : "failed"}`,
-				);
+				toast.error(`${id}: ${e instanceof Error ? e.message : "failed"}`);
 			}
 		}
 

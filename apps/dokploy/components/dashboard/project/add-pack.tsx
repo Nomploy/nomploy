@@ -87,12 +87,18 @@ const logoSlug = (name: string) => {
 // inline logo (→ data-URI src), or a colored monogram tile. Older/custom
 // registries omit it — fall back to guessing a Simple Icons slug from the pack
 // name, then a generic box.
-type PackIcon =
+export type PackIcon =
 	| { kind: "brand"; slug: string; hex?: string; title?: string }
 	| { kind: "custom"; src: string }
 	| { kind: "monogram"; text: string; color?: string };
 
-const PackLogo = ({ name, icon }: { name: string; icon?: PackIcon | null }) => {
+export const PackLogo = ({
+	name,
+	icon,
+}: {
+	name: string;
+	icon?: PackIcon | null;
+}) => {
 	const [errored, setErrored] = useState(false);
 
 	// Custom: a self-contained logo the registry published as a data-URI.
@@ -185,7 +191,7 @@ const toHclLiteral = (v: PackVar, value: string): string => {
 
 type PackHealth = { ok?: boolean; checkedAt?: string } | null;
 
-type PackSummary = {
+export type PackSummary = {
 	name: string;
 	description: string;
 	version: string;
@@ -197,7 +203,7 @@ type PackSummary = {
 };
 
 // "4172" → "4.2k". Keeps star counts compact on the card.
-const fmtStars = (n: number): string =>
+export const fmtStars = (n: number): string =>
 	n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : `${n}`;
 
 const ALL_CATEGORIES = "__all__";
