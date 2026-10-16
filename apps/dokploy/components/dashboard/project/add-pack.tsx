@@ -32,8 +32,15 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import {
+	displayDefault,
+	isEditable,
+	type PackVar,
+	toHclLiteral,
+} from "@/lib/pack-vars";
 import { slugify } from "@/lib/slug";
 import { api } from "@/utils/api";
+import { PackVarFields } from "./pack-var-fields";
 
 interface Props {
 	environmentId: string;
@@ -140,53 +147,6 @@ export const PackLogo = ({
 			{name.slice(0, 1).toUpperCase() || <Box className="size-5" />}
 		</div>
 	);
-};
-
-// Plumbing variables the user should never edit from the form — they're managed
-// by the platform (constraints/datacenters) or the deployment name (job_name).
-const HIDDEN_VARS = new Set([
-	"job_name",
-	"namespace",
-	"datacenters",
-	"constraints",
-]);
-// Only scalar variables get a form field; list/object vars (resources, disks…)
-// keep their pack defaults.
-const EDITABLE_KINDS = new Set(["string", "number", "bool"]);
-
-type PackVar = {
-	name: string;
-	description?: string;
-	type?: string;
-	kind?: string;
-	default?: string;
-	placeholder?: boolean;
-	sensitive?: boolean;
-};
-
-const isEditable = (v: PackVar) =>
-	!HIDDEN_VARS.has(v.name) && EDITABLE_KINDS.has(v.kind ?? "");
-
-// A variable's `default` is a raw HCL literal: strings are JSON-style quoted
-// ("\"immich\""), numbers/bools are bare. Turn it into a display value.
-const displayDefault = (v: PackVar): string => {
-	const def = v.default ?? "";
-	if (v.kind === "string") {
-		try {
-			const parsed = JSON.parse(def);
-			return typeof parsed === "string" ? parsed : def;
-		} catch {
-			return def.replace(/^"|"$/g, "");
-		}
-	}
-	return def;
-};
-
-// Turn a form value back into an HCL literal for the var-file.
-const toHclLiteral = (v: PackVar, value: string): string => {
-	if (v.kind === "number") return value.trim();
-	if (v.kind === "bool") return value === "true" ? "true" : "false";
-	return JSON.stringify(value); // properly escapes quotes/newlines
 };
 
 type PackHealth = { ok?: boolean; checkedAt?: string } | null;
@@ -446,67 +406,13 @@ export const AddPack = ({
 										built-in defaults and edit variables afterwards.
 									</AlertBlock>
 								) : (
-									editableVars.map((v) => (
-										<div key={v.name} className="space-y-1.5">
-											<Label className="flex items-center gap-2 text-sm">
-												<code className="text-xs">{v.name}</code>
-												{v.placeholder && (
-													<Badge
-														variant="yellow"
-														className="px-1.5 py-0 text-[10px]"
-													>
-														change me
-													</Badge>
-												)}
-												{v.sensitive && (
-													<Badge
-														variant="secondary"
-														className="px-1.5 py-0 text-[10px]"
-													>
-														secret
-													</Badge>
-												)}
-											</Label>
-											{v.kind === "bool" ? (
-												<Select
-													value={values[v.name] ?? displayDefault(v)}
-													onValueChange={(val) =>
-														setValues((s) => ({ ...s, [v.name]: val }))
-													}
-												>
-													<SelectTrigger className="w-full sm:w-[200px]">
-														<SelectValue />
-													</SelectTrigger>
-													<SelectContent>
-														<SelectItem value="true">true</SelectItem>
-														<SelectItem value="false">false</SelectItem>
-													</SelectContent>
-												</Select>
-											) : (
-												<Input
-													type={
-														v.sensitive
-															? "password"
-															: v.kind === "number"
-																? "number"
-																: "text"
-													}
-													value={values[v.name] ?? ""}
-													onChange={(e) =>
-														setValues((s) => ({
-															...s,
-															[v.name]: e.target.value,
-														}))
-													}
-												/>
-											)}
-											{v.description && (
-												<p className="text-muted-foreground text-xs">
-													{v.description}
-												</p>
-											)}
-										</div>
-									))
+									<PackVarFields
+										variables={(detail?.variables as PackVar[]) ?? []}
+										values={values}
+										onChange={(name, value) =>
+											setValues((s) => ({ ...s, [name]: value }))
+										}
+									/>
 								)}
 							</div>
 						</ScrollArea>
