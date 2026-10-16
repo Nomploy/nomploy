@@ -54,11 +54,6 @@ import {
 } from "@nomploy/server/setup/loadbalancer-dns";
 import { getNomadBootstrapCommand } from "@nomploy/server/setup/nomad-bootstrap";
 import {
-	type GalleryPack,
-	mapRegistryPacks,
-	type RegistryPackRaw,
-} from "@nomploy/server/setup/pack-registry";
-import {
 	getClusterServerJoinCommand,
 	getClusterWorkerJoinCommand,
 } from "@nomploy/server/setup/nomad-cluster";
@@ -77,6 +72,12 @@ import {
 	serverMeshMembers,
 	writeCluster,
 } from "@nomploy/server/setup/nomad-mesh";
+import {
+	type GalleryPack,
+	mapRegistryPacks,
+	type NomadStack,
+	type RegistryPackRaw,
+} from "@nomploy/server/setup/pack-registry";
 import {
 	deployTraefikHaSystemJob,
 	getPoolCertMeta,
@@ -104,7 +105,6 @@ interface NomadConfig {
 	token: string;
 	namespace: string;
 }
-
 
 /**
  * Resolve which Nomad cluster a request targets.
@@ -1457,6 +1457,40 @@ done
 					});
 				}
 				return packs.sort((a, b) => a.name.localeCompare(b.name));
+			} catch {
+				return [];
+			}
+		}),
+
+	// Curated stacks published by a GitHub-Pages registry (its /api/stacks.json):
+	// batteries-included bundles of packs the Deploy Stack dialog can offer so a
+	// whole set deploys in a couple of clicks. Returns [] for registries without
+	// the static API (custom git registries / the host cache-scrape has no stacks).
+	listNomadStacks: withPermission("server", "read")
+		.input(z.object({ registryUrl: z.string().optional() }))
+		.query(async ({ input }): Promise<NomadStack[]> => {
+			const url =
+				input.registryUrl?.trim() ||
+				"github.com/hashicorp/nomad-pack-community-registry";
+			if (!/^[a-zA-Z0-9_.:/@#?=&~-]+$/.test(url)) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Invalid registry URL",
+				});
+			}
+			const gh = url.match(
+				/^(?:https?:\/\/)?github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/.*)?$/i,
+			);
+			if (!gh) return [];
+			const apiUrl = `https://${gh[1].toLowerCase()}.github.io/${gh[2]}/api/stacks.json`;
+			try {
+				const ctl = new AbortController();
+				const t = setTimeout(() => ctl.abort(), 6000);
+				const res = await fetch(apiUrl, { signal: ctl.signal });
+				clearTimeout(t);
+				if (!res.ok) return [];
+				const data = (await res.json()) as { stacks?: NomadStack[] };
+				return Array.isArray(data.stacks) ? data.stacks : [];
 			} catch {
 				return [];
 			}

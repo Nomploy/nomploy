@@ -46,9 +46,11 @@ import {
 	toHclLiteral,
 } from "@/lib/pack-vars";
 import { slugify } from "@/lib/slug";
-import { api } from "@/utils/api";
+import { api, type RouterOutputs } from "@/utils/api";
 import { fmtStars, PackLogo, type PackSummary } from "./add-pack";
 import { PackVarFields } from "./pack-var-fields";
+
+type NomadStack = RouterOutputs["nomad"]["listNomadStacks"][number];
 
 interface Props {
 	environmentId: string;
@@ -121,6 +123,10 @@ export const AddDeployStack = ({ environmentId, projectName }: Props) => {
 	const slug = slugify(projectName);
 	const [open, setOpen] = useState(false);
 	const [step, setStep] = useState<"browse" | "configure">("browse");
+	// Within the browse step: curated "stacks" vs. the full pack gallery.
+	const [browseTab, setBrowseTab] = useState<"stacks" | "packs">("stacks");
+	// Selected profile per stack (stackId → profileId; absent = the default set).
+	const [stackProfile, setStackProfile] = useState<Record<string, string>>({});
 	const [registry, setRegistry] = useState<string>(REGISTRIES[0].url);
 	const [custom, setCustom] = useState("");
 	const [search, setSearch] = useState("");
@@ -142,8 +148,20 @@ export const AddDeployStack = ({ environmentId, projectName }: Props) => {
 		{ registryUrl: registryUrl || undefined },
 		{ enabled: open && !!registryUrl },
 	);
+	const { data: stacks, isFetching: stacksFetching } =
+		api.nomad.listNomadStacks.useQuery(
+			{ registryUrl: registryUrl || undefined },
+			{ enabled: open && !!registryUrl },
+		);
 	const createMut = api.compose.create.useMutation();
 	const deployMut = api.compose.deploy.useMutation();
+
+	// Pack names available in this registry — to flag a stack that references a
+	// pack the registry no longer publishes.
+	const availablePacks = useMemo(
+		() => new Set((packs ?? []).map((p) => p.name)),
+		[packs],
+	);
 
 	const categories = useMemo(
 		() =>
@@ -167,6 +185,8 @@ export const AddDeployStack = ({ environmentId, projectName }: Props) => {
 
 	const reset = () => {
 		setStep("browse");
+		setBrowseTab("stacks");
+		setStackProfile({});
 		setSelected(new Set());
 		setDetails({});
 		setValues({});
@@ -178,6 +198,24 @@ export const AddDeployStack = ({ environmentId, projectName }: Props) => {
 		setSelected(new Set());
 		setDetails({});
 		setValues({});
+	};
+
+	// The packs a stack deploys: the chosen profile's set, else the default set.
+	const packsForStack = (stack: NomadStack): string[] => {
+		const profId = stackProfile[stack.id];
+		const prof = stack.profiles?.find((p) => p.id === profId);
+		return prof?.packs ?? stack.packs;
+	};
+
+	// Pick a stack: select its packs (skipping any the registry no longer
+	// publishes, once the pack list has loaded) and jump to the Packs tab.
+	const selectStack = (stack: NomadStack) => {
+		const wanted = packsForStack(stack);
+		const next = packs ? wanted.filter((id) => availablePacks.has(id)) : wanted;
+		setSelected(new Set(next));
+		setDetails({});
+		setValues({});
+		setBrowseTab("packs");
 	};
 
 	const toggle = (name: string) =>
@@ -349,9 +387,33 @@ export const AddDeployStack = ({ environmentId, projectName }: Props) => {
 								<div>
 									<DialogTitle>Deploy a stack</DialogTitle>
 									<DialogDescription>
-										Pick several packs and create them all as services in this
-										environment at once.
+										Deploy a curated stack, or pick packs yourself — all created
+										as services in this environment at once.
 									</DialogDescription>
+									<div className="mt-3 inline-flex rounded-md border p-0.5">
+										<button
+											type="button"
+											onClick={() => setBrowseTab("stacks")}
+											className={`rounded px-3 py-1 text-sm transition-colors ${
+												browseTab === "stacks"
+													? "bg-muted font-medium"
+													: "text-muted-foreground hover:text-foreground"
+											}`}
+										>
+											Stacks
+										</button>
+										<button
+											type="button"
+											onClick={() => setBrowseTab("packs")}
+											className={`rounded px-3 py-1 text-sm transition-colors ${
+												browseTab === "packs"
+													? "bg-muted font-medium"
+													: "text-muted-foreground hover:text-foreground"
+											}`}
+										>
+											Packs
+										</button>
+									</div>
 								</div>
 								<div className="flex flex-col gap-3 sm:flex-row sm:items-center">
 									<div className="space-y-1.5">
@@ -388,7 +450,7 @@ export const AddDeployStack = ({ environmentId, projectName }: Props) => {
 											/>
 										</div>
 									)}
-									{categories.length > 0 && (
+									{browseTab === "packs" && categories.length > 0 && (
 										<div className="space-y-1.5">
 											<Label className="text-xs">Category</Label>
 											<Select value={category} onValueChange={setCategory}>
@@ -408,22 +470,145 @@ export const AddDeployStack = ({ environmentId, projectName }: Props) => {
 											</Select>
 										</div>
 									)}
-									<div className="space-y-1.5">
-										<Label className="text-xs">Search</Label>
-										<Input
-											placeholder="Search packs…"
-											value={search}
-											onChange={(e) => setSearch(e.target.value)}
-											className="w-full sm:w-[200px]"
-										/>
-									</div>
+									{browseTab === "packs" && (
+										<div className="space-y-1.5">
+											<Label className="text-xs">Search</Label>
+											<Input
+												placeholder="Search packs…"
+												value={search}
+												onChange={(e) => setSearch(e.target.value)}
+												className="w-full sm:w-[200px]"
+											/>
+										</div>
+									)}
 								</div>
 							</div>
 						</DialogHeader>
 
-						<ScrollArea className="h-[calc(80vh-13rem)]">
+						<ScrollArea className="h-[calc(80vh-15rem)]">
 							<div className="p-6">
-								{isFetching ? (
+								{browseTab === "stacks" ? (
+									stacksFetching ? (
+										<div className="flex min-h-[40vh] items-center justify-center gap-3 text-muted-foreground">
+											<Loader2 className="size-6 animate-spin" />
+											<span className="text-sm">Loading stacks…</span>
+										</div>
+									) : (stacks?.length ?? 0) === 0 ? (
+										<div className="flex min-h-[40vh] flex-col items-center justify-center gap-2 text-center text-muted-foreground">
+											<Layers className="size-6" />
+											<p className="text-sm">
+												This registry publishes no curated stacks.
+												<br />
+												Switch to <strong>Packs</strong> to pick services
+												yourself.
+											</p>
+										</div>
+									) : (
+										<div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+											{(stacks ?? []).map((st) => {
+												const stPacks = packsForStack(st);
+												// Only flag missing packs once the pack list has loaded,
+												// so a slow pack fetch doesn't cross out everything.
+												const missing = packs
+													? stPacks.filter((id) => !availablePacks.has(id))
+													: [];
+												return (
+													<div
+														key={st.id}
+														className="flex flex-col gap-3 rounded-lg border p-4"
+													>
+														<div className="flex items-start gap-3">
+															<div className="flex size-10 flex-none items-center justify-center rounded-md bg-muted/40">
+																<Layers className="size-5 text-muted-foreground" />
+															</div>
+															<div className="min-w-0 flex-1">
+																<div className="flex items-center gap-2">
+																	<span className="truncate font-medium text-sm">
+																		{st.name}
+																	</span>
+																	<Badge
+																		variant="secondary"
+																		className="flex-none px-1.5 py-0 text-[10px]"
+																	>
+																		{stPacks.length} packs
+																	</Badge>
+																</div>
+																{st.tagline && (
+																	<p className="truncate text-muted-foreground text-xs">
+																		{st.tagline}
+																	</p>
+																)}
+															</div>
+														</div>
+														{st.description && (
+															<p className="line-clamp-2 text-muted-foreground text-xs">
+																{st.description}
+															</p>
+														)}
+														<div className="flex flex-wrap gap-1.5">
+															{stPacks.map((id) => (
+																<Badge
+																	key={id}
+																	variant="outline"
+																	className={`px-1.5 py-0 text-[10px] ${
+																		missing.includes(id)
+																			? "border-destructive/40 text-destructive line-through"
+																			: ""
+																	}`}
+																>
+																	{id}
+																</Badge>
+															))}
+														</div>
+														{missing.length > 0 && (
+															<p className="text-[11px] text-destructive">
+																{missing.length} pack
+																{missing.length === 1 ? "" : "s"} not in this
+																registry — they'll be skipped.
+															</p>
+														)}
+														<div className="mt-auto flex items-center gap-2 pt-1">
+															{(st.profiles?.length ?? 0) > 0 && (
+																<Select
+																	value={stackProfile[st.id] ?? "__default__"}
+																	onValueChange={(v) =>
+																		setStackProfile((s) => ({
+																			...s,
+																			[st.id]: v === "__default__" ? "" : v,
+																		}))
+																	}
+																>
+																	<SelectTrigger className="h-8 w-[140px] text-xs">
+																		<SelectValue />
+																	</SelectTrigger>
+																	<SelectContent>
+																		<SelectItem value="__default__">
+																			Recommended
+																		</SelectItem>
+																		{st.profiles?.map((pr) => (
+																			<SelectItem key={pr.id} value={pr.id}>
+																				{pr.name}
+																			</SelectItem>
+																		))}
+																	</SelectContent>
+																</Select>
+															)}
+															<Button
+																size="sm"
+																variant="secondary"
+																className="ml-auto"
+																disabled={running}
+																onClick={() => selectStack(st)}
+															>
+																Select {stPacks.length - missing.length} packs
+															</Button>
+														</div>
+													</div>
+												);
+											})}
+										</div>
+									)
+								) : isFetching ? (
 									<div className="flex min-h-[40vh] items-center justify-center gap-3 text-muted-foreground">
 										<Loader2 className="size-6 animate-spin" />
 										<span className="text-sm">Loading packs…</span>

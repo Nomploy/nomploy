@@ -35,6 +35,22 @@ export type GalleryPack = {
 };
 
 /**
+ * A curated "stack" published by a GitHub-Pages registry (its /api/stacks.json):
+ * a batteries-included bundle of packs that work well together on one node. The
+ * panel's Deploy Stack dialog lists these so a whole set can be deployed at once.
+ * `packs` is the default set; an optional `profiles` entry offers named variants
+ * (e.g. minimal vs. full) that deploy a different subset.
+ */
+export type NomadStack = {
+	id: string;
+	name: string;
+	tagline?: string;
+	description?: string;
+	packs: string[];
+	profiles?: { id: string; name: string; packs: string[] }[];
+};
+
+/**
  * Normalize a GitHub-Pages registry's packs.json entries into the gallery shape:
  * drop nameless entries, coalesce the homepage (appUrl → sourceUrl), carry the
  * store metadata, and sort most-popular-first (stars desc, then name) so the
