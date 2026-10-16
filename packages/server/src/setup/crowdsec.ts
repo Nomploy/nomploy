@@ -359,6 +359,26 @@ export const ensureHubAccessLog = async (): Promise<void> => {
  * blip the panel (which the hub Traefik serves). Driven by getCrowdsecBouncer()
  * — present → add; null (disabled/enforce off) → remove.
  */
+/**
+ * Remove the `crowdsec@file` middleware from a hub entrypoint, then tidy up: drop
+ * the `middlewares` key if it became empty, and drop the whole `http` block if
+ * THAT became empty — Traefik rejects a standalone empty `http:` element in its
+ * static config (`http cannot be a standalone element`), which otherwise
+ * crash-loops the hub Traefik.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: nested free-form YAML object
+const removeCrowdsecFromEntrypoint = (main: any, ep: string, cur: string[]) => {
+	const http = main.entryPoints?.[ep]?.http;
+	if (!http) return;
+	const next = cur.filter((m) => m !== "crowdsec@file");
+	if (next.length > 0) {
+		http.middlewares = next;
+	} else {
+		delete http.middlewares;
+		if (Object.keys(http).length === 0) delete main.entryPoints[ep].http;
+	}
+};
+
 export const ensureHubBouncer = async (): Promise<void> => {
 	const bouncer = getCrowdsecBouncer();
 	const mainRaw = readMainConfig();
@@ -401,17 +421,18 @@ export const ensureHubBouncer = async (): Promise<void> => {
 		// migration from global → per-service too).
 		main.entryPoints = main.entryPoints ?? {};
 		for (const ep of ["web", "websecure"]) {
-			main.entryPoints[ep] = main.entryPoints[ep] ?? {};
-			main.entryPoints[ep].http = main.entryPoints[ep].http ?? {};
-			const cur: string[] = main.entryPoints[ep].http.middlewares ?? [];
+			const cur: string[] = main.entryPoints[ep]?.http?.middlewares ?? [];
 			const has = cur.includes("crowdsec@file");
 			if (!bouncer.perService && !has) {
+				// Global mode: ensure the bouncer is on the entrypoint. Only create the
+				// http block when actually adding (an empty `http: {}` is rejected).
+				main.entryPoints[ep] = main.entryPoints[ep] ?? {};
+				main.entryPoints[ep].http = main.entryPoints[ep].http ?? {};
 				main.entryPoints[ep].http.middlewares = [...cur, "crowdsec@file"];
 				staticChanged = true;
 			} else if (bouncer.perService && has) {
-				const next = cur.filter((m) => m !== "crowdsec@file");
-				if (next.length > 0) main.entryPoints[ep].http.middlewares = next;
-				else delete main.entryPoints[ep].http.middlewares;
+				// Per-service mode: strip the global attach and tidy up an empty http.
+				removeCrowdsecFromEntrypoint(main, ep, cur);
 				staticChanged = true;
 			}
 		}
@@ -448,9 +469,7 @@ export const ensureHubBouncer = async (): Promise<void> => {
 			const cur: string[] | undefined =
 				main.entryPoints?.[ep]?.http?.middlewares;
 			if (Array.isArray(cur) && cur.includes("crowdsec@file")) {
-				const next = cur.filter((m) => m !== "crowdsec@file");
-				if (next.length > 0) main.entryPoints[ep].http.middlewares = next;
-				else delete main.entryPoints[ep].http.middlewares;
+				removeCrowdsecFromEntrypoint(main, ep, cur);
 				staticChanged = true;
 			}
 		}
