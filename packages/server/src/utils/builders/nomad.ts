@@ -7,6 +7,10 @@ import {
 } from "@nomploy/server/services/cert-resolver";
 import type { Domain } from "@nomploy/server/services/domain";
 import type { InferResultType } from "@nomploy/server/types/with";
+import {
+	CROWDSEC_MIDDLEWARE_REF,
+	isCrowdsecPerServiceActive,
+} from "../../setup/crowdsec-flag";
 import { allServers, readCluster } from "../../setup/nomad-mesh";
 import { encodeBase64, getEnvironmentVariablesObject } from "../docker/utils";
 import { parseComposeToNomadServices } from "./nomad-parser";
@@ -43,6 +47,12 @@ export interface NomadServiceSpec {
 	 * credential. Only meaningful with `metricsPort`. Undefined = default job.
 	 */
 	metricsAuthProfile?: string;
+	/**
+	 * CrowdSec per-service protection. Only meaningful when CrowdSec runs in
+	 * per-service mode (see isCrowdsecPerServiceActive): `false` opts this service
+	 * out of the per-router bouncer middleware. Undefined/true = protected (default).
+	 */
+	crowdsecEnabled?: boolean;
 	healthCheck?: {
 		type: string;
 		path?: string;
@@ -316,6 +326,11 @@ export const getBuildNomadCommand = async (
 		// compose Environment tab; content lives in the variable, not the job HCL.
 		if (compose.nomadSecretsEnabled) {
 			for (const s of services) s.secrets = true;
+		}
+		// Compose-level CrowdSec opt-out applies to the whole stack (a per-service
+		// x-nomad-crowdsec:false in the YAML can still opt an individual service out).
+		if (compose.crowdsecEnabled === false) {
+			for (const s of services) s.crowdsecEnabled = false;
 		}
 		if (compose.configFiles && compose.configFiles.length > 0) {
 			for (const s of services) s.configFiles = compose.configFiles;
@@ -1617,7 +1632,18 @@ const generateConsulServices = (
 				(d.port === port.to || (!d.port && port === service.ports[0])),
 		);
 
-		const tags = generateConsulTags(appName, service.name, portDomains);
+		// In per-service CrowdSec mode, attach the bouncer middleware to this
+		// service's routers unless it opted out (crowdsecEnabled === false). In
+		// global mode (or CrowdSec off) this is false and the bouncer rides the
+		// entrypoints instead.
+		const crowdsecProtect =
+			service.crowdsecEnabled !== false && isCrowdsecPerServiceActive();
+		const tags = generateConsulTags(
+			appName,
+			service.name,
+			portDomains,
+			crowdsecProtect,
+		);
 		// Tag the mesh service with its project so the intentions engine can group
 		// services by project from a single Consul catalog listing (catalog returns
 		// tags, not meta). Harmless to Traefik, which ignores non-traefik tags.
@@ -1688,6 +1714,7 @@ export const generateConsulTags = (
 	appName: string,
 	serviceName: string,
 	domains: Domain[],
+	crowdsecProtect = false,
 ): string[] => {
 	if (domains.length === 0) return [];
 
@@ -1705,6 +1732,10 @@ export const generateConsulTags = (
 			`traefik.http.routers.${routerName}.rule=Host(\`${domain.host}\`)${pathRule}`,
 			`traefik.http.routers.${routerName}.entrypoints=web`,
 		);
+		if (crowdsecProtect)
+			tags.push(
+				`traefik.http.routers.${routerName}.middlewares=${CROWDSEC_MIDDLEWARE_REF}`,
+			);
 
 		// HTTPS router
 		if (domain.https) {
@@ -1714,6 +1745,10 @@ export const generateConsulTags = (
 				`traefik.http.routers.${secureRouter}.entrypoints=websecure`,
 				`traefik.http.routers.${secureRouter}.tls.certresolver=${domain.customCertResolver || "letsencrypt"}`,
 			);
+			if (crowdsecProtect)
+				tags.push(
+					`traefik.http.routers.${secureRouter}.middlewares=${CROWDSEC_MIDDLEWARE_REF}`,
+				);
 		}
 	}
 

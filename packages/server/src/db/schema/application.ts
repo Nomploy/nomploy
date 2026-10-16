@@ -183,6 +183,10 @@ export const applications = pgTable("application", {
 	// This flag gates emitting that template — opt-in per app so a cluster without
 	// workload-identity variable access can't break every deploy at once.
 	nomadSecretsEnabled: boolean("nomadSecretsEnabled").notNull().default(false),
+	// CrowdSec per-service protection. Protected by default (true); false opts this
+	// app out of the per-router bouncer, which only takes effect when CrowdSec runs
+	// in per-service mode (otherwise the bouncer rides the entrypoints globally).
+	crowdsecEnabled: boolean("crowdsecEnabled").notNull().default(true),
 	// Raw editor text of the runtime secrets (KEY=VALUE lines, comments, blanks,
 	// in the author's order). The injected values still live in the Nomad Variable
 	// nomad/jobs/<appName> as individual keys (Go sorts those alphabetically on
@@ -400,6 +404,7 @@ const createSchema = createInsertSchema(applications, {
 		.regex(/^[A-Za-z0-9_-]+$/)
 		.nullable()
 		.optional(),
+	crowdsecEnabled: z.boolean().optional(),
 	enableSubmodules: z.boolean().optional(),
 	icon: z
 		.string()

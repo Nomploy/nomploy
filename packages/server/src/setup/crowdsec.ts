@@ -66,6 +66,15 @@ export type CrowdsecConfig = {
 	 * never ban itself; an operator adds their own admin IP here.
 	 */
 	allowlist: string[];
+	/**
+	 * Per-service enforcement. When false (default) the bouncer is attached
+	 * **globally** on the web/websecure entrypoints (every route protected). When
+	 * true the global attach is dropped and the bouncer is attached **per-router**
+	 * via a Consul tag that each service carries by default; a service can opt out
+	 * (`crowdsecEnabled=false`), which only takes effect in this mode. Only
+	 * meaningful with `enforce` on (the UI gates it on enforce).
+	 */
+	perService: boolean;
 };
 
 const DEFAULT_CROWDSEC_CONFIG: CrowdsecConfig = {
@@ -73,6 +82,7 @@ const DEFAULT_CROWDSEC_CONFIG: CrowdsecConfig = {
 	enforce: false,
 	bouncerKey: "",
 	allowlist: [],
+	perService: false,
 };
 
 // The WireGuard overlay subnet (hub .1, servers .2-.10, workers .11-.254). Always
@@ -115,6 +125,7 @@ export const getCrowdsecConfig = (): CrowdsecConfig => {
 			bouncerKey:
 				typeof parsed.bouncerKey === "string" ? parsed.bouncerKey : "",
 			allowlist: normalizeAllowlist(parsed.allowlist),
+			perService: parsed.perService === true,
 		};
 	} catch {
 		return { ...DEFAULT_CROWDSEC_CONFIG };
@@ -139,6 +150,7 @@ export const setCrowdsecConfig = (cfg: CrowdsecConfig): CrowdsecConfig => {
 		enforce: cfg.enforce === true,
 		bouncerKey,
 		allowlist: normalizeAllowlist(cfg.allowlist),
+		perService: cfg.perService === true,
 	};
 	const file = crowdsecConfigPath();
 	mkdirSync(path.dirname(file), { recursive: true });
@@ -182,15 +194,26 @@ export const getCrowdsecBouncer = (): {
 	trustedIPs: string[];
 	pluginModule: string;
 	pluginVersion: string;
+	/** Attach per-router (via Consul tags) instead of globally on entrypoints. */
+	perService: boolean;
+	/** Whether the plugin actually blocks (false = defined but pass-through). */
+	enforce: boolean;
 } | null => {
 	const cfg = getCrowdsecConfig();
-	if (!cfg.enabled || !cfg.enforce || cfg.bouncerKey === "") return null;
+	// Need a key, and either global enforcement OR per-service mode. In per-service
+	// mode we return (so the middleware is DEFINED) even when enforce is off — it's
+	// then a pass-through (`enabled: false`), which lets per-router tags reference it
+	// safely and makes toggling enforce an instant hot-reload with no app redeploy.
+	if (!cfg.enabled || cfg.bouncerKey === "") return null;
+	if (!cfg.enforce && !cfg.perService) return null;
 	return {
 		lapiHost: `${CONTROL_PLANE_WG_IP}:${LAPI_HOST_PORT}`,
 		lapiKey: cfg.bouncerKey,
 		trustedIPs: [WG_OVERLAY_CIDR, ...cfg.allowlist],
 		pluginModule: CROWDSEC_PLUGIN_MODULE,
 		pluginVersion: CROWDSEC_PLUGIN_VERSION,
+		perService: cfg.perService === true,
+		enforce: cfg.enforce === true,
 	};
 };
 
@@ -347,7 +370,8 @@ export const ensureHubBouncer = async (): Promise<void> => {
 	// biome-ignore lint/suspicious/noExplicitAny: nested YAML mutation
 	let mw: any = {};
 	try {
-		if (existsSync(dynPath)) mw = (parse(readFileSync(dynPath, "utf8")) ?? {}) as unknown;
+		if (existsSync(dynPath))
+			mw = (parse(readFileSync(dynPath, "utf8")) ?? {}) as unknown;
 	} catch {}
 	mw.http = mw.http ?? {};
 	mw.http.middlewares = mw.http.middlewares ?? {};
@@ -371,20 +395,33 @@ export const ensureHubBouncer = async (): Promise<void> => {
 			main.experimental.plugins.crowdsec = desired;
 			staticChanged = true;
 		}
+		// Global entrypoint attach ONLY in global mode. In per-service mode the
+		// bouncer is attached per-router via Consul tags (incl. the panel's own
+		// routers), so ensure it's REMOVED from the entrypoints here (covers the
+		// migration from global → per-service too).
 		main.entryPoints = main.entryPoints ?? {};
 		for (const ep of ["web", "websecure"]) {
 			main.entryPoints[ep] = main.entryPoints[ep] ?? {};
 			main.entryPoints[ep].http = main.entryPoints[ep].http ?? {};
 			const cur: string[] = main.entryPoints[ep].http.middlewares ?? [];
-			if (!cur.includes("crowdsec@file")) {
+			const has = cur.includes("crowdsec@file");
+			if (!bouncer.perService && !has) {
 				main.entryPoints[ep].http.middlewares = [...cur, "crowdsec@file"];
+				staticChanged = true;
+			} else if (bouncer.perService && has) {
+				const next = cur.filter((m) => m !== "crowdsec@file");
+				if (next.length > 0) main.entryPoints[ep].http.middlewares = next;
+				else delete main.entryPoints[ep].http.middlewares;
 				staticChanged = true;
 			}
 		}
 		const desiredMw = {
 			plugin: {
 				crowdsec: {
-					enabled: true,
+					// Pass-through when not enforcing (per-service mode keeps the
+					// middleware defined so per-router tags stay valid; flipping enforce
+					// is then just a hot-reload of this flag).
+					enabled: bouncer.enforce,
 					crowdsecMode: "stream",
 					crowdsecLapiScheme: "http",
 					crowdsecLapiHost: bouncer.lapiHost,
@@ -404,12 +441,12 @@ export const ensureHubBouncer = async (): Promise<void> => {
 			delete main.experimental.plugins.crowdsec;
 			if (Object.keys(main.experimental.plugins).length === 0)
 				delete main.experimental.plugins;
-			if (Object.keys(main.experimental).length === 0)
-				delete main.experimental;
+			if (Object.keys(main.experimental).length === 0) delete main.experimental;
 			staticChanged = true;
 		}
 		for (const ep of ["web", "websecure"]) {
-			const cur: string[] | undefined = main.entryPoints?.[ep]?.http?.middlewares;
+			const cur: string[] | undefined =
+				main.entryPoints?.[ep]?.http?.middlewares;
 			if (Array.isArray(cur) && cur.includes("crowdsec@file")) {
 				const next = cur.filter((m) => m !== "crowdsec@file");
 				if (next.length > 0) main.entryPoints[ep].http.middlewares = next;

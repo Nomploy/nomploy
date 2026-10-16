@@ -11,6 +11,7 @@ import { syncIntentionsForOrg } from "@nomploy/server/setup/nomad-connect";
 import { getBuildCommand } from "@nomploy/server/utils/builders";
 import {
 	assertBuiltImageRunnable,
+	getApplicationNomadDeployCommand,
 	getBuildNomadApplicationCommand,
 	NOMAD_APP_SERVICE_NAME,
 } from "@nomploy/server/utils/builders/nomad-application";
@@ -167,6 +168,38 @@ export const updateApplicationStatus = async (
 		.returning();
 
 	return application;
+};
+
+/**
+ * Re-submit every deployed application's Nomad job (no source rebuild — same as
+ * the per-app `reload`). Used when CrowdSec per-service mode is toggled: the
+ * per-router bouncer tag lives in each service's Consul tags, so already-running
+ * apps only pick up (or drop) their protection on a re-submit. Best-effort and
+ * sequential to keep the blast radius small; a single app's failure is logged and
+ * skipped. Only touches apps that are actually deployed (done/running).
+ */
+export const reloadDeployedApplications = async (): Promise<void> => {
+	const rows = await db.query.applications.findMany({
+		columns: { applicationId: true, applicationStatus: true },
+	});
+	for (const r of rows) {
+		if (r.applicationStatus !== "done" && r.applicationStatus !== "running")
+			continue;
+		try {
+			const application = await findApplicationById(r.applicationId);
+			const command = await getApplicationNomadDeployCommand(application);
+			if (application.serverId) {
+				await execAsyncRemote(application.serverId, command);
+			} else {
+				await execAsync(command);
+			}
+		} catch (err) {
+			console.error(
+				`reloadDeployedApplications: ${r.applicationId} failed:`,
+				err,
+			);
+		}
+	}
 };
 
 export const deployApplication = async ({

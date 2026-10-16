@@ -96,6 +96,11 @@ export const compose = pgTable("compose", {
 	// configFiles holds only the mount metadata. See getComposeSecrets /
 	// getComposeConfigFiles and the injection in generateNomadJob (compose path).
 	nomadSecretsEnabled: boolean("nomadSecretsEnabled").notNull().default(false),
+	// CrowdSec per-service protection (protected by default). A compose service can
+	// also opt out individually via the `x-nomad-crowdsec: false` service extension;
+	// this compose-level flag opts the whole stack out. Only effective in CrowdSec
+	// per-service mode.
+	crowdsecEnabled: boolean("crowdsecEnabled").notNull().default(true),
 	// Raw editor text of the runtime secrets (order + comments preserved for
 	// display). Injected values live in the Nomad Variable; see the matching
 	// field on `applications` for why this column exists.

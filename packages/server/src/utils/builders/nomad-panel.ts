@@ -1,5 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { getDefaultCertResolver } from "../../services/cert-resolver";
+import {
+	CROWDSEC_MIDDLEWARE_REF,
+	isCrowdsecPerServiceActive,
+} from "../../setup/crowdsec-flag";
 import { encodeBase64 } from "../docker/utils";
 
 // The panel's Traefik file route (written at install), the single place that
@@ -167,6 +171,17 @@ export const generatePanelNomadJob = (
 	const panelEnv = env;
 	// priority 100 so these Consul routers win over the legacy file route (same Host
 	// rule) once the canary is healthy; the file route stays as a harmless fallback.
+	// In per-service CrowdSec mode the bouncer rides per-router tags (the entrypoints
+	// are clean), so the panel must carry it on its own routers to stay protected —
+	// the panel is never opted out (keep admin behind the bouncer; use the allowlist
+	// / a VPN CIDR for admin access). The web router already has redirect-to-https.
+	const csOn = isCrowdsecPerServiceActive();
+	const webMw = csOn
+		? `redirect-to-https@file,${CROWDSEC_MIDDLEWARE_REF}`
+		: "redirect-to-https@file";
+	const secureMwLine = csOn
+		? `\n        "traefik.http.routers.nomploy-secure.middlewares=${CROWDSEC_MIDDLEWARE_REF}",`
+		: "";
 	const serviceBlock = zeroDowntime
 		? `    service {
       name     = "${PANEL_JOB_NAME}"
@@ -176,11 +191,11 @@ export const generatePanelNomadJob = (
         "traefik.enable=true",
         "traefik.http.routers.nomploy-web.rule=Host(\`${panelDomain}\`)",
         "traefik.http.routers.nomploy-web.entrypoints=web",
-        "traefik.http.routers.nomploy-web.middlewares=redirect-to-https@file",
+        "traefik.http.routers.nomploy-web.middlewares=${webMw}",
         "traefik.http.routers.nomploy-web.priority=100",
         "traefik.http.routers.nomploy-secure.rule=Host(\`${panelDomain}\`)",
         "traefik.http.routers.nomploy-secure.entrypoints=websecure",
-        "traefik.http.routers.nomploy-secure.tls.certresolver=${certResolver}",
+        "traefik.http.routers.nomploy-secure.tls.certresolver=${certResolver}",${secureMwLine}
         "traefik.http.routers.nomploy-secure.priority=100",
       ]
 

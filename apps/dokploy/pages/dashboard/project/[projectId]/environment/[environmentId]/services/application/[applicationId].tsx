@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import superjson from "superjson";
 import { ShowApplicationAutoscaling } from "@/components/dashboard/application/advanced/autoscaling/show-autoscaling";
 import { ShowClusterSettings } from "@/components/dashboard/application/advanced/cluster/show-cluster-settings";
+import { ShowApplicationCrowdsec } from "@/components/dashboard/application/advanced/crowdsec/show-crowdsec";
 import { AddCommand } from "@/components/dashboard/application/advanced/general/add-command";
 import { ShowApplicationMetrics } from "@/components/dashboard/application/advanced/metrics/show-metrics";
 import { ShowPorts } from "@/components/dashboard/application/advanced/ports/show-port";
@@ -473,6 +474,9 @@ const Service = (
 														serverId={data?.serverId || undefined}
 													/>
 													<ShowApplicationMetrics
+														applicationId={applicationId}
+													/>
+													<ShowApplicationCrowdsec
 														applicationId={applicationId}
 													/>
 													<ShowVersionHistory

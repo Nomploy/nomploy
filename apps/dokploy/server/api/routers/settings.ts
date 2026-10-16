@@ -49,17 +49,8 @@ import {
 	writeTraefikSetup,
 } from "@nomploy/server";
 import { db } from "@nomploy/server/db";
+import { reloadDeployedApplications } from "@nomploy/server/services/application";
 import { checkPermission } from "@nomploy/server/services/permission";
-import {
-	deployLogAgent,
-	deployOtelCollector,
-	getObservabilityLogs,
-	getObservabilityStatus,
-	getOtelConfig,
-	setOtelConfig,
-	stopLogAgent,
-	stopOtelCollector,
-} from "@nomploy/server/setup/otel-collector";
 import {
 	crowdsecUnban,
 	deployCrowdsec,
@@ -70,6 +61,16 @@ import {
 	setCrowdsecConfig,
 	stopCrowdsec,
 } from "@nomploy/server/setup/crowdsec";
+import {
+	deployLogAgent,
+	deployOtelCollector,
+	getObservabilityLogs,
+	getObservabilityStatus,
+	getOtelConfig,
+	setOtelConfig,
+	stopLogAgent,
+	stopOtelCollector,
+} from "@nomploy/server/setup/otel-collector";
 import { deployTraefikHaSystemJob } from "@nomploy/server/setup/traefik-ha";
 import {
 	getTraefikVersion,
@@ -335,7 +336,9 @@ export const settingsRouter = createTRPCRouter({
 		return getCrowdsecStatus();
 	}),
 	getCrowdsecBanHistory: adminProcedure
-		.input(z.object({ minutes: z.number().int().min(5).max(10_080).optional() }))
+		.input(
+			z.object({ minutes: z.number().int().min(5).max(10_080).optional() }),
+		)
 		.query(({ input }) => getCrowdsecBanHistory(input.minutes ?? 360)),
 	crowdsecUnban: adminProcedure
 		.input(z.object({ ip: z.string() }))
@@ -357,23 +360,36 @@ export const settingsRouter = createTRPCRouter({
 				// Anti-lockout allowlist (CIDRs/IPs). The WG overlay subnet is always
 				// added server-side, so the cluster can't ban itself.
 				allowlist: z.array(z.string()).optional(),
+				// Per-service mode: attach the bouncer per-router (opt-out per service)
+				// instead of globally on the entrypoints. Toggling this re-registers
+				// every deployed app so it picks up/drops its per-router bouncer tag.
+				perService: z.boolean().optional(),
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
 			// Preserve the generated bouncer key across saves (not a client input).
 			const prev = getCrowdsecConfig();
 			const nextEnforce = input.enforce ?? false;
+			const nextPerService = input.perService ?? false;
 			setCrowdsecConfig({
 				enabled: input.enabled,
 				enforce: nextEnforce,
 				bouncerKey: prev.bouncerKey,
 				allowlist: input.allowlist ?? [],
+				perService: nextPerService,
 			});
-			// Whether the pool Traefik bouncer should be active before vs after. The
-			// key is present after setCrowdsecConfig when enabled (generated on first
-			// enable), so gate on enabled+enforce.
-			const prevActive = prev.enabled && prev.enforce && prev.bouncerKey !== "";
-			const nextActive = input.enabled && nextEnforce;
+			// Whether the bouncer is configured at all (middleware defined / entrypoint
+			// or per-router attach) before vs after — active when enabled with a key and
+			// either enforcing or in per-service mode.
+			const prevActive =
+				prev.enabled &&
+				prev.bouncerKey !== "" &&
+				(prev.enforce || prev.perService);
+			const nextActive = input.enabled && (nextEnforce || nextPerService);
+			// Whether per-service (per-router) attachment is active before vs after.
+			const prevPerSvc =
+				prev.enabled && prev.perService && prev.bouncerKey !== "";
+			const nextPerSvc = input.enabled && nextPerService;
 			// Deploy/stop the detector + (re)configure the pool bouncer in the
 			// background so the request returns immediately (mirrors
 			// saveObservability). Tolerate failure (e.g. no cluster).
@@ -386,13 +402,20 @@ export const settingsRouter = createTRPCRouter({
 					// we must still remove it from the hub Traefik.
 					await ensureHubBouncer();
 				}
-				// Reconfigure the HA pool Traefik when enforcement turns on, off, or
-				// changes while on (e.g. allowlist edit) — deploy the detector first so
+				// Reconfigure the HA pool Traefik when the bouncer config changes
+				// (enforce/per-service/allowlist/enable) — deploy the detector first so
 				// LAPI is up before the bouncer queries it. (The pool is a system job;
-				// system jobs have no auto_revert, so a bad config needs enforce toggled
-				// off to recover — the panel runs on the independent hub Traefik.)
+				// system jobs have no auto_revert, so a bad config needs the toggle off
+				// to recover — the panel runs on the independent hub Traefik.)
 				if (prevActive || nextActive) {
 					await deployTraefikHaSystemJob();
+				}
+				// On a per-service-mode transition, already-running apps must re-register
+				// so they add (on → per-router) or drop (off → global) the bouncer tag.
+				// New/redeployed services pick it up on their own; composes need a manual
+				// redeploy (the UI says so).
+				if (prevPerSvc !== nextPerSvc) {
+					await reloadDeployedApplications();
 				}
 			})().catch((err) => {
 				console.error("saveCrowdsec background:", err);

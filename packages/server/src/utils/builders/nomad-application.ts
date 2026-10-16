@@ -172,6 +172,8 @@ export const applicationToNomadSpec = (
 		entrypoint: entrypoint.length > 0 ? entrypoint : undefined,
 		metricsPort: application.metricsPort ?? undefined,
 		metricsAuthProfile: application.metricsAuthProfile ?? undefined,
+		// CrowdSec per-service opt-out (only effective in per-service mode).
+		crowdsecEnabled: application.crowdsecEnabled ?? undefined,
 		resources: cpu || memory ? { cpu, memory } : undefined,
 		scaling,
 		volumes: volumes.length > 0 ? volumes : undefined,

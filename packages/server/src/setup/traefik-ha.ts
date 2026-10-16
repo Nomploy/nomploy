@@ -79,6 +79,8 @@ export const generateTraefikHaJob = (opts: {
 		trustedIPs: string[];
 		pluginModule: string;
 		pluginVersion: string;
+		perService: boolean;
+		enforce: boolean;
 	};
 }): string => {
 	const token = opts.consulToken ?? "";
@@ -100,16 +102,21 @@ export const generateTraefikHaJob = (opts: {
 		);
 	const experimentalBlock =
 		expLines.length > 0 ? `experimental:\n${expLines.join("\n")}\n` : "";
-	// Attach the bouncer globally on web+websecure when enforcing.
-	const entrypointMw = cs
-		? "\n    http:\n      middlewares:\n        - crowdsec@file"
-		: "";
+	// Attach the bouncer globally on web+websecure — ONLY in global mode. In
+	// per-service mode the bouncer is attached per-router via each service's Consul
+	// tag (see generateConsulTags), so the entrypoints stay clean.
+	const entrypointMw =
+		cs && !cs.perService
+			? "\n    http:\n      middlewares:\n        - crowdsec@file"
+			: "";
 	// The bouncer middleware definition (file provider) — appended to dynamic.yml.
+	// Defined whenever `cs` is present; `enabled` follows enforce so per-service mode
+	// can keep it defined as a pass-through while enforcement is off.
 	const crowdsecMiddleware = cs
 		? `\n    crowdsec:
       plugin:
         crowdsec:
-          enabled: true
+          enabled: ${cs.enforce}
           crowdsecMode: stream
           crowdsecLapiScheme: http
           crowdsecLapiHost: ${JSON.stringify(cs.lapiHost)}

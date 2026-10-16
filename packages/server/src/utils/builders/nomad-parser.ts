@@ -65,6 +65,7 @@ const convertService = (
 	const fileMounts = extractFileMounts(service, configContents);
 	const metricsPort = extractMetricsPort(service);
 	const metricsAuthProfile = extractMetricsAuthProfile(service);
+	const crowdsecEnabled = extractCrowdsecEnabled(service);
 
 	return {
 		name,
@@ -81,7 +82,24 @@ const convertService = (
 		fileMounts,
 		metricsPort,
 		metricsAuthProfile,
+		crowdsecEnabled,
 	};
+};
+
+/**
+ * CrowdSec per-service opt-out via the `x-nomad-crowdsec` service extension.
+ * Protected by default (undefined); set `x-nomad-crowdsec: false` to opt a
+ * compose service out of the per-router bouncer (only effective in per-service
+ * mode). Example:
+ *   my-service:
+ *     x-nomad-crowdsec: false
+ */
+const extractCrowdsecEnabled = (
+	service: DefinitionsService,
+): boolean | undefined => {
+	const raw = (service as Record<string, unknown>)["x-nomad-crowdsec"];
+	if (raw === false || raw === "false") return false;
+	return undefined;
 };
 
 /**
