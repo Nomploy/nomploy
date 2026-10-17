@@ -416,6 +416,17 @@ export const settingsRouter = createTRPCRouter({
 				// redeploy (the UI says so).
 				if (prevPerSvc !== nextPerSvc) {
 					await reloadDeployedApplications();
+					// The panel is a Consul-catalog service too (its routers carry the
+					// bouncer tag in per-service mode — see nomad-panel.ts), but it's a
+					// separate job not covered by reloadDeployedApplications. Re-submit it
+					// (zero-downtime canary, same path as self-update) so the panel is
+					// protected on enable / released on disable. Best-effort: a failure
+					// here must not fail the whole crowdsec save.
+					try {
+						await reloadDockerResource("nomploy");
+					} catch (err) {
+						console.error("saveCrowdsec: panel re-register failed:", err);
+					}
 				}
 			})().catch((err) => {
 				console.error("saveCrowdsec background:", err);
