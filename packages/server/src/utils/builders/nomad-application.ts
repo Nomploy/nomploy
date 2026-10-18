@@ -164,10 +164,14 @@ export const applicationToNomadSpec = (
 		name: NOMAD_APP_SERVICE_NAME,
 		image: imageOverride ?? resolveApplicationImage(application),
 		ports,
-		// When autoscaling, the job starts at min; the autoscaler takes over.
-		replicas: application.autoscalingEnabled
-			? autoscaleMin
-			: (application.replicas ?? 1),
+		// Scale-to-zero: a sleeping app is emitted with count=0 so a redeploy can't
+		// resurrect it (the wake path clears isSleeping first). Otherwise, when
+		// autoscaling, the job starts at min and the autoscaler takes over.
+		replicas: application.isSleeping
+			? 0
+			: application.autoscalingEnabled
+				? autoscaleMin
+				: (application.replicas ?? 1),
 		env,
 		entrypoint: entrypoint.length > 0 ? entrypoint : undefined,
 		metricsPort: application.metricsPort ?? undefined,

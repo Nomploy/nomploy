@@ -101,6 +101,12 @@ export const compose = pgTable("compose", {
 	// this compose-level flag opts the whole stack out. Only effective in CrowdSec
 	// per-service mode.
 	crowdsecEnabled: boolean("crowdsecEnabled").notNull().default(true),
+	// Scale-to-zero (stack-level): may scale every service in this stack to 0 and
+	// wake on request. Only meaningful for HTTP-routed services.
+	scaleToZeroEnabled: boolean("scaleToZeroEnabled").notNull().default(false),
+	idleMinutes: integer("idleMinutes").notNull().default(15),
+	isSleeping: boolean("isSleeping").notNull().default(false),
+	sleepingSince: text("sleepingSince"),
 	// Raw editor text of the runtime secrets (order + comments preserved for
 	// display). Injected values live in the Nomad Variable; see the matching
 	// field on `applications` for why this column exists.

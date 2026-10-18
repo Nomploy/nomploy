@@ -187,6 +187,18 @@ export const applications = pgTable("application", {
 	// app out of the per-router bouncer, which only takes effect when CrowdSec runs
 	// in per-service mode (otherwise the bouncer rides the entrypoints globally).
 	crowdsecEnabled: boolean("crowdsecEnabled").notNull().default(true),
+	// Scale-to-zero: when enabled, this app may be scaled to 0 allocations (manually
+	// or, later, after idleMinutes without requests) and woken on the next request
+	// by the activator. Only meaningful for HTTP-routed (domain-bearing) services.
+	scaleToZeroEnabled: boolean("scaleToZeroEnabled").notNull().default(false),
+	// Minutes of no traffic before auto-sleep (phase 2). Unused while sleeping is
+	// manual; stored now so enabling auto-idle needs no migration.
+	idleMinutes: integer("idleMinutes").notNull().default(15),
+	// Runtime sleep state (authoritative over the builder's count on redeploy — a
+	// sleeping app is emitted with count=0 so a deploy doesn't resurrect it).
+	isSleeping: boolean("isSleeping").notNull().default(false),
+	// ISO timestamp of when it went to sleep (for the UI + the idle calc). Null = awake.
+	sleepingSince: text("sleepingSince"),
 	// Raw editor text of the runtime secrets (KEY=VALUE lines, comments, blanks,
 	// in the author's order). The injected values still live in the Nomad Variable
 	// nomad/jobs/<appName> as individual keys (Go sorts those alphabetically on
@@ -405,6 +417,8 @@ const createSchema = createInsertSchema(applications, {
 		.nullable()
 		.optional(),
 	crowdsecEnabled: z.boolean().optional(),
+	scaleToZeroEnabled: z.boolean().optional(),
+	idleMinutes: z.number().int().positive().optional(),
 	enableSubmodules: z.boolean().optional(),
 	icon: z
 		.string()

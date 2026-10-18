@@ -59,6 +59,8 @@ export type AuditAction =
 	| "stop"
 	| "reload"
 	| "rebuild"
+	| "sleep"
+	| "wake"
 	| "move";
 
 export type AuditResourceType =

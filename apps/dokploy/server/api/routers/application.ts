@@ -18,6 +18,7 @@ import {
 	removeMonitoringDirectory,
 	removeService,
 	removeTraefikConfig,
+	sleepApplication,
 	startService,
 	startServiceRemote,
 	stopService,
@@ -26,6 +27,7 @@ import {
 	updateApplication,
 	updateApplicationStatus,
 	updateDeploymentStatus,
+	wakeApplication,
 	writeConfig,
 	writeConfigRemote,
 } from "@nomploy/server";
@@ -227,6 +229,54 @@ export const applicationRouter = createTRPCRouter({
 				throw new TRPCError({
 					code: "INTERNAL_SERVER_ERROR",
 					message: "Error reloading application",
+					cause: error,
+				});
+			}
+		}),
+	sleep: protectedProcedure
+		.input(apiReloadApplication)
+		.mutation(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.applicationId, {
+				deployment: ["create"],
+			});
+			const application = await findApplicationById(input.applicationId);
+			try {
+				await sleepApplication(input.applicationId);
+				await audit(ctx, {
+					action: "sleep",
+					resourceType: "application",
+					resourceId: application.applicationId,
+					resourceName: application.appName,
+				});
+				return true;
+			} catch (error) {
+				throw new TRPCError({
+					code: "INTERNAL_SERVER_ERROR",
+					message: "Error sleeping application",
+					cause: error,
+				});
+			}
+		}),
+	wake: protectedProcedure
+		.input(apiReloadApplication)
+		.mutation(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.applicationId, {
+				deployment: ["create"],
+			});
+			const application = await findApplicationById(input.applicationId);
+			try {
+				await wakeApplication(input.applicationId);
+				await audit(ctx, {
+					action: "wake",
+					resourceType: "application",
+					resourceId: application.applicationId,
+					resourceName: application.appName,
+				});
+				return true;
+			} catch (error) {
+				throw new TRPCError({
+					code: "INTERNAL_SERVER_ERROR",
+					message: "Error waking application",
 					cause: error,
 				});
 			}

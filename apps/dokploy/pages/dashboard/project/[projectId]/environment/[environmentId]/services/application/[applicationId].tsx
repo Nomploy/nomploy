@@ -19,6 +19,7 @@ import { AddCommand } from "@/components/dashboard/application/advanced/general/
 import { ShowApplicationMetrics } from "@/components/dashboard/application/advanced/metrics/show-metrics";
 import { ShowPorts } from "@/components/dashboard/application/advanced/ports/show-port";
 import { ShowRedirects } from "@/components/dashboard/application/advanced/redirects/show-redirects";
+import { ShowApplicationScaleToZero } from "@/components/dashboard/application/advanced/scale-to-zero/show-scale-to-zero";
 import { ShowSecurity } from "@/components/dashboard/application/advanced/security/show-security";
 import { ShowBuildServer } from "@/components/dashboard/application/advanced/show-build-server";
 import { ShowDeployStrategy } from "@/components/dashboard/application/advanced/show-deploy-strategy";
@@ -477,6 +478,9 @@ const Service = (
 														applicationId={applicationId}
 													/>
 													<ShowApplicationCrowdsec
+														applicationId={applicationId}
+													/>
+													<ShowApplicationScaleToZero
 														applicationId={applicationId}
 													/>
 													<ShowVersionHistory

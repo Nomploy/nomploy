@@ -202,6 +202,45 @@ export const reloadDeployedApplications = async (): Promise<void> => {
 	}
 };
 
+/**
+ * Re-submit an application's Nomad job on its current image (no rebuild), the
+ * same path as `reload`. Used by sleep/wake so the builder re-emits the new count
+ * (0 when sleeping, the configured replicas when awake) without a full redeploy.
+ */
+const reloadApplicationJob = async (applicationId: string): Promise<void> => {
+	const application = await findApplicationById(applicationId);
+	const command = await getApplicationNomadDeployCommand(application);
+	if (application.serverId) {
+		await execAsyncRemote(application.serverId, command);
+	} else {
+		await execAsync(command);
+	}
+};
+
+/**
+ * Scale-to-zero: put an application to sleep (scale to 0) or wake it (back to its
+ * configured replicas). We set the state first so the builder emits the right
+ * count on the re-submit — a sleeping app is count=0 and stays down across
+ * redeploys until woken. Idempotent-ish: callers gate on the current state.
+ */
+export const sleepApplication = async (
+	applicationId: string,
+): Promise<void> => {
+	await updateApplication(applicationId, {
+		isSleeping: true,
+		sleepingSince: new Date().toISOString(),
+	});
+	await reloadApplicationJob(applicationId);
+};
+
+export const wakeApplication = async (applicationId: string): Promise<void> => {
+	await updateApplication(applicationId, {
+		isSleeping: false,
+		sleepingSince: null,
+	});
+	await reloadApplicationJob(applicationId);
+};
+
 export const deployApplication = async ({
 	applicationId,
 	titleLog = "Manual deployment",
