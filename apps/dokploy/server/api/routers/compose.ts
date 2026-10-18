@@ -81,6 +81,35 @@ import { generatePassword } from "@/templates/utils";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { audit } from "../utils/audit";
 
+// Queue a compose (re)deploy the same way the `redeploy` mutation does, so the
+// new config (e.g. count=0 when sleeping) is applied via the proven deploy path.
+const enqueueComposeRedeploy = async (
+	composeId: string,
+	title: string,
+): Promise<void> => {
+	const compose = await findComposeById(composeId);
+	const jobData: DeploymentJob = {
+		composeId,
+		titleLog: title,
+		type: "redeploy",
+		applicationType: "compose",
+		descriptionLog: "",
+		server: !!compose.serverId,
+	};
+	if (IS_CLOUD && compose.serverId) {
+		jobData.serverId = compose.serverId;
+		deploy(jobData).catch((error) => {
+			console.error("Background deployment failed:", error);
+		});
+		return;
+	}
+	await myQueue.add(
+		"deployments",
+		{ ...jobData },
+		{ removeOnComplete: true, removeOnFail: true },
+	);
+};
+
 export const composeRouter = createTRPCRouter({
 	create: protectedProcedure
 		.input(apiCreateCompose)
@@ -672,6 +701,42 @@ export const composeRouter = createTRPCRouter({
 				message: "Redeployment queued",
 				composeId: compose.composeId,
 			};
+		}),
+	sleep: protectedProcedure
+		.input(apiFindCompose)
+		.mutation(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.composeId, {
+				deployment: ["create"],
+			});
+			await updateCompose(input.composeId, {
+				isSleeping: true,
+				sleepingSince: new Date().toISOString(),
+			});
+			await enqueueComposeRedeploy(input.composeId, "Sleep (scale to zero)");
+			await audit(ctx, {
+				action: "sleep",
+				resourceType: "compose",
+				resourceId: input.composeId,
+			});
+			return true;
+		}),
+	wake: protectedProcedure
+		.input(apiFindCompose)
+		.mutation(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.composeId, {
+				deployment: ["create"],
+			});
+			await updateCompose(input.composeId, {
+				isSleeping: false,
+				sleepingSince: null,
+			});
+			await enqueueComposeRedeploy(input.composeId, "Wake");
+			await audit(ctx, {
+				action: "wake",
+				resourceType: "compose",
+				resourceId: input.composeId,
+			});
+			return true;
 		}),
 	stop: protectedProcedure
 		.input(apiFindCompose)

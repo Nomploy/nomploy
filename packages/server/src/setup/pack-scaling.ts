@@ -13,6 +13,7 @@ export type PackScalingCompose = Pick<
 	| "maxReplicas"
 	| "autoscaleCpuTarget"
 	| "autoscaleMemoryTarget"
+	| "isSleeping"
 >;
 
 type ServiceConfig = NonNullable<Compose["serviceScaling"]>[string];
@@ -112,6 +113,14 @@ export const applyScalingToJob = (
 
 	let changed = false;
 	for (const tg of job.TaskGroups ?? []) {
+		// Scale-to-zero: a sleeping stack forces every group to 0 (and drops any
+		// autoscaling policy) so a redeploy keeps it down until woken.
+		if (compose.isSleeping) {
+			tg.Count = 0;
+			tg.Scaling = undefined;
+			changed = true;
+			continue;
+		}
 		const groupSvcNames = [
 			...svcNames(tg.Services),
 			...(tg.Tasks ?? []).flatMap((t: NomadJob) => svcNames(t.Services)),

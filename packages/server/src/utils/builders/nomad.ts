@@ -338,6 +338,12 @@ export const getBuildNomadCommand = async (
 		// Merge per-service scaling set from the panel UI over the compose-file values
 		// (UI wins), so users can set replicas/autoscaling without editing the YAML.
 		applyServiceScalingOverrides(services, compose.serviceScaling);
+		// Scale-to-zero: a sleeping stack is emitted with every service at count=0 so
+		// a redeploy can't resurrect it (wake clears isSleeping first). Wins over the
+		// scaling overrides above.
+		if (compose.isSleeping) {
+			for (const s of services) s.replicas = 0;
+		}
 		// Generate Nomad HCL job spec. Isolated projects join the Connect mesh.
 		const segmentation = compose.environment?.project?.isolated
 			? { projectId: compose.environment.projectId }
