@@ -25,6 +25,7 @@ import {
 	updateCompose,
 } from "@nomploy/server/services/compose";
 import { checkServicePermissionAndAccess } from "@nomploy/server/services/permission";
+import { rightsizeService } from "@nomploy/server/services/rightsize";
 import { getScalingSuggestions } from "@nomploy/server/services/scaling-suggestions";
 import { getProvisioner } from "@nomploy/server/setup/autoscale";
 import {
@@ -1037,6 +1038,32 @@ export const nomadRouter = createTRPCRouter({
 	getScalingSuggestions: protectedProcedure.query(async ({ ctx }) => {
 		return getScalingSuggestions(ctx.session.activeOrganizationId);
 	}),
+
+	// Apply a right-size recommendation to a service (application or a managed DB):
+	// set its reserved CPU (MHz) + memory (MB) and re-submit the job. Compose is not
+	// supported (resources live in its file). Reschedules the alloc — volumeless
+	// apps roll zero-downtime (canary); DBs restart briefly.
+	applyRightsize: protectedProcedure
+		.input(
+			z.object({
+				serviceType: z.string().min(1),
+				serviceId: z.string().min(1),
+				cpuMhz: z.number().int().positive(),
+				memMb: z.number().int().positive(),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.serviceId, {
+				deployment: ["create"],
+			});
+			await rightsizeService(
+				input.serviceType,
+				input.serviceId,
+				input.cpuMhz,
+				input.memMb,
+			);
+			return true;
+		}),
 
 	// HA "LoadBalancer": a Traefik system job on every node tagged nomploy_lb=true
 	// (the hub is excluded — it runs the standalone Traefik). Members serve routes

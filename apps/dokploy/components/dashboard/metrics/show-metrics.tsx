@@ -579,13 +579,106 @@ const CostClusterChart = ({
 	);
 };
 
+/** Per-project cost — every project as a colored line on one chart. */
+const MultiProjectCostChart = ({ minutes }: { minutes: number }) => {
+	const zoom = useZoom();
+	const { data } = api.cost.projectHistory.useQuery(
+		{ minutes },
+		{ refetchInterval: 60000 },
+	);
+	const series = data ?? [];
+	const byTs = new Map<number, Record<string, number>>();
+	for (const s of series)
+		for (const p of s.points) {
+			const row = byTs.get(p.ts) ?? {};
+			row[s.projectId] = p.value;
+			byTs.set(p.ts, row);
+		}
+	const rows = [...byTs.entries()]
+		.map(([time, vals]) => ({ time, ...vals }))
+		.sort((a, b) => a.time - b.time);
+	const cfg: ChartConfig = Object.fromEntries(
+		series.map((s, i) => [
+			s.projectId,
+			{
+				label: s.projectName,
+				color: SERIES_COLORS[i % SERIES_COLORS.length],
+			},
+		]),
+	);
+
+	return (
+		<Card className="bg-background">
+			<CardHeader className="pb-2">
+				<CardTitle className="text-base">Cost — per project</CardTitle>
+				<CardDescription>
+					Each project's run-rate over time (€/mo).
+				</CardDescription>
+			</CardHeader>
+			<CardContent>
+				{rows.length < 2 ? (
+					<p className="py-10 text-center text-sm text-muted-foreground">
+						Collecting samples…
+					</p>
+				) : (
+					<ChartContainer config={cfg} className="h-[220px] w-full">
+						<LineChart
+							data={rows}
+							margin={{ left: 4, right: 8, top: 8 }}
+							{...zoom.handlers}
+						>
+							<CartesianGrid vertical={false} />
+							<XAxis
+								dataKey="time"
+								type="number"
+								scale="time"
+								domain={zoom.domain ?? ["dataMin", "dataMax"]}
+								allowDataOverflow
+								tickFormatter={tickFmt(minutes)}
+								tickLine={false}
+								axisLine={false}
+								minTickGap={40}
+							/>
+							<YAxis
+								tickLine={false}
+								axisLine={false}
+								width={40}
+								allowDecimals={false}
+							/>
+							<ChartTooltip content={<ChartTooltipContent />} />
+							<Legend />
+							{series.map((s, i) => (
+								<Line
+									key={s.projectId}
+									dataKey={s.projectId}
+									name={s.projectName}
+									type="monotone"
+									stroke={SERIES_COLORS[i % SERIES_COLORS.length]}
+									dot={false}
+									connectNulls
+									isAnimationActive={false}
+								/>
+							))}
+							{zoom.refL != null && zoom.refR != null && (
+								<ReferenceArea
+									x1={zoom.refL}
+									x2={zoom.refR}
+									strokeOpacity={0.3}
+								/>
+							)}
+						</LineChart>
+					</ChartContainer>
+				)}
+			</CardContent>
+		</Card>
+	);
+};
+
 export const ShowMetrics = () => {
 	const [minutes, setMinutes] = useState(360);
-	const [projectTarget, setProjectTarget] = useState<string | null>(null);
 
 	const { data: metrics } = api.alert.metrics.useQuery();
 	const { data: rules, refetch: refetchRules } = api.alert.list.useQuery();
-	const { data: projects } = api.cost.projectTargets.useQuery();
 	const onRuleDone = () => refetchRules();
 
 	const allRules = (rules ?? []) as unknown as Rule[];
@@ -662,48 +755,8 @@ export const ShowMetrics = () => {
 				/>
 			))}
 
-			{/* Per-project cost */}
-			{hasProjectCost && (
-				<Card className="bg-background">
-					<CardHeader className="pb-2">
-						<div className="flex flex-wrap items-center justify-between gap-2">
-							<CardTitle className="text-lg">Per-project cost</CardTitle>
-							<select
-								className="h-9 rounded-md border bg-background px-2 text-sm"
-								value={projectTarget ?? ""}
-								onChange={(e) => setProjectTarget(e.target.value || null)}
-							>
-								<option value="">Pick a project…</option>
-								{(projects ?? []).map((p) => (
-									<option key={p.projectId} value={p.projectId}>
-										{p.projectName}
-									</option>
-								))}
-							</select>
-						</div>
-					</CardHeader>
-					<CardContent>
-						{projectTarget ? (
-							<MetricChart
-								meta={{
-									metric: "cost_project_monthly",
-									label: "Project run-rate",
-									unit: "€/mo",
-									needsTarget: true,
-								}}
-								target={projectTarget}
-								minutes={minutes}
-								rules={allRules}
-								onRuleDone={onRuleDone}
-							/>
-						) : (
-							<p className="py-6 text-center text-sm text-muted-foreground">
-								Pick a project to see its run-rate.
-							</p>
-						)}
-					</CardContent>
-				</Card>
-			)}
+			{/* Per-project cost — all projects on one chart */}
+			{hasProjectCost && <MultiProjectCostChart minutes={minutes} />}
 		</div>
 	);
 };

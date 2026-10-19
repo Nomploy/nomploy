@@ -488,6 +488,37 @@ export const startCostSampler = (intervalSeconds = 300): NodeJS.Timeout => {
 	return setInterval(tick, intervalSeconds * 1000);
 };
 
+/** Bucket a (ts,value)-ish series to ≤max points (avg per bucket) for long ranges. */
+const dsRows = <T extends { ts: number }>(
+	rows: T[],
+	avgKeys: (keyof T)[],
+	max = 300,
+): T[] => {
+	if (rows.length <= max) return rows;
+	const first = rows[0]?.ts ?? 0;
+	const last = rows[rows.length - 1]?.ts ?? 0;
+	const bucketMs = Math.max(1, (last - first) / max);
+	const buckets = new Map<number, { ts: number; n: number; sums: Record<string, number> }>();
+	for (const r of rows) {
+		const b = Math.floor((r.ts - first) / bucketMs);
+		const cur = buckets.get(b) ?? { ts: 0, n: 0, sums: {} };
+		cur.ts += r.ts;
+		cur.n += 1;
+		for (const k of avgKeys)
+			cur.sums[k as string] = (cur.sums[k as string] ?? 0) + Number(r[k]);
+		buckets.set(b, cur);
+	}
+	return [...buckets.values()]
+		.map((b) => {
+			const out = { ts: Math.round(b.ts / b.n) } as T;
+			for (const k of avgKeys)
+				(out as Record<string, number>)[k as string] =
+					(b.sums[k as string] ?? 0) / b.n;
+			return out;
+		})
+		.sort((a, b) => a.ts - b.ts);
+};
+
 export interface CostHistoryPoint {
 	ts: number;
 	total: number;
@@ -519,12 +550,58 @@ export const getCostHistory = async (
 			),
 		)
 		.orderBy(costSample.createdAt);
-	return rows.map((r) => ({
-		ts: new Date(r.createdAt).getTime(),
-		total: r.total ?? 0,
-		allocated: r.allocated ?? 0,
-		platform: r.platform ?? 0,
-		idle: r.idle ?? 0,
+	return dsRows(
+		rows.map((r) => ({
+			ts: new Date(r.createdAt).getTime(),
+			total: r.total ?? 0,
+			allocated: r.allocated ?? 0,
+			platform: r.platform ?? 0,
+			idle: r.idle ?? 0,
+		})),
+		["total", "allocated", "platform", "idle"],
+	);
+};
+
+/** Per-project cost history (all projects) for a multi-line chart. */
+export const getProjectCostHistory = async (
+	orgId: string,
+	minutes: number,
+): Promise<
+	{ projectId: string; projectName: string; points: { ts: number; value: number }[] }[]
+> => {
+	const since = new Date(Date.now() - minutes * 60_000).toISOString();
+	const rows = await db
+		.select({
+			projectId: costSample.projectId,
+			projectName: costSample.projectName,
+			createdAt: costSample.createdAt,
+			monthly: costSample.monthly,
+		})
+		.from(costSample)
+		.where(
+			and(
+				eq(costSample.organizationId, orgId),
+				gte(costSample.createdAt, since),
+			),
+		)
+		.orderBy(costSample.createdAt);
+	const byProject = new Map<
+		string,
+		{ projectName: string; points: { ts: number; value: number }[] }
+	>();
+	for (const r of rows) {
+		if (!r.projectId) continue; // skip cluster rows
+		const g = byProject.get(r.projectId) ?? {
+			projectName: r.projectName ?? r.projectId,
+			points: [],
+		};
+		g.points.push({ ts: new Date(r.createdAt).getTime(), value: r.monthly ?? 0 });
+		byProject.set(r.projectId, g);
+	}
+	return [...byProject.entries()].map(([projectId, g]) => ({
+		projectId,
+		projectName: g.projectName,
+		points: dsRows(g.points, ["value"]),
 	}));
 };
 

@@ -15,23 +15,25 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/utils/api";
 
 const ApplyRightsizeButton = ({
-	applicationId,
+	serviceType,
+	serviceId,
 	serviceName,
 	cpuMhz,
 	memMb,
 	onDone,
 }: {
-	applicationId: string;
+	serviceType: string;
+	serviceId: string;
 	serviceName: string;
 	cpuMhz: number;
 	memMb: number;
 	onDone: () => void;
 }) => {
-	const { mutateAsync, isPending } =
-		api.application.applyRightsize.useMutation();
+	const { mutateAsync, isPending } = api.nomad.applyRightsize.useMutation();
+	const isApp = serviceType === "application";
 	const apply = async () => {
 		try {
-			await mutateAsync({ applicationId, cpuMhz, memMb });
+			await mutateAsync({ serviceType, serviceId, cpuMhz, memMb });
 			toast.success("Right-size applied — redeploying");
 			onDone();
 		} catch (err) {
@@ -41,7 +43,11 @@ const ApplyRightsizeButton = ({
 	return (
 		<DialogAction
 			title="Apply right-size?"
-			description={`Set ${serviceName}'s reserved resources to ${cpuMhz} MHz CPU / ${memMb} MB and redeploy it. Changing reserved resources reschedules the allocation — a single-replica app without a canary deploy strategy will restart briefly (a few seconds of downtime). Enable canary (or run ≥2 replicas) for a zero-downtime roll.`}
+			description={`Set ${serviceName}'s reserved resources to ${cpuMhz} MHz CPU / ${memMb} MB and redeploy it. ${
+				isApp
+					? "A volumeless app rolls with a zero-downtime canary; a single-replica app with a writable volume restarts briefly."
+					: "The database reschedules its allocation and restarts briefly (a few seconds of downtime) — it holds a writable volume so there's no canary."
+			}`}
 			onClick={apply}
 		>
 			<Button type="button" size="sm" variant="outline" disabled={isPending}>
@@ -192,7 +198,8 @@ export const SuggestionsList = () => {
 						<div className="flex shrink-0 flex-col items-end gap-1">
 							{s.canApply ? (
 								<ApplyRightsizeButton
-									applicationId={s.serviceId}
+									serviceType={s.serviceType}
+									serviceId={s.serviceId}
 									serviceName={s.serviceName}
 									cpuMhz={s.recommended.cpuMhz}
 									memMb={s.recommended.memMb}
@@ -200,8 +207,8 @@ export const SuggestionsList = () => {
 								/>
 							) : (
 								resized && (
-									<span className="self-center text-xs text-muted-foreground">
-										set in Resources
+									<span className="self-center text-right text-xs text-muted-foreground">
+										edit in its file
 									</span>
 								)
 							)}

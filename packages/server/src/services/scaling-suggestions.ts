@@ -40,6 +40,18 @@ const MEM_FLOOR_MB = 64;
 // Only surface a right-size when it moves either dimension by at least this much.
 const MIN_DELTA = 0.15;
 
+// Service types the panel can right-size (set reserved CPU/mem + redeploy). These
+// store cpuLimit/memoryLimit fields; compose keeps its resources in its own file.
+const RIGHTSIZEABLE_TYPES = new Set([
+	"application",
+	"postgres",
+	"mysql",
+	"mariadb",
+	"mongo",
+	"redis",
+	"libsql",
+]);
+
 const WINDOW_HOURS = 24;
 // Require a handful of samples so a just-deployed service or a brief spike doesn't
 // trigger a suggestion.
@@ -205,7 +217,7 @@ export const getScalingSuggestions = async (
 			estMonthlySaving,
 			// Applications store cpuLimit/memoryLimit the panel can re-submit; other
 			// types (compose/db) are shown but applied in their own tab for now.
-			canApply: m.type === "application" && curCpuMhz > 0 && meaningful,
+			canApply: RIGHTSIZEABLE_TYPES.has(m.type) && curCpuMhz > 0 && meaningful,
 			// Scale-to-zero exists for apps + composes (wakes on request via the
 			// activator); offered on idle services as the "auto-stop" option.
 			canAutoStop: m.type === "application" || m.type === "compose",

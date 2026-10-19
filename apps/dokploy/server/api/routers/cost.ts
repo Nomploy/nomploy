@@ -2,6 +2,7 @@ import {
 	computeCostReport,
 	getCostConfig,
 	getCostHistory,
+	getProjectCostHistory,
 	setCostConfig,
 	suggestHetznerPrices,
 } from "@nomploy/server/services/cost";
@@ -61,6 +62,15 @@ export const costRouter = createTRPCRouter({
 		)
 		.query(async ({ ctx, input }) =>
 			getCostHistory(ctx.session.activeOrganizationId, input.minutes),
+		),
+
+	// Per-project cost history (all projects) for a multi-line chart.
+	projectHistory: withPermission("service", "read")
+		.input(
+			z.object({ minutes: z.number().int().min(5).max(43200).default(1440) }),
+		)
+		.query(async ({ ctx, input }) =>
+			getProjectCostHistory(ctx.session.activeOrganizationId, input.minutes),
 		),
 
 	// Projects that have cost history — targets for a cost_project_monthly alert /
