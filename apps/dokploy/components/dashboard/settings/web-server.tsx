@@ -13,6 +13,7 @@ import { ShowNomployActions } from "./servers/actions/show-nomploy-actions";
 import { ShowStorageActions } from "./servers/actions/show-storage-actions";
 import { ShowTraefikActions } from "./servers/actions/show-traefik-actions";
 import { ToggleDockerCleanup } from "./servers/actions/toggle-docker-cleanup";
+import { ShowActivator } from "./web-server/activator";
 import { ShowWebServerBackups } from "./web-server/show-web-server-backups";
 import { UpdateServer } from "./web-server/update-server";
 import { UpgradeTraefik } from "./web-server/upgrade-traefik";
@@ -53,6 +54,8 @@ export const WebServer = () => {
 						</div>
 
 						<UpgradeTraefik />
+
+						<ShowActivator />
 
 						<div className="flex items-center flex-wrap justify-between gap-4">
 							<span className="text-sm text-muted-foreground flex items-center gap-1.5">

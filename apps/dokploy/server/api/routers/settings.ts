@@ -52,6 +52,11 @@ import { db } from "@nomploy/server/db";
 import { reloadDeployedApplications } from "@nomploy/server/services/application";
 import { checkPermission } from "@nomploy/server/services/permission";
 import {
+	deployActivator,
+	getActivatorConfig,
+	setActivatorConfig,
+} from "@nomploy/server/setup/activator";
+import {
 	crowdsecUnban,
 	deployCrowdsec,
 	ensureHubBouncer,
@@ -332,6 +337,28 @@ export const settingsRouter = createTRPCRouter({
 		const { bouncerKey, ...rest } = cfg;
 		return { ...rest, hasBouncerKey: bouncerKey !== "" };
 	}),
+	getActivator: adminProcedure.query(() => {
+		// Never return the shared secret; expose only whether one is set.
+		const { secret, ...rest } = getActivatorConfig();
+		return { ...rest, hasSecret: secret !== "" };
+	}),
+	saveActivator: adminProcedure
+		.input(z.object({ enabled: z.boolean() }))
+		.mutation(async ({ input, ctx }) => {
+			const prev = getActivatorConfig();
+			setActivatorConfig({ enabled: input.enabled, secret: prev.secret });
+			// Deploy/stop the activator (and its catch-all route) in the background so
+			// the request returns immediately. Tolerate failure (e.g. no cluster).
+			void deployActivator().catch((err) => {
+				console.error("saveActivator background:", err);
+			});
+			await audit(ctx, {
+				action: "update",
+				resourceType: "settings",
+				resourceName: "activator",
+			});
+			return true;
+		}),
 	getCrowdsecStatus: adminProcedure.query(() => {
 		return getCrowdsecStatus();
 	}),
