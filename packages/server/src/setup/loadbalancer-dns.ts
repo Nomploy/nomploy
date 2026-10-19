@@ -2,11 +2,14 @@ import net from "node:net";
 import { and, asc, eq, gte, lt } from "drizzle-orm";
 import { db } from "../db";
 import {
+	applications,
 	cloudProvider,
+	compose,
 	dnsProvider,
 	lbMetricSample,
 	loadBalancer,
 	server,
+	serviceRequestSample,
 } from "../db/schema";
 import { execAsync } from "../utils/process/execAsync";
 import { syncTraefikCertsToConsulKV, TRAEFIK_HA_JOB_NAME } from "./traefik-ha";
@@ -891,6 +894,21 @@ const sumByCodeClass = (body: string): Record<string, number> => {
 	return out;
 };
 
+// Per-Traefik-service cumulative request counts (summed over codes/methods), for
+// the scale-to-zero idle signal. Keyed by the Traefik `service` label (which is
+// the Consul service name, `<appName>-<service>-<port>@consulcatalog`).
+const sumRequestsByService = (body: string): Record<string, number> => {
+	const out: Record<string, number> = {};
+	const re = /traefik_service_requests_total\{([^}]*)\}\s+([0-9.eE+-]+)/gm;
+	let m: RegExpExecArray | null;
+	// biome-ignore lint/suspicious/noAssignInExpressions: standard regex exec loop
+	while ((m = re.exec(body)) !== null) {
+		const svc = m[1]?.match(/service="([^"]*)"/)?.[1];
+		if (svc) out[svc] = (out[svc] ?? 0) + (Number(m[2]) || 0);
+	}
+	return out;
+};
+
 type RawCounters = {
 	reqTotal: number;
 	req2xx: number;
@@ -898,6 +916,8 @@ type RawCounters = {
 	req5xx: number;
 	durSum: number;
 	durCount: number;
+	/** Cumulative requests per Traefik service label (for scale-to-zero idle). */
+	perService: Record<string, number>;
 };
 
 /** Scrape a node's Traefik Prometheus endpoint into cumulative counters. */
@@ -925,6 +945,7 @@ const scrapeRawCounters = async (host: string): Promise<RawCounters | null> => {
 				body,
 				"traefik_entrypoint_request_duration_seconds_count",
 			),
+			perService: sumRequestsByService(body),
 		};
 	} catch {
 		return null;
@@ -1177,6 +1198,8 @@ export const finalizeDrains = async (organizationId: string): Promise<void> => {
 // ---------------------------------------------------------------------------
 
 const METRICS_RETENTION_DAYS = 7;
+// Request-counter history only needs to cover the idle window (minutes–hours).
+const REQUEST_RETENTION_DAYS = 2;
 
 /** Scrape every pool node's cumulative counters once and persist a sample row
  * per node, for each org that has pool nodes. Prunes past the retention window. */
@@ -1184,6 +1207,25 @@ export const sampleLoadBalancerMetrics = async (): Promise<number> => {
 	const orgRows = await db
 		.selectDistinct({ organizationId: server.organizationId })
 		.from(server);
+	// Known appNames (longest first) to map a Traefik `service` label
+	// (<appName>-<service>-<port>@consulcatalog) back to its owning appName.
+	const appRows = await db
+		.select({ appName: applications.appName })
+		.from(applications);
+	const composeRows = await db
+		.select({ appName: compose.appName })
+		.from(compose);
+	const appNames = [...appRows, ...composeRows]
+		.map((r) => r.appName)
+		.filter((a): a is string => !!a)
+		.sort((a, b) => b.length - a.length);
+	const appNameFor = (label: string): string | null => {
+		const name = label.replace(/@.*$/, "");
+		return appNames.find((a) => name.startsWith(`${a}-`)) ?? null;
+	};
+	// Pool-wide cumulative requests per appName, summed across LB nodes.
+	const reqByApp = new Map<string, number>();
+
 	let written = 0;
 	for (const { organizationId } of orgRows) {
 		try {
@@ -1206,6 +1248,10 @@ export const sampleLoadBalancerMetrics = async (): Promise<number> => {
 					durSum: c.durSum,
 					durCount: c.durCount,
 				});
+				for (const [label, count] of Object.entries(c.perService)) {
+					const app = appNameFor(label);
+					if (app) reqByApp.set(app, (reqByApp.get(app) ?? 0) + count);
+				}
 				written++;
 			}
 		} catch (e) {
@@ -1215,8 +1261,24 @@ export const sampleLoadBalancerMetrics = async (): Promise<number> => {
 			);
 		}
 	}
+	// One request-counter row per service this tick (best-effort — skip if the
+	// scrape found nothing so an all-nodes-unreachable blip doesn't look like 0).
+	if (reqByApp.size > 0) {
+		await db.insert(serviceRequestSample).values(
+			[...reqByApp].map(([appName, requests]) => ({
+				appName,
+				requests: Math.round(requests),
+			})),
+		);
+	}
 	const cutoff = new Date(Date.now() - METRICS_RETENTION_DAYS * 86400_000);
 	await db.delete(lbMetricSample).where(lt(lbMetricSample.ts, cutoff));
+	const reqCutoff = new Date(
+		Date.now() - REQUEST_RETENTION_DAYS * 86400_000,
+	).toISOString();
+	await db
+		.delete(serviceRequestSample)
+		.where(lt(serviceRequestSample.createdAt, reqCutoff));
 	return written;
 };
 

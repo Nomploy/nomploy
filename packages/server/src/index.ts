@@ -40,6 +40,7 @@ export * from "./services/proprietary/sso";
 export * from "./services/redirect";
 export * from "./services/redis";
 export * from "./services/registry";
+export * from "./services/request-activity";
 export * from "./services/rollbacks";
 export * from "./services/schedule";
 export * from "./services/security";

@@ -9,6 +9,7 @@ import {
 	getAccessibleServerIds,
 	getApplicationStats,
 	getContainerLogs,
+	getServiceRequestActivity,
 	getWebServerSettings,
 	IS_CLOUD,
 	readConfig,
@@ -143,6 +144,13 @@ export const applicationRouter = createTRPCRouter({
 					cause: error,
 				});
 			}
+		}),
+	requestActivity: protectedProcedure
+		.input(apiFindOneApplication)
+		.query(async ({ input, ctx }) => {
+			await checkServiceAccess(ctx, input.applicationId, "read");
+			const application = await findApplicationById(input.applicationId);
+			return getServiceRequestActivity(application.appName);
 		}),
 	one: protectedProcedure
 		.input(apiFindOneApplication)

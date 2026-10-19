@@ -40,6 +40,7 @@ export * from "./schedule";
 export * from "./security";
 export * from "./server";
 export * from "./service-metric-sample";
+export * from "./service-request-sample";
 export * from "./session";
 export * from "./shared";
 export * from "./ssh-key";

@@ -30,6 +30,10 @@ export const ShowComposeScaleToZero = ({ composeId }: Props) => {
 	const update = api.compose.update.useMutation();
 	const sleep = api.compose.sleep.useMutation();
 	const wake = api.compose.wake.useMutation();
+	const { data: activity } = api.compose.requestActivity.useQuery(
+		{ composeId },
+		{ enabled: !!data?.scaleToZeroEnabled, refetchInterval: 60_000 },
+	);
 
 	const [enabled, setEnabled] = useState(false);
 	const [idleMinutes, setIdleMinutes] = useState("15");
@@ -112,6 +116,13 @@ export const ShowComposeScaleToZero = ({ composeId }: Props) => {
 					</div>
 					<Switch checked={enabled} onCheckedChange={setEnabled} />
 				</div>
+				{enabled && activity && (
+					<p className="text-muted-foreground text-sm">
+						{activity.collecting
+							? "Collecting traffic samples…"
+							: `${activity.requestsLastHour} requests in the last hour · idle ${activity.idleMinutes} min`}
+					</p>
+				)}
 				<div className="space-y-1.5 sm:max-w-xs">
 					<Label>Auto-sleep after (minutes idle)</Label>
 					<Input

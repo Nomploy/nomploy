@@ -19,6 +19,7 @@ import {
 	getAccessibleServerIds,
 	getComposeContainer,
 	getContainerLogs,
+	getServiceRequestActivity,
 	getWebServerSettings,
 	IS_CLOUD,
 	loadServices,
@@ -165,6 +166,13 @@ export const composeRouter = createTRPCRouter({
 			}
 		}),
 
+	requestActivity: protectedProcedure
+		.input(apiFindCompose)
+		.query(async ({ input, ctx }) => {
+			await checkServiceAccess(ctx, input.composeId, "read");
+			const compose = await findComposeById(input.composeId);
+			return getServiceRequestActivity(compose.appName);
+		}),
 	one: protectedProcedure
 		.input(apiFindCompose)
 		.query(async ({ input, ctx }) => {
