@@ -190,9 +190,9 @@ export const ShowCost = () => {
 							<CardHeader className="pb-2">
 								<CardTitle className="text-lg">This month</CardTitle>
 								<CardDescription>
-									Accrued spend so far (day {spend.daysElapsed}/
-									{spend.daysInMonth}) and the end-of-month projection at the
-									current run-rate.
+									Estimated spend so far (day {spend.daysElapsed}/
+									{spend.daysInMonth}) and the end-of-month projection, assuming
+									a steady run-rate.
 								</CardDescription>
 							</CardHeader>
 							<CardContent className="flex flex-col gap-4">

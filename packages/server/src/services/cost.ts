@@ -720,26 +720,27 @@ export const getCostSpend = async (orgId: string): Promise<CostSpend> => {
 		)
 		.orderBy(costSample.createdAt);
 
-	// Integrate run-rate over elapsed intervals. Cap a gap (panel downtime) to one
-	// sampling cadence-ish so a long outage doesn't over/under-count wildly.
-	const MAX_GAP_MS = 15 * 60_000;
-	let monthToDate = 0;
-	let prevTs = monthStart.getTime();
-	let prevRate = rows[0]?.total ?? 0;
-	for (const r of rows) {
-		const ts = new Date(r.createdAt).getTime();
-		const dt = Math.min(Math.max(0, ts - prevTs), MAX_GAP_MS);
-		monthToDate += prevRate * (dt / msInMonth);
-		prevTs = ts;
-		prevRate = r.total ?? prevRate;
-	}
-	// Tail from the last sample to now at the latest rate.
-	monthToDate += prevRate * (Math.min(now.getTime() - prevTs, MAX_GAP_MS) / msInMonth);
-
+	// Estimate from the sampled run-rate, assuming a roughly constant rate over the
+	// month (true for infra — nodes don't churn by the minute). This stays sensible
+	// when tracking only started mid-month: we don't have samples for the early part,
+	// so integrating only what we have would wildly under-count. Instead apply the
+	// average sampled rate to the whole elapsed month, and the current rate to the
+	// rest. Once a full month of samples exists, avg ≈ the real average anyway.
+	const totals = rows
+		.map((r) => r.total ?? 0)
+		.filter((t) => Number.isFinite(t) && t > 0);
+	const avgRate = totals.length
+		? totals.reduce((a, b) => a + b, 0) / totals.length
+		: 0;
 	const runRate = rows.length > 0 ? (rows[rows.length - 1]?.total ?? 0) : 0;
-	const remainingMs = Math.max(0, monthStart.getTime() + msInMonth - now.getTime());
+	const elapsedFraction = Math.min(
+		1,
+		(now.getTime() - monthStart.getTime()) / msInMonth,
+	);
+	const remainingFraction = Math.max(0, 1 - elapsedFraction);
+	const monthToDate = avgRate * elapsedFraction;
 	const projectedMonthEnd =
-		Math.round((monthToDate + runRate * (remainingMs / msInMonth)) * 100) / 100;
+		Math.round((monthToDate + runRate * remainingFraction) * 100) / 100;
 	const budget = cfg.monthlyBudget;
 	return {
 		currency: cfg.currency,
