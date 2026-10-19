@@ -2,12 +2,54 @@ import {
 	AlertTriangle,
 	ChevronRight,
 	Lightbulb,
+	Loader2,
 	Moon,
 	TrendingDown,
 } from "lucide-react";
 import Link from "next/link";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { api } from "@/utils/api";
+
+const ApplyRightsizeButton = ({
+	applicationId,
+	cpuMhz,
+	memMb,
+	onDone,
+}: {
+	applicationId: string;
+	cpuMhz: number;
+	memMb: number;
+	onDone: () => void;
+}) => {
+	const { mutateAsync, isPending } =
+		api.application.applyRightsize.useMutation();
+	return (
+		<Button
+			type="button"
+			size="sm"
+			variant="outline"
+			disabled={isPending}
+			onClick={async () => {
+				try {
+					await mutateAsync({ applicationId, cpuMhz, memMb });
+					toast.success("Right-size applied — redeploying");
+					onDone();
+				} catch (err) {
+					toast.error(err instanceof Error ? err.message : "Failed to apply");
+				}
+			}}
+		>
+			{isPending ? (
+				<Loader2 className="mr-1 size-3.5 animate-spin" />
+			) : (
+				<TrendingDown className="mr-1 size-3.5" />
+			)}
+			Apply
+		</Button>
+	);
+};
 
 const KIND = {
 	under_provisioned: {
@@ -30,9 +72,10 @@ const KIND = {
  * compact banner) so a long list never pushes the project grid down.
  */
 export const SuggestionsList = () => {
-	const { data } = api.nomad.getScalingSuggestions.useQuery(undefined, {
-		refetchInterval: 60000,
-	});
+	const { data, refetch } = api.nomad.getScalingSuggestions.useQuery(
+		undefined,
+		{ refetchInterval: 60000 },
+	);
 	if (!data) return null;
 	if (data.length === 0) {
 		return (
@@ -46,15 +89,17 @@ export const SuggestionsList = () => {
 		<div className="flex flex-col gap-2">
 			{data.map((s) => {
 				const { Icon, className } = KIND[s.kind];
+				const resized =
+					s.current.cpuMhz !== s.recommended.cpuMhz ||
+					s.current.memMb !== s.recommended.memMb;
 				return (
-					<Link
+					<div
 						key={`${s.serviceType}:${s.serviceId}`}
-						href={`/dashboard/project/${s.projectId}/environment/${s.environmentId}/services/${s.serviceType}/${s.serviceId}`}
-						className="flex items-start gap-2.5 rounded-lg border p-3 text-sm transition-colors hover:bg-border"
+						className="flex items-start gap-2.5 rounded-lg border p-3 text-sm"
 					>
 						<Icon className={`mt-0.5 size-4 shrink-0 ${className}`} />
-						<span className="flex min-w-0 flex-col gap-0.5">
-							<span className="flex flex-wrap items-center gap-1.5">
+						<div className="flex min-w-0 flex-1 flex-col gap-0.5">
+							<div className="flex flex-wrap items-center gap-1.5">
 								<span className="font-medium">{s.serviceName}</span>
 								<Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
 									{s.serviceType}
@@ -62,13 +107,47 @@ export const SuggestionsList = () => {
 								<span className="text-xs text-muted-foreground">
 									in {s.projectName}
 								</span>
-							</span>
+								{s.estMonthlySaving > 0 && (
+									<Badge className="bg-emerald-600 px-1.5 py-0 text-[10px] hover:bg-emerald-600">
+										saves ~{s.estMonthlySaving} €/mo
+									</Badge>
+								)}
+							</div>
 							<span>{s.message}</span>
-							<span className="truncate text-xs text-muted-foreground">
-								{s.appName} · {s.samples} samples
-							</span>
-						</span>
-					</Link>
+							{resized && (
+								<span className="text-xs text-muted-foreground">
+									Reserve{" "}
+									<span className="font-medium text-foreground">
+										{s.current.cpuMhz}→{s.recommended.cpuMhz} MHz CPU
+									</span>
+									{" · "}
+									<span className="font-medium text-foreground">
+										{s.current.memMb}→{s.recommended.memMb} MB mem
+									</span>
+								</span>
+							)}
+							<Link
+								href={`/dashboard/project/${s.projectId}/environment/${s.environmentId}/services/${s.serviceType}/${s.serviceId}`}
+								className="truncate text-xs text-muted-foreground underline-offset-2 hover:underline"
+							>
+								{s.appName} · {s.samples} samples — open
+							</Link>
+						</div>
+						{s.canApply ? (
+							<ApplyRightsizeButton
+								applicationId={s.serviceId}
+								cpuMhz={s.recommended.cpuMhz}
+								memMb={s.recommended.memMb}
+								onDone={() => refetch()}
+							/>
+						) : (
+							resized && (
+								<span className="shrink-0 self-center text-xs text-muted-foreground">
+									set in Resources
+								</span>
+							)
+						)}
+					</div>
 				);
 			})}
 		</div>

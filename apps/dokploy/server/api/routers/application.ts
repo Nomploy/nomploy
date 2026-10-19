@@ -19,6 +19,7 @@ import {
 	removeMonitoringDirectory,
 	removeService,
 	removeTraefikConfig,
+	rightsizeApplication,
 	sleepApplication,
 	startService,
 	startServiceRemote,
@@ -237,6 +238,40 @@ export const applicationRouter = createTRPCRouter({
 				throw new TRPCError({
 					code: "INTERNAL_SERVER_ERROR",
 					message: "Error reloading application",
+					cause: error,
+				});
+			}
+		}),
+	applyRightsize: protectedProcedure
+		.input(
+			z.object({
+				applicationId: z.string().min(1),
+				cpuMhz: z.number().int().positive(),
+				memMb: z.number().int().positive(),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.applicationId, {
+				deployment: ["create"],
+			});
+			const application = await findApplicationById(input.applicationId);
+			try {
+				await rightsizeApplication(
+					input.applicationId,
+					input.cpuMhz,
+					input.memMb,
+				);
+				await audit(ctx, {
+					action: "update",
+					resourceType: "application",
+					resourceId: application.applicationId,
+					resourceName: application.appName,
+				});
+				return true;
+			} catch (error) {
+				throw new TRPCError({
+					code: "INTERNAL_SERVER_ERROR",
+					message: "Error applying right-size",
 					cause: error,
 				});
 			}

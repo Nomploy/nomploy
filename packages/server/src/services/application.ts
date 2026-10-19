@@ -241,6 +241,26 @@ export const wakeApplication = async (applicationId: string): Promise<void> => {
 	await reloadApplicationJob(applicationId);
 };
 
+/**
+ * Right-size an application: set its reserved CPU (MHz) + memory (MB) and re-submit
+ * the job (no rebuild). Stored in the app's legacy units — cpuLimit is NanoCPUs
+ * (1 core = 1e9; the builder divides by 1e6 → MHz) and memoryLimit is bytes (÷1024²
+ * → MB). Clamped to sane floors so a bad recommendation can't zero a service out.
+ */
+export const rightsizeApplication = async (
+	applicationId: string,
+	cpuMhz: number,
+	memMb: number,
+): Promise<void> => {
+	const cpu = Math.max(10, Math.round(cpuMhz));
+	const mem = Math.max(16, Math.round(memMb));
+	await updateApplication(applicationId, {
+		cpuLimit: String(cpu * 1_000_000),
+		memoryLimit: String(mem * 1024 * 1024),
+	});
+	await reloadApplicationJob(applicationId);
+};
+
 export const deployApplication = async ({
 	applicationId,
 	titleLog = "Manual deployment",

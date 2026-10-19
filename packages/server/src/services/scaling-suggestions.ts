@@ -1,6 +1,7 @@
 import { eq, gte } from "drizzle-orm";
 import { db } from "../db";
 import { projects, serviceMetricSample } from "../db/schema";
+import { computeCostReport } from "./cost";
 
 export type SuggestionKind = "under_provisioned" | "over_provisioned" | "idle";
 
@@ -19,7 +20,23 @@ export interface ScalingSuggestion {
 	cpuPct: number;
 	memPct: number;
 	samples: number;
+	/** Current reserved (sampled) and the right-size recommendation, in MHz / MB. */
+	current: { cpuMhz: number; memMb: number };
+	recommended: { cpuMhz: number; memMb: number };
+	/** Estimated €/mo saved by applying (reductions only; 0 for a raise). */
+	estMonthlySaving: number;
+	/** Whether the panel can apply the recommendation (applications only for now). */
+	canApply: boolean;
 }
+
+// Recommended reserved = average use over the window × this headroom factor,
+// floored so a quiet service keeps a little room. Raises hot services, lowers
+// over-provisioned ones.
+const HEADROOM = 1.5;
+const CPU_FLOOR_MHZ = 50;
+const MEM_FLOOR_MB = 64;
+// Only surface a right-size when it moves either dimension by at least this much.
+const MIN_DELTA = 0.15;
 
 const WINDOW_HOURS = 24;
 // Require a handful of samples so a just-deployed service or a brief spike doesn't
@@ -129,6 +146,17 @@ export const getScalingSuggestions = async (
 		agg.set(s.appName, g);
 	}
 
+	// Per-service current monthly cost, to estimate the saving of a reduction.
+	// Best-effort: if nothing is priced the map is empty → savings show as 0.
+	const costByApp = new Map<string, number>();
+	try {
+		const report = await computeCostReport(organizationId, null);
+		for (const p of report.projects)
+			for (const s of p.services) costByApp.set(s.appName, s.monthly);
+	} catch {
+		// cost unavailable (no cluster / prices) — savings default to 0
+	}
+
 	const out: ScalingSuggestion[] = [];
 	for (const [appName, g] of agg) {
 		if (g.n < MIN_SAMPLES) continue;
@@ -136,6 +164,28 @@ export const getScalingSuggestions = async (
 		if (!m) continue;
 		const cpuPct = g.cpuA > 0 ? Math.round((g.cpuU / g.cpuA) * 100) : 0;
 		const memPct = g.memA > 0 ? Math.round((g.memU / g.memA) * 100) : 0;
+
+		const curCpuMhz = Math.round(g.cpuA / g.n);
+		const curMemMb = Math.round(g.memA / g.n);
+		const recCpuMhz = Math.max(
+			CPU_FLOOR_MHZ,
+			Math.ceil((g.cpuU / g.n) * HEADROOM),
+		);
+		const recMemMb = Math.max(
+			MEM_FLOOR_MB,
+			Math.ceil((g.memU / g.n) * HEADROOM),
+		);
+		// Blended reserved reduction → saving (only when lowering), scaled by the
+		// service's current cost share. A raise (hot service) saves nothing.
+		const cpuRatio = curCpuMhz > 0 ? recCpuMhz / curCpuMhz : 1;
+		const memRatio = curMemMb > 0 ? recMemMb / curMemMb : 1;
+		const reductionFrac = Math.max(0, 1 - (cpuRatio + memRatio) / 2);
+		const estMonthlySaving =
+			Math.round((costByApp.get(appName) ?? 0) * reductionFrac * 100) / 100;
+		const meaningful =
+			Math.abs(1 - cpuRatio) >= MIN_DELTA ||
+			Math.abs(1 - memRatio) >= MIN_DELTA;
+
 		const base = {
 			appName,
 			serviceType: m.type,
@@ -148,6 +198,12 @@ export const getScalingSuggestions = async (
 			cpuPct,
 			memPct,
 			samples: g.n,
+			current: { cpuMhz: curCpuMhz, memMb: curMemMb },
+			recommended: { cpuMhz: recCpuMhz, memMb: recMemMb },
+			estMonthlySaving,
+			// Applications store cpuLimit/memoryLimit the panel can re-submit; other
+			// types (compose/db) are shown but applied in their own tab for now.
+			canApply: m.type === "application" && curCpuMhz > 0 && meaningful,
 		};
 		const usage = `CPU ${cpuPct}%, mem ${memPct}% of reserved over ${WINDOW_HOURS}h`;
 		if (cpuPct <= 5 && memPct <= 5) {
