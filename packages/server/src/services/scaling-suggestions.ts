@@ -216,6 +216,8 @@ export const getScalingSuggestions = async (
 			out.push({
 				...base,
 				kind: "under_provisioned",
+				// A raise is a reliability fix, not a saving — never show "saves …".
+				estMonthlySaving: 0,
 				message: `Running hot — ${usage}. Raise reserved resources or enable autoscaling.`,
 			});
 		} else if (cpuPct < 15 && memPct < 40) {
