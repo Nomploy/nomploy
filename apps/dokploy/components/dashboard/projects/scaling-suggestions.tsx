@@ -8,46 +8,50 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { DialogAction } from "@/components/shared/dialog-action";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/utils/api";
 
 const ApplyRightsizeButton = ({
 	applicationId,
+	serviceName,
 	cpuMhz,
 	memMb,
 	onDone,
 }: {
 	applicationId: string;
+	serviceName: string;
 	cpuMhz: number;
 	memMb: number;
 	onDone: () => void;
 }) => {
 	const { mutateAsync, isPending } =
 		api.application.applyRightsize.useMutation();
+	const apply = async () => {
+		try {
+			await mutateAsync({ applicationId, cpuMhz, memMb });
+			toast.success("Right-size applied — redeploying");
+			onDone();
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : "Failed to apply");
+		}
+	};
 	return (
-		<Button
-			type="button"
-			size="sm"
-			variant="outline"
-			disabled={isPending}
-			onClick={async () => {
-				try {
-					await mutateAsync({ applicationId, cpuMhz, memMb });
-					toast.success("Right-size applied — redeploying");
-					onDone();
-				} catch (err) {
-					toast.error(err instanceof Error ? err.message : "Failed to apply");
-				}
-			}}
+		<DialogAction
+			title="Apply right-size?"
+			description={`Set ${serviceName}'s reserved resources to ${cpuMhz} MHz CPU / ${memMb} MB and redeploy it. Changing reserved resources reschedules the allocation — a single-replica app without a canary deploy strategy will restart briefly (a few seconds of downtime). Enable canary (or run ≥2 replicas) for a zero-downtime roll.`}
+			onClick={apply}
 		>
-			{isPending ? (
-				<Loader2 className="mr-1 size-3.5 animate-spin" />
-			) : (
-				<TrendingDown className="mr-1 size-3.5" />
-			)}
-			Apply
-		</Button>
+			<Button type="button" size="sm" variant="outline" disabled={isPending}>
+				{isPending ? (
+					<Loader2 className="mr-1 size-3.5 animate-spin" />
+				) : (
+					<TrendingDown className="mr-1 size-3.5" />
+				)}
+				Apply
+			</Button>
+		</DialogAction>
 	);
 };
 
@@ -136,6 +140,7 @@ export const SuggestionsList = () => {
 						{s.canApply ? (
 							<ApplyRightsizeButton
 								applicationId={s.serviceId}
+								serviceName={s.serviceName}
 								cpuMhz={s.recommended.cpuMhz}
 								memMb={s.recommended.memMb}
 								onDone={() => refetch()}
