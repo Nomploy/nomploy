@@ -67,6 +67,11 @@ import {
 	stopCrowdsec,
 } from "@nomploy/server/setup/crowdsec";
 import {
+	deployGoliash,
+	getGoliashConfig,
+	setGoliashConfig,
+} from "@nomploy/server/setup/goliash";
+import {
 	deployLogAgent,
 	deployOtelCollector,
 	getObservabilityLogs,
@@ -356,6 +361,48 @@ export const settingsRouter = createTRPCRouter({
 				action: "update",
 				resourceType: "settings",
 				resourceName: "activator",
+			});
+			return true;
+		}),
+	getGoliash: adminProcedure.query(() => {
+		// Never return the minted Nomad token or secret key; expose only presence.
+		const { nomadToken, nomadTokenAccessor, secretKey, ...rest } =
+			getGoliashConfig();
+		return { ...rest, hasNomadToken: nomadToken !== "" };
+	}),
+	saveGoliash: adminProcedure
+		.input(
+			z.object({
+				enabled: z.boolean(),
+				image: z.string().optional(),
+				publicUrl: z.string().optional(),
+				ownerEmail: z.string().optional(),
+				environment: z.string().optional(),
+				databaseUrl: z.string().optional(),
+				metricsEnabled: z.boolean().optional(),
+				metricsAuthProfile: z.string().optional(),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			await setGoliashConfig({
+				enabled: input.enabled,
+				image: input.image ?? "",
+				publicUrl: input.publicUrl ?? "",
+				ownerEmail: input.ownerEmail ?? "",
+				environment: input.environment ?? "prod",
+				databaseUrl: input.databaseUrl ?? "",
+				metricsEnabled: input.metricsEnabled ?? false,
+				metricsAuthProfile: input.metricsAuthProfile ?? "",
+			});
+			// Deploy/stop the goliash job in the background so the request returns
+			// immediately. Tolerate failure (e.g. no cluster reachable).
+			void deployGoliash().catch((err) => {
+				console.error("saveGoliash background:", err);
+			});
+			await audit(ctx, {
+				action: "update",
+				resourceType: "settings",
+				resourceName: "goliash",
 			});
 			return true;
 		}),

@@ -185,6 +185,17 @@ void (async () => {
 						"@nomploy/server"
 					);
 					const { myQueue } = await import("./queues/queueSetup");
+					// Ensure the goliash integration job is running when enabled —
+					// self-heals after a panel roll / node loss (same rationale as otel/
+					// crowdsec above).
+					const { getGoliashConfig, deployGoliash } = await import(
+						"@nomploy/server/setup/goliash"
+					);
+					if (getGoliashConfig().enabled) {
+						deployGoliash().catch((err) =>
+							console.error("goliash boot ensure:", err),
+						);
+					}
 					startAutoSleepLoop(async (composeId: string) => {
 						const compose = await findComposeById(composeId);
 						await updateCompose(composeId, {
