@@ -28,7 +28,9 @@ import { execAsync } from "../utils/process/execAsync";
  * generated Nomad job, deploy/stop, and leader-boot self-heal.
  */
 const JOB_NAME = "nomploy-goliash";
-const DEFAULT_IMAGE = "ghcr.io/pipozzz/goliash:0.11.0";
+// A real image tag (goliash images are versioned 1.x; 0.11.0 was a pack version,
+// not an image tag). Overridable in the UI; pin a newer tag there as they ship.
+const DEFAULT_IMAGE = "ghcr.io/pipozzz/goliash:1.20.0";
 // Static host port for the web UI / API / agent endpoint (goliash default).
 const GOLIASH_PORT = 8070;
 // The control-plane Nomad + hub dnsmasq (forwards *.service.consul), over WG.

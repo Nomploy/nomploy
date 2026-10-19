@@ -152,7 +152,7 @@ export const ShowGoliash = () => {
 					<div className="space-y-1.5">
 						<Label>Image</Label>
 						<Input
-							placeholder="ghcr.io/pipozzz/goliash:0.11.0"
+							placeholder="ghcr.io/pipozzz/goliash:1.20.0"
 							value={image}
 							onChange={(e) => setImage(e.target.value)}
 						/>
