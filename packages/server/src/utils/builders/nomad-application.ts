@@ -203,15 +203,24 @@ export const generateApplicationNomadJob = (
 	imageOverride?: string,
 ): string => {
 	const spec = applicationToNomadSpec(application, domains, imageOverride);
-	// A canary can't run alongside the old alloc when the app holds an exclusive-
-	// writer volume (they'd share it → corruption), so force canary off there
-	// regardless of the configured count — unless the user opts in (the app
-	// tolerates brief concurrent access). Gate health on a check only if one exists.
+	// Zero-downtime CANARY is the default for a volumeless app (a 2nd alloc runs
+	// beside the old one on a dynamic host port, promoted once healthy, then the old
+	// stops) — matching compose's deriveUpdateConfig. A canary can't share an
+	// exclusive-writer volume (→ corruption), so a RW volume forces a plain rolling
+	// restart (brief downtime) unless the user opts in. An explicit canaryCount > 0
+	// is always honored; the implicit default (0) becomes 1 for volumeless apps.
 	const hasRwVolume = (spec.volumes ?? []).some((v) => v.mode !== "ro");
+	const userCanary = application.canaryCount ?? 0;
 	const canary =
 		hasRwVolume && !application.allowCanaryWithVolume
 			? 0
-			: (application.canaryCount ?? 0);
+			: userCanary > 0
+				? userCanary
+				: 1;
+	// An auto-defaulted canary must auto-promote (otherwise the deploy waits for a
+	// manual promote and never completes). A user-set canary keeps its own setting.
+	const autoPromote =
+		canary > 0 ? (userCanary > 0 ? (application.autoPromote ?? false) : true) : false;
 	return generateNomadJobSpec(
 		application.appName,
 		[spec],
@@ -224,7 +233,7 @@ export const generateApplicationNomadJob = (
 		{
 			maxParallel: application.updateMaxParallel ?? 1,
 			canary,
-			autoPromote: application.autoPromote ?? false,
+			autoPromote,
 			healthCheck: spec.ports.length > 0 ? "checks" : "task_states",
 		},
 		undefined,

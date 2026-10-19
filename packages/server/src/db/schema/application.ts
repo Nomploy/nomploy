@@ -214,10 +214,11 @@ export const applications = pgTable("application", {
 		.$type<{ mountPath: string; varKey: string }[]>()
 		.notNull()
 		.default([]),
-	// Deployment strategy → the job's Nomad `update` stanza. Defaults reproduce
-	// today's rolling deploy exactly. canaryCount > 0 enables canary deploys:
-	// N canaries run beside the old version until healthy, then promote (auto or
-	// manual). See generateUpdateBlock.
+	// Deployment strategy → the job's Nomad `update` stanza. canaryCount > 0 sets N
+	// canaries explicitly; canaryCount = 0 (the column default) means "auto" — the
+	// builder uses a zero-downtime canary for a volumeless app and a plain rolling
+	// restart for one with a writable volume. See generateApplicationNomadJob /
+	// generateUpdateBlock.
 	updateMaxParallel: integer("updateMaxParallel").notNull().default(1),
 	canaryCount: integer("canaryCount").notNull().default(0),
 	autoPromote: boolean("autoPromote").notNull().default(false),
