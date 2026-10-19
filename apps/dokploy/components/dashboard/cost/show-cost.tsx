@@ -70,10 +70,7 @@ export const ShowCost = () => {
 			if (n.serverType) s.add(n.serverType);
 		return [...s].sort();
 	}, [report]);
-	const untypedNodes = useMemo(
-		() => (report?.nodes ?? []).filter((n) => !n.serverType),
-		[report],
-	);
+	const allNodes = useMemo(() => report?.nodes ?? [], [report]);
 
 	const save = async () => {
 		const toNum = (m: Record<string, string>) =>
@@ -152,13 +149,17 @@ export const ShowCost = () => {
 						</Card>
 						<Card className="bg-background">
 							<CardHeader className="pb-2">
-								<CardDescription>Unallocated (idle headroom)</CardDescription>
+								<CardDescription>Unallocated</CardDescription>
 								<CardTitle className="text-2xl">
 									{fmt(report.unallocatedMonthly)}
 									<span className="ml-1 text-sm font-normal text-muted-foreground">
 										/mo
 									</span>
 								</CardTitle>
+								<CardDescription className="pt-1">
+									{fmt(report.platformMonthly)} platform ·{" "}
+									{fmt(report.idleMonthly)} idle
+								</CardDescription>
 							</CardHeader>
 						</Card>
 					</div>
@@ -216,19 +217,29 @@ export const ShowCost = () => {
 									</div>
 								</div>
 							)}
-							{untypedNodes.length > 0 && (
+							{allNodes.length > 0 && (
 								<div>
-									<Label>Per node (hub / manual)</Label>
-									<div className="mt-2 grid gap-3 sm:grid-cols-3">
-										{untypedNodes.map((n) => (
+									<Label>Per node (overrides the type price)</Label>
+									<p className="mb-2 text-xs text-muted-foreground">
+										Leave blank to use the server-type price. Set a node's own
+										price when it differs — e.g. the hub / control-plane box.
+									</p>
+									<div className="grid gap-3 sm:grid-cols-3">
+										{allNodes.map((n) => (
 											<div key={n.id} className="space-y-1">
 												<Label className="text-xs text-muted-foreground">
 													{n.name}
+													{n.serverType ? ` · ${n.serverType}` : ""}
 												</Label>
 												<Input
 													type="number"
 													min={0}
 													step="0.01"
+													placeholder={
+														n.serverType && typePrices[n.serverType]
+															? `type: ${typePrices[n.serverType]}`
+															: "0.00"
+													}
 													value={nodePrices[n.name] ?? ""}
 													onChange={(e) =>
 														setNodePrices((p) => ({

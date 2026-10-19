@@ -129,10 +129,14 @@ export interface CostReport {
 	currency: string;
 	/** Cluster run-rate = sum of node monthly prices. */
 	totalMonthly: number;
-	/** Cost attributed to services (by reserved share). */
+	/** Cost attributed to panel services (= the per-project rollup total). */
 	allocatedMonthly: number;
-	/** totalMonthly − allocatedMonthly: idle headroom + unmapped system jobs. */
+	/** totalMonthly − allocatedMonthly (= platform + idle). */
 	unallocatedMonthly: number;
+	/** Reserved by platform/system jobs with no panel service (traefik, otel, …). */
+	platformMonthly: number;
+	/** Unreserved node capacity you're paying for (idle headroom). */
+	idleMonthly: number;
 	/** Nodes with no price set — the run-rate undercounts until these are priced. */
 	unpricedNodes: string[];
 	nodes: CostNode[];
@@ -314,17 +318,27 @@ export const computeCostReport = async (
 	for (const p of projects)
 		p.services.sort((a, b) => b.monthly - a.monthly);
 
-	const totalMonthly =
-		Math.round(costNodes.reduce((s, n) => s + n.monthly, 0) * 100) / 100;
-	const allocatedMonthly =
-		Math.round([...costByApp.values()].reduce((s, v) => s + v, 0) * 100) / 100;
+	const round2 = (n: number) => Math.round(n * 100) / 100;
+	const totalMonthly = round2(costNodes.reduce((s, n) => s + n.monthly, 0));
+	// Everything reserved on priced nodes (services + platform/system jobs).
+	const reservedMonthly = [...costByApp.values()].reduce((s, v) => s + v, 0);
+	// Only panel services → equals the per-project rollup the UI shows.
+	const allocatedMonthly = round2(
+		serviceRows.reduce((s, r) => s + r.monthly, 0),
+	);
+	// Reserved by system/raw jobs (traefik, otel, crowdsec, registry, the panel…)
+	// that have no panel service to charge to.
+	const platformMonthly = round2(Math.max(0, reservedMonthly - allocatedMonthly));
+	// Unreserved capacity still being paid for.
+	const idleMonthly = round2(Math.max(0, totalMonthly - reservedMonthly));
 
 	return {
 		currency: cfg.currency,
 		totalMonthly,
 		allocatedMonthly,
-		unallocatedMonthly:
-			Math.round((totalMonthly - allocatedMonthly) * 100) / 100,
+		unallocatedMonthly: round2(totalMonthly - allocatedMonthly),
+		platformMonthly,
+		idleMonthly,
 		unpricedNodes: unpriced,
 		nodes: costNodes.sort((a, b) => b.monthly - a.monthly),
 		projects,
