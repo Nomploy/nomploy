@@ -73,10 +73,13 @@ export const ShowCost = () => {
 	const allNodes = useMemo(() => report?.nodes ?? [], [report]);
 
 	const save = async () => {
+		// A blank field means "no price here" (inherit the type price / unset) — drop
+		// it rather than persisting Number("") === 0 as an explicit 0 override.
 		const toNum = (m: Record<string, string>) =>
 			Object.fromEntries(
 				Object.entries(m)
-					.map(([k, v]) => [k, Number(v)] as const)
+					.filter(([, raw]) => raw.trim() !== "")
+					.map(([k, raw]) => [k, Number(raw)] as const)
 					.filter(([, v]) => Number.isFinite(v) && v >= 0),
 			);
 		try {

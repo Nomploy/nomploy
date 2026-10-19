@@ -211,14 +211,18 @@ export const computeCostReport = async (
 		const serverType = poolType.get(pool) ?? null;
 		let monthly = 0;
 		let priceSource: CostNode["priceSource"] = "none";
-		if (cfg.nodePrices[name] != null) {
-			monthly = cfg.nodePrices[name] ?? 0;
+		const override = cfg.nodePrices[name];
+		const typePrice = serverType ? cfg.typePrices[serverType] : undefined;
+		// A node override only counts when > 0; otherwise fall through to the type
+		// price (so a stray 0 never blocks the type price or looks "unpriced").
+		if (override != null && override > 0) {
+			monthly = override;
 			priceSource = "node";
-		} else if (serverType && cfg.typePrices[serverType] != null) {
-			monthly = cfg.typePrices[serverType] ?? 0;
+		} else if (typePrice != null && typePrice > 0) {
+			monthly = typePrice;
 			priceSource = "type";
 		}
-		if (priceSource === "none" || monthly <= 0) unpriced.push(name);
+		if (monthly <= 0) unpriced.push(name);
 
 		let cpuCap = 0;
 		let memCap = 0;
