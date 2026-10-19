@@ -174,6 +174,36 @@ void (async () => {
 					// Sample the active-ban count into a rolling series for the Security
 					// chart + active-bans alert (the tick itself no-ops when disabled).
 					startCrowdsecBanSampler(60);
+					// Auto-idle: sleep scale-to-zero services past their idle window.
+					// Only acts when the activator is enabled (the wake path). Composes
+					// sleep through the deploy queue (the loop lives in the server pkg,
+					// the queue here), so we inject the compose sleeper.
+					const { startAutoSleepLoop } = await import(
+						"@nomploy/server/setup/autosleep"
+					);
+					const { updateCompose, findComposeById } = await import(
+						"@nomploy/server"
+					);
+					const { myQueue } = await import("./queues/queueSetup");
+					startAutoSleepLoop(async (composeId: string) => {
+						const compose = await findComposeById(composeId);
+						await updateCompose(composeId, {
+							isSleeping: true,
+							sleepingSince: new Date().toISOString(),
+						});
+						await myQueue.add(
+							"deployments",
+							{
+								composeId,
+								titleLog: "Auto-sleep (idle)",
+								type: "redeploy",
+								applicationType: "compose",
+								descriptionLog: "",
+								server: !!compose.serverId,
+							},
+							{ removeOnComplete: true, removeOnFail: true },
+						);
+					}, 60);
 				},
 				{
 					onWait: () =>

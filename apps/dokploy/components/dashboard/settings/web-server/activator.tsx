@@ -55,9 +55,10 @@ export const ShowActivator = () => {
 				</CardTitle>
 				<CardDescription>
 					Run a tiny proxy on the LB nodes so a request to a sleeping service
-					wakes it automatically (otherwise sleeping services wake only via
-					their Wake button). Enable scale-to-zero per service in its Advanced
-					tab.
+					wakes it automatically — and so scale-to-zero services auto-sleep
+					after their idle window. Off → sleeping services wake only via their
+					Wake button and nothing auto-sleeps. Enable scale-to-zero per service
+					in its Advanced tab.
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">

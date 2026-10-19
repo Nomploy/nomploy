@@ -109,9 +109,10 @@ export const ShowComposeScaleToZero = ({ composeId }: Props) => {
 					<div className="flex flex-col gap-1">
 						<Label className="text-base">Enabled</Label>
 						<span className="text-sm text-muted-foreground">
-							Allow this stack to be scaled to zero. Auto-sleep +
-							wake-on-request arrive with the activator; for now use the Sleep /
-							Wake buttons.
+							Allow this stack to be scaled to zero: auto-sleep after the idle
+							window and wake on the next request. Needs the activator
+							(Settings → Web Server) for both; Sleep / Wake buttons work
+							without it.
 						</span>
 					</div>
 					<Switch checked={enabled} onCheckedChange={setEnabled} />
@@ -133,7 +134,8 @@ export const ShowComposeScaleToZero = ({ composeId }: Props) => {
 						disabled={!enabled}
 					/>
 					<p className="text-muted-foreground text-xs">
-						Used by auto-sleep (coming soon); manual Sleep/Wake works now.
+						Auto-sleep triggers after this many minutes without a request
+						(activator must be on); manual Sleep/Wake always works.
 					</p>
 				</div>
 				<div className="flex flex-wrap items-center gap-2">

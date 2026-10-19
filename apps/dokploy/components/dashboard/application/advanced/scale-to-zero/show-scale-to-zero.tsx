@@ -108,9 +108,10 @@ export const ShowApplicationScaleToZero = ({ applicationId }: Props) => {
 					<div className="flex flex-col gap-1">
 						<Label className="text-base">Enabled</Label>
 						<span className="text-sm text-muted-foreground">
-							Allow this app to be scaled to zero. Auto-sleep after the idle
-							window + wake-on-request arrive with the activator; for now use
-							the Sleep / Wake buttons.
+							Allow this app to be scaled to zero: auto-sleep after the idle
+							window and wake on the next request. Needs the activator
+							(Settings → Web Server) for both; Sleep / Wake buttons work
+							without it.
 						</span>
 					</div>
 					<Switch checked={enabled} onCheckedChange={setEnabled} />
@@ -132,7 +133,8 @@ export const ShowApplicationScaleToZero = ({ applicationId }: Props) => {
 						disabled={!enabled}
 					/>
 					<p className="text-muted-foreground text-xs">
-						Used by auto-sleep (coming soon); manual Sleep/Wake works now.
+						Auto-sleep triggers after this many minutes without a request
+						(activator must be on); manual Sleep/Wake always works.
 					</p>
 				</div>
 				<div className="flex flex-wrap items-center gap-2">
