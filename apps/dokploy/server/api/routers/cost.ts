@@ -2,6 +2,7 @@ import {
 	computeCostReport,
 	getCostConfig,
 	getCostHistory,
+	getCostSpend,
 	getProjectCostHistory,
 	setCostConfig,
 	suggestHetznerPrices,
@@ -32,12 +33,18 @@ export const costRouter = createTRPCRouter({
 
 	getConfig: adminProcedure.query(() => getCostConfig()),
 
+	// Month-to-date spend + end-of-month projection vs the budget.
+	spend: withPermission("service", "read").query(async ({ ctx }) =>
+		getCostSpend(ctx.session.activeOrganizationId),
+	),
+
 	saveConfig: adminProcedure
 		.input(
 			z.object({
 				currency: z.string().optional(),
 				typePrices: z.record(z.string(), z.number()).optional(),
 				nodePrices: z.record(z.string(), z.number()).optional(),
+				monthlyBudget: z.number().min(0).optional(),
 			}),
 		)
 		.mutation(({ input }) => {
@@ -46,6 +53,7 @@ export const costRouter = createTRPCRouter({
 				currency: input.currency ?? prev.currency,
 				typePrices: input.typePrices ?? prev.typePrices,
 				nodePrices: input.nodePrices ?? prev.nodePrices,
+				monthlyBudget: input.monthlyBudget ?? prev.monthlyBudget,
 			});
 		}),
 

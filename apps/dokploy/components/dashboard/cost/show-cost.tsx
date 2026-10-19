@@ -41,8 +41,14 @@ export const ShowCost = () => {
 	const { mutateAsync: saveConfig, isPending: saving } =
 		api.cost.saveConfig.useMutation();
 
+	const { data: spend, refetch: refetchSpend } = api.cost.spend.useQuery(
+		undefined,
+		{ refetchInterval: 60000 },
+	);
+
 	const [typePrices, setTypePrices] = useState<Record<string, string>>({});
 	const [nodePrices, setNodePrices] = useState<Record<string, string>>({});
+	const [budget, setBudget] = useState("");
 
 	// Seed the editable price maps from the saved config once it loads.
 	useEffect(() => {
@@ -57,6 +63,7 @@ export const ShowCost = () => {
 				Object.entries(config.nodePrices).map(([k, v]) => [k, String(v)]),
 			),
 		);
+		setBudget(config.monthlyBudget ? String(config.monthlyBudget) : "");
 	}, [config]);
 
 	const currency = report?.currency ?? "EUR";
@@ -86,9 +93,11 @@ export const ShowCost = () => {
 			await saveConfig({
 				typePrices: toNum(typePrices),
 				nodePrices: toNum(nodePrices),
+				monthlyBudget: budget.trim() === "" ? 0 : Math.max(0, Number(budget)),
 			});
 			toast.success("Prices saved");
 			await refetch();
+			await refetchSpend();
 		} catch (err) {
 			toast.error(err instanceof Error ? err.message : "Failed to save");
 		}
@@ -173,6 +182,74 @@ export const ShowCost = () => {
 							is undercounted. Set prices below: {report.unpricedNodes.join(", ")}
 							.
 						</p>
+					)}
+
+					{/* This month: spend + projection vs budget */}
+					{spend && (
+						<Card className="bg-background">
+							<CardHeader className="pb-2">
+								<CardTitle className="text-lg">This month</CardTitle>
+								<CardDescription>
+									Accrued spend so far (day {spend.daysElapsed}/
+									{spend.daysInMonth}) and the end-of-month projection at the
+									current run-rate.
+								</CardDescription>
+							</CardHeader>
+							<CardContent className="flex flex-col gap-4">
+								<div className="grid gap-4 sm:grid-cols-3">
+									<div>
+										<p className="text-sm text-muted-foreground">
+											Spent so far
+										</p>
+										<p className="text-xl font-semibold">
+											{fmt(spend.monthToDate)}
+										</p>
+									</div>
+									<div>
+										<p className="text-sm text-muted-foreground">
+											Projected month-end
+										</p>
+										<p className="text-xl font-semibold">
+											{fmt(spend.projectedMonthEnd)}
+										</p>
+									</div>
+									<div className="space-y-1">
+										<p className="text-sm text-muted-foreground">
+											Monthly budget
+										</p>
+										<Input
+											type="number"
+											min={0}
+											step="1"
+											placeholder="none"
+											value={budget}
+											onChange={(e) => setBudget(e.target.value)}
+											className="h-8"
+										/>
+									</div>
+								</div>
+								{spend.budget > 0 && (
+									<div className="space-y-1">
+										<div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+											<div
+												className={`h-full ${spend.budgetUsedFraction > 1 ? "bg-destructive" : "bg-emerald-600"}`}
+												style={{
+													width: `${Math.min(100, spend.budgetUsedFraction * 100)}%`,
+												}}
+											/>
+										</div>
+										<p
+											className={`text-xs ${spend.budgetUsedFraction > 1 ? "text-destructive" : "text-muted-foreground"}`}
+										>
+											Projected uses {Math.round(spend.budgetUsedFraction * 100)}%
+											of the {fmt(spend.budget)} budget
+											{spend.budgetUsedFraction > 1 ? " — over budget" : ""}.
+											Save the budget below.
+										</p>
+									</div>
+								)}
+							</CardContent>
+						</Card>
 					)}
 
 					{/* Prices editor */}

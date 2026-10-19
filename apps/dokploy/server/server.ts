@@ -117,6 +117,12 @@ void (async () => {
 						"@nomploy/server/setup/metrics/digest"
 					);
 					startScalingDigestLoop();
+					// Weekly cost report (run-rate, MTD spend, projection vs budget,
+					// top projects + available savings) to cluster-alert channels.
+					const { startCostDigestLoop } = await import(
+						"@nomploy/server/setup/cost-digest"
+					);
+					startCostDigestLoop();
 					// Cluster health monitor (node down / raft leader → cluster alerts).
 					const { startClusterHealthLoop } = await import(
 						"@nomploy/server/setup/monitoring/cluster-health"

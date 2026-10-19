@@ -42,12 +42,15 @@ export type CostConfig = {
 	typePrices: Record<string, number>;
 	/** €/month override per Nomad node name (hub + manual nodes that have no type). */
 	nodePrices: Record<string, number>;
+	/** Monthly spend budget in the currency; 0 = no budget set. */
+	monthlyBudget: number;
 };
 
 const DEFAULT_CONFIG: CostConfig = {
 	currency: "EUR",
 	typePrices: {},
 	nodePrices: {},
+	monthlyBudget: 0,
 };
 
 const configPath = (): string =>
@@ -71,6 +74,10 @@ export const getCostConfig = (): CostConfig => {
 				parsed.nodePrices && typeof parsed.nodePrices === "object"
 					? parsed.nodePrices
 					: {},
+			monthlyBudget:
+				typeof parsed.monthlyBudget === "number" && parsed.monthlyBudget >= 0
+					? parsed.monthlyBudget
+					: 0,
 		};
 	} catch {
 		return { ...DEFAULT_CONFIG };
@@ -88,6 +95,10 @@ export const setCostConfig = (cfg: CostConfig): CostConfig => {
 		currency: cfg.currency?.trim() || "EUR",
 		typePrices: normalize(cfg.typePrices ?? {}),
 		nodePrices: normalize(cfg.nodePrices ?? {}),
+		monthlyBudget:
+			Number.isFinite(cfg.monthlyBudget) && cfg.monthlyBudget >= 0
+				? cfg.monthlyBudget
+				: 0,
 	};
 	const file = configPath();
 	mkdirSync(path.dirname(file), { recursive: true });
@@ -662,4 +673,83 @@ export const getLatestCostValue = async (
 		.orderBy(desc(costSample.createdAt))
 		.limit(1);
 	return rows[0]?.monthly ?? null;
+};
+
+export interface CostSpend {
+	currency: string;
+	/** Current cluster run-rate (€/month). */
+	runRate: number;
+	/** Accrued spend so far this calendar month (€), integrating the run-rate. */
+	monthToDate: number;
+	/** Projected total for this month (€) = MTD + run-rate × remaining fraction. */
+	projectedMonthEnd: number;
+	/** Monthly budget (€); 0 = none. */
+	budget: number;
+	/** projectedMonthEnd / budget as a fraction (0 when no budget). */
+	budgetUsedFraction: number;
+	daysElapsed: number;
+	daysInMonth: number;
+}
+
+/**
+ * Month-to-date spend + end-of-month projection against the budget. Spend accrues
+ * the sampled run-rate (€/month) over elapsed time: a full month at rate R costs R,
+ * so an interval dt contributes R × (dt / month-duration). Robust to a variable
+ * rate (autoscaling) since it integrates the samples.
+ */
+export const getCostSpend = async (orgId: string): Promise<CostSpend> => {
+	const cfg = getCostConfig();
+	const now = new Date();
+	const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+	const daysInMonth = new Date(
+		now.getFullYear(),
+		now.getMonth() + 1,
+		0,
+	).getDate();
+	const msInMonth = daysInMonth * 86400_000;
+
+	const rows = await db
+		.select({ createdAt: costSample.createdAt, total: costSample.total })
+		.from(costSample)
+		.where(
+			and(
+				eq(costSample.organizationId, orgId),
+				isNull(costSample.projectId),
+				gte(costSample.createdAt, monthStart.toISOString()),
+			),
+		)
+		.orderBy(costSample.createdAt);
+
+	// Integrate run-rate over elapsed intervals. Cap a gap (panel downtime) to one
+	// sampling cadence-ish so a long outage doesn't over/under-count wildly.
+	const MAX_GAP_MS = 15 * 60_000;
+	let monthToDate = 0;
+	let prevTs = monthStart.getTime();
+	let prevRate = rows[0]?.total ?? 0;
+	for (const r of rows) {
+		const ts = new Date(r.createdAt).getTime();
+		const dt = Math.min(Math.max(0, ts - prevTs), MAX_GAP_MS);
+		monthToDate += prevRate * (dt / msInMonth);
+		prevTs = ts;
+		prevRate = r.total ?? prevRate;
+	}
+	// Tail from the last sample to now at the latest rate.
+	monthToDate += prevRate * (Math.min(now.getTime() - prevTs, MAX_GAP_MS) / msInMonth);
+
+	const runRate = rows.length > 0 ? (rows[rows.length - 1]?.total ?? 0) : 0;
+	const remainingMs = Math.max(0, monthStart.getTime() + msInMonth - now.getTime());
+	const projectedMonthEnd =
+		Math.round((monthToDate + runRate * (remainingMs / msInMonth)) * 100) / 100;
+	const budget = cfg.monthlyBudget;
+	return {
+		currency: cfg.currency,
+		runRate: Math.round(runRate * 100) / 100,
+		monthToDate: Math.round(monthToDate * 100) / 100,
+		projectedMonthEnd,
+		budget,
+		budgetUsedFraction:
+			budget > 0 ? Math.round((projectedMonthEnd / budget) * 100) / 100 : 0,
+		daysElapsed: now.getDate(),
+		daysInMonth,
+	};
 };
