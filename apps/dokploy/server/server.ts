@@ -143,6 +143,12 @@ void (async () => {
 						"@nomploy/server/services/alerts"
 					);
 					startAlertLoop(60);
+					// Sample cost into a rolling history (powers the Metrics dashboard
+					// charts + the cost alert rules, which read the latest sample).
+					const { startCostSampler } = await import(
+						"@nomploy/server/services/cost"
+					);
+					startCostSampler(300);
 					// Ensure the OTel Collector job is running when observability is
 					// enabled — self-heals after a panel roll / node loss (the job is
 					// only otherwise (re)deployed on a saveObservability).

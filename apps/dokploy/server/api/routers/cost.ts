@@ -50,4 +50,17 @@ export const costRouter = createTRPCRouter({
 	suggestPrices: adminProcedure.query(({ ctx }) =>
 		suggestHetznerPrices(ctx.session.activeOrganizationId),
 	),
+
+	// Projects that have cost history — targets for a cost_project_monthly alert /
+	// the Metrics dashboard's project picker. Derived from the report's rollup.
+	projectTargets: withPermission("service", "read").query(async ({ ctx }) => {
+		const report = await computeCostReport(
+			ctx.session.activeOrganizationId,
+			await resolveAccess(ctx),
+		);
+		return report.projects.map((p) => ({
+			projectId: p.projectId,
+			projectName: p.projectName,
+		}));
+	}),
 });

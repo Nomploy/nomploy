@@ -23,6 +23,7 @@ import {
 	getLogAgentHealth,
 	getOtelCollectorHealth,
 } from "../setup/otel-collector";
+import { getCostMetricHistory, getLatestCostValue } from "./cost";
 import { sendClusterAlertNotifications } from "../utils/notifications/cluster-alert";
 
 export type MetricMeta = {
@@ -108,6 +109,22 @@ export const AVAILABLE_METRICS: MetricMeta[] = [
 		defaultComparator: "lt",
 		defaultThreshold: 1,
 	},
+	{
+		metric: "cost_cluster_monthly",
+		label: "Cost — cluster run-rate",
+		unit: "€/mo",
+		needsTarget: false,
+		defaultComparator: "gt",
+		defaultThreshold: 100,
+	},
+	{
+		metric: "cost_project_monthly",
+		label: "Cost — project run-rate",
+		unit: "€/mo",
+		needsTarget: true,
+		defaultComparator: "gt",
+		defaultThreshold: 50,
+	},
 ];
 
 const avg = (xs: number[]): number | null =>
@@ -146,6 +163,15 @@ const computeValue = async (rule: AlertRule): Promise<number | null> => {
 	}
 	if (rule.metric === "otel_collector_up") return getOtelCollectorHealth();
 	if (rule.metric === "log_agent_up") return getLogAgentHealth();
+
+	// Cost (instantaneous): the latest sampled run-rate. Null when nothing is
+	// priced / no recent sample, so the rule is skipped rather than fired.
+	if (
+		rule.metric === "cost_cluster_monthly" ||
+		rule.metric === "cost_project_monthly"
+	) {
+		return getLatestCostValue(rule.organizationId, rule.metric, rule.target);
+	}
 
 	// Service metrics — scoped to a Nomad job id (appName). "All services" rules
 	// are handled per-service in the loop, not here.
@@ -220,6 +246,15 @@ export const getMetricHistory = async (
 	if (metric === "crowdsec_active_bans") {
 		const series = await getCrowdsecBanHistory(minutes);
 		return { points: series.map((p) => ({ ts: p.ts, value: p.bans })), unit };
+	}
+	if (metric === "cost_cluster_monthly" || metric === "cost_project_monthly") {
+		const points = await getCostMetricHistory(
+			organizationId,
+			metric,
+			target,
+			minutes,
+		);
+		return { points, unit };
 	}
 	if (!target) return { points: [], unit };
 	const since = new Date(Date.now() - minutes * 60_000).toISOString();
@@ -421,8 +456,13 @@ export const runAlertEvaluations = async (): Promise<void> => {
 	});
 	for (const rule of rules) {
 		try {
-			// SigNoz-style "all services": evaluate + transition each service on its own.
-			if (metricNeedsTarget(rule.metric) && rule.target === ALERT_ALL_TARGETS) {
+			// SigNoz-style "all services": evaluate + transition each service on its
+			// own. Only service_ metrics fan out this way (cost_project uses a
+			// specific projectId target, never the all-services sentinel).
+			if (
+				rule.metric.startsWith("service_") &&
+				rule.target === ALERT_ALL_TARGETS
+			) {
 				await evaluateAllServices(rule);
 				continue;
 			}

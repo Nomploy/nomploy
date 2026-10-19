@@ -9,6 +9,7 @@ export * from "./certificate";
 export * from "./cloud-provider";
 export * from "./cluster-autoscaler";
 export * from "./compose";
+export * from "./cost-sample";
 export * from "./crowdsec";
 export * from "./deployment";
 export * from "./destination";

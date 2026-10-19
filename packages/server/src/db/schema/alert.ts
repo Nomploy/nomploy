@@ -26,12 +26,15 @@ export const ALERT_METRICS = [
 	"crowdsec_detector_up",
 	"otel_collector_up",
 	"log_agent_up",
+	// Cost (from the cost sampler). Cluster = total run-rate; project needs a target.
+	"cost_cluster_monthly",
+	"cost_project_monthly",
 ] as const;
 export type AlertMetric = (typeof ALERT_METRICS)[number];
 
 /** Whether a service-scoped metric needs a `target` (the Nomad job / appName). */
 export const metricNeedsTarget = (m: string): boolean =>
-	m.startsWith("service_");
+	m.startsWith("service_") || m === "cost_project_monthly";
 
 /**
  * Sentinel `target` for a service-metric rule that watches EVERY service

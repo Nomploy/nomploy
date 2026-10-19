@@ -183,6 +183,15 @@ const MENU: Menu = {
 		},
 		{
 			isSingle: true,
+			title: "Metrics",
+			url: "/dashboard/metrics",
+			icon: Activity,
+			// Time-series dashboard for alertable metrics; needs monitoring.read.
+			isEnabled: ({ isCloud, permissions }) =>
+				!isCloud && !!permissions?.monitoring.read,
+		},
+		{
+			isSingle: true,
 			title: "Monitoring",
 			url: "/dashboard/monitoring",
 			icon: BarChartHorizontalBigIcon,

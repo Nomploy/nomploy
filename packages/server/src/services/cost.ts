@@ -1,9 +1,14 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lt } from "drizzle-orm";
 import { paths } from "../constants";
 import { db } from "../db";
-import { clusterAutoscaler, cloudProvider } from "../db/schema";
+import {
+	clusterAutoscaler,
+	cloudProvider,
+	costSample,
+	organization,
+} from "../db/schema";
 import {
 	findAllServicesCentralized,
 	type OverviewServiceType,
@@ -416,4 +421,168 @@ export const suggestHetznerPrices = async (
 		}
 	}
 	return out;
+};
+
+// ── Sampler + history (powers the Metrics dashboard + cost alerts) ───────────
+
+const COST_RETENTION_DAYS = 90;
+
+/** Sample cost for every org into cost_sample (cluster row + one row per project). */
+export const sampleCost = async (): Promise<number> => {
+	const orgs = await db
+		.select({ id: organization.id })
+		.from(organization);
+	let written = 0;
+	for (const { id: orgId } of orgs) {
+		try {
+			const report = await computeCostReport(orgId, null);
+			// Nothing priced yet → skip (don't store a misleading all-zero run-rate).
+			if (report.totalMonthly <= 0) continue;
+			const createdAt = new Date().toISOString();
+			const rows = [
+				{
+					organizationId: orgId,
+					createdAt,
+					projectId: null as string | null,
+					projectName: null as string | null,
+					monthly: report.totalMonthly,
+					total: report.totalMonthly,
+					allocated: report.allocatedMonthly,
+					platform: report.platformMonthly,
+					idle: report.idleMonthly,
+				},
+				...report.projects.map((p) => ({
+					organizationId: orgId,
+					createdAt,
+					projectId: p.projectId,
+					projectName: p.projectName,
+					monthly: p.monthly,
+					total: null as number | null,
+					allocated: null as number | null,
+					platform: null as number | null,
+					idle: null as number | null,
+				})),
+			];
+			await db.insert(costSample).values(rows);
+			written += rows.length;
+		} catch (e) {
+			console.error(`cost sampler: failed for org ${orgId}:`, e);
+		}
+	}
+	const cutoff = new Date(
+		Date.now() - COST_RETENTION_DAYS * 86400_000,
+	).toISOString();
+	await db.delete(costSample).where(lt(costSample.createdAt, cutoff));
+	return written;
+};
+
+export const startCostSampler = (intervalSeconds = 300): NodeJS.Timeout => {
+	const tick = async () => {
+		try {
+			await sampleCost();
+		} catch (e) {
+			console.error("cost sampler: tick error:", e);
+		}
+	};
+	void tick();
+	return setInterval(tick, intervalSeconds * 1000);
+};
+
+export interface CostHistoryPoint {
+	ts: number;
+	total: number;
+	allocated: number;
+	platform: number;
+	idle: number;
+}
+
+/** Cluster run-rate history (the stacked breakdown) over the last `minutes`. */
+export const getCostHistory = async (
+	orgId: string,
+	minutes: number,
+): Promise<CostHistoryPoint[]> => {
+	const since = new Date(Date.now() - minutes * 60_000).toISOString();
+	const rows = await db
+		.select({
+			createdAt: costSample.createdAt,
+			total: costSample.total,
+			allocated: costSample.allocated,
+			platform: costSample.platform,
+			idle: costSample.idle,
+		})
+		.from(costSample)
+		.where(
+			and(
+				eq(costSample.organizationId, orgId),
+				isNull(costSample.projectId),
+				gte(costSample.createdAt, since),
+			),
+		)
+		.orderBy(costSample.createdAt);
+	return rows.map((r) => ({
+		ts: new Date(r.createdAt).getTime(),
+		total: r.total ?? 0,
+		allocated: r.allocated ?? 0,
+		platform: r.platform ?? 0,
+		idle: r.idle ?? 0,
+	}));
+};
+
+/** A metric point series for one cost metric (for the generic Metrics dashboard). */
+export const getCostMetricHistory = async (
+	orgId: string,
+	metric: "cost_cluster_monthly" | "cost_project_monthly",
+	target: string | null | undefined,
+	minutes: number,
+): Promise<{ ts: number; value: number }[]> => {
+	const since = new Date(Date.now() - minutes * 60_000).toISOString();
+	const whereProject =
+		metric === "cost_cluster_monthly"
+			? isNull(costSample.projectId)
+			: target
+				? eq(costSample.projectId, target)
+				: undefined;
+	if (metric === "cost_project_monthly" && !target) return [];
+	const rows = await db
+		.select({ createdAt: costSample.createdAt, monthly: costSample.monthly })
+		.from(costSample)
+		.where(
+			and(
+				eq(costSample.organizationId, orgId),
+				whereProject,
+				gte(costSample.createdAt, since),
+			),
+		)
+		.orderBy(costSample.createdAt);
+	return rows.map((r) => ({
+		ts: new Date(r.createdAt).getTime(),
+		value: r.monthly ?? 0,
+	}));
+};
+
+/**
+ * Latest sampled cost value for an alert rule. Cluster = newest cluster row's
+ * total; project = newest row for that projectId. Null when there's no recent
+ * sample (rule is skipped rather than fired).
+ */
+export const getLatestCostValue = async (
+	orgId: string,
+	metric: "cost_cluster_monthly" | "cost_project_monthly",
+	target: string | null | undefined,
+): Promise<number | null> => {
+	if (metric === "cost_project_monthly" && !target) return null;
+	const rows = await db
+		.select({ monthly: costSample.monthly })
+		.from(costSample)
+		.where(
+			and(
+				eq(costSample.organizationId, orgId),
+				metric === "cost_cluster_monthly"
+					? isNull(costSample.projectId)
+					: eq(costSample.projectId, target as string),
+			),
+		)
+		.orderBy(desc(costSample.createdAt))
+		.limit(1);
+	return rows[0]?.monthly ?? null;
 };

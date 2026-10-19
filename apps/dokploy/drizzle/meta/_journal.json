@@ -1548,6 +1548,13 @@
       "when": 1792392972142,
       "tag": "0220_vengeful_dagger",
       "breakpoints": true
+    },
+    {
+      "idx": 221,
+      "version": "7",
+      "when": 1792417776757,
+      "tag": "0221_red_queen_noir",
+      "breakpoints": true
     }
   ]
 }
