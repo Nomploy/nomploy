@@ -242,7 +242,7 @@ export const applicationRouter = createTRPCRouter({
 			}
 		}),
 	sleep: protectedProcedure
-		.input(apiReloadApplication)
+		.input(apiFindOneApplication)
 		.mutation(async ({ input, ctx }) => {
 			await checkServicePermissionAndAccess(ctx, input.applicationId, {
 				deployment: ["create"],
@@ -266,7 +266,7 @@ export const applicationRouter = createTRPCRouter({
 			}
 		}),
 	wake: protectedProcedure
-		.input(apiReloadApplication)
+		.input(apiFindOneApplication)
 		.mutation(async ({ input, ctx }) => {
 			await checkServicePermissionAndAccess(ctx, input.applicationId, {
 				deployment: ["create"],
