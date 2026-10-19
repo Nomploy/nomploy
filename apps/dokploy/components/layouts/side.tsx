@@ -9,6 +9,7 @@ import {
 	BotIcon,
 	ChevronRight,
 	ChevronsUpDown,
+	CircleDollarSign,
 	CircleHelp,
 	ClipboardList,
 	Clock,
@@ -170,6 +171,15 @@ const MENU: Menu = {
 			title: "Overview",
 			url: "/dashboard/overview",
 			icon: LayoutGrid,
+		},
+		{
+			isSingle: true,
+			title: "Cost",
+			url: "/dashboard/cost",
+			icon: CircleDollarSign,
+			// Non-cloud only (reads the local Nomad cluster), admins/owners.
+			isEnabled: ({ isCloud, permissions }) =>
+				!isCloud && !!permissions?.organization.update,
 		},
 		{
 			isSingle: true,

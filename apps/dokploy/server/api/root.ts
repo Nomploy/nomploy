@@ -8,6 +8,7 @@ import { bitbucketRouter } from "./routers/bitbucket";
 import { certificateRouter } from "./routers/certificate";
 import { cloudProviderRouter } from "./routers/cloud-provider";
 import { composeRouter } from "./routers/compose";
+import { costRouter } from "./routers/cost";
 import { deploymentRouter } from "./routers/deployment";
 import { destinationRouter } from "./routers/destination";
 import { dnsProviderRouter } from "./routers/dns-provider";
@@ -66,6 +67,7 @@ export const appRouter = createTRPCRouter({
 	compose: composeRouter,
 	deployment: deploymentRouter,
 	overview: overviewRouter,
+	cost: costRouter,
 	destination: destinationRouter,
 	cloudProvider: cloudProviderRouter,
 	dnsProvider: dnsProviderRouter,
