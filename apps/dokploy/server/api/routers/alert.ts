@@ -8,7 +8,9 @@ import {
 } from "@nomploy/server/db/schema";
 import {
 	AVAILABLE_METRICS,
+	getAlertEventMarkers,
 	getMetricHistory,
+	getServiceMetricSeriesAll,
 	listAlertEvents,
 	listAlertSilences,
 	listAlertTargets,
@@ -28,16 +30,51 @@ export const alertRouter = createTRPCRouter({
 	),
 
 	// Time series for a metric (rule editor preview chart + per-rule graphs).
+	// Up to 30d; long ranges are downsampled server-side.
 	metricHistory: withPermission("monitoring", "read")
 		.input(
 			z.object({
 				metric: z.string(),
 				target: z.string().nullable().optional(),
-				minutes: z.number().int().min(5).max(1440).default(360),
+				minutes: z.number().int().min(5).max(43200).default(360),
 			}),
 		)
 		.query(async ({ ctx, input }) =>
 			getMetricHistory(
+				ctx.session.activeOrganizationId,
+				input.metric,
+				input.target ?? null,
+				input.minutes,
+			),
+		),
+
+	// All services' series for a service_ metric — one multi-line chart.
+	serviceSeriesAll: withPermission("monitoring", "read")
+		.input(
+			z.object({
+				metric: z.string(),
+				minutes: z.number().int().min(5).max(43200).default(360),
+			}),
+		)
+		.query(async ({ ctx, input }) =>
+			getServiceMetricSeriesAll(
+				ctx.session.activeOrganizationId,
+				input.metric,
+				input.minutes,
+			),
+		),
+
+	// Fired/resolved markers for a metric (+target) to overlay on its chart.
+	eventMarkers: withPermission("monitoring", "read")
+		.input(
+			z.object({
+				metric: z.string(),
+				target: z.string().nullable().optional(),
+				minutes: z.number().int().min(5).max(43200).default(360),
+			}),
+		)
+		.query(async ({ ctx, input }) =>
+			getAlertEventMarkers(
 				ctx.session.activeOrganizationId,
 				input.metric,
 				input.target ?? null,

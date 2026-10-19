@@ -208,12 +208,15 @@ const MetricChart = ({
 	);
 };
 
-const RuleDialog = ({
+export const RuleDialog = ({
 	rule,
+	preset,
 	trigger,
 	onDone,
 }: {
 	rule?: Rule;
+	/** Prefill a new rule's metric/target (e.g. "Create alert" from a chart). */
+	preset?: { metric?: string; target?: string | null };
 	trigger: React.ReactNode;
 	onDone: () => void;
 }) => {
@@ -245,15 +248,17 @@ const RuleDialog = ({
 			setSeverity(rule.severity ?? "warning");
 			setForMinutes(rule.forMinutes);
 		} else {
+			const pm = preset?.metric ?? "lb_5xx_per_sec";
+			const md = (metrics ?? []).find((x) => x.metric === pm);
 			setName("");
-			setMetric("lb_5xx_per_sec");
-			setTarget("");
-			setComparator("gt");
-			setThreshold(1);
+			setMetric(pm);
+			setTarget(preset?.target ?? "");
+			setComparator(md?.defaultComparator ?? "gt");
+			setThreshold(md?.defaultThreshold ?? 1);
 			setSeverity("warning");
 			setForMinutes(5);
 		}
-	}, [open, rule]);
+	}, [open, rule, preset, metrics]);
 
 	const meta = (metrics ?? []).find((m) => m.metric === metric);
 	const needsTarget = !!meta?.needsTarget;

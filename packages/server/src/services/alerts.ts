@@ -218,6 +218,33 @@ const metricUnit = (m: string): string =>
 export type MetricPoint = { ts: number; value: number };
 
 /**
+ * Bucket a time series down to at most `max` points (avg per bucket) so a long
+ * range (7d/30d) stays cheap to ship + render. Short ranges pass through.
+ */
+export const downsample = (
+	points: MetricPoint[],
+	max = 300,
+): MetricPoint[] => {
+	if (points.length <= max) return points;
+	const first = points[0]?.ts ?? 0;
+	const last = points[points.length - 1]?.ts ?? 0;
+	const span = Math.max(1, last - first);
+	const bucketMs = span / max;
+	const buckets = new Map<number, { ts: number; sum: number; n: number }>();
+	for (const p of points) {
+		const b = Math.floor((p.ts - first) / bucketMs);
+		const cur = buckets.get(b) ?? { ts: 0, sum: 0, n: 0 };
+		cur.ts += p.ts;
+		cur.sum += p.value;
+		cur.n += 1;
+		buckets.set(b, cur);
+	}
+	return [...buckets.values()]
+		.map((b) => ({ ts: Math.round(b.ts / b.n), value: b.sum / b.n }))
+		.sort((a, b) => a.ts - b.ts);
+};
+
+/**
  * Time series for a single metric over the last `minutes` — powers the rule
  * editor's live preview chart and per-rule graphs. Works for both LB pool metrics
  * (from the sampled history) and service CPU/mem % (from service_metric_sample).
@@ -229,6 +256,7 @@ export const getMetricHistory = async (
 	minutes: number,
 ): Promise<{ points: MetricPoint[]; unit: string }> => {
 	const unit = metricUnit(metric);
+	const ds = (p: MetricPoint[]) => downsample(p);
 	if (metric.startsWith("lb_")) {
 		const series = await getLoadBalancerMetricsHistory(organizationId, minutes);
 		const pick = (p: {
@@ -241,11 +269,17 @@ export const getMetricHistory = async (
 				: metric === "lb_req_per_sec"
 					? p.reqPerSec
 					: p.latencyMs;
-		return { points: series.map((p) => ({ ts: p.ts, value: pick(p) })), unit };
+		return {
+			points: ds(series.map((p) => ({ ts: p.ts, value: pick(p) }))),
+			unit,
+		};
 	}
 	if (metric === "crowdsec_active_bans") {
 		const series = await getCrowdsecBanHistory(minutes);
-		return { points: series.map((p) => ({ ts: p.ts, value: p.bans })), unit };
+		return {
+			points: ds(series.map((p) => ({ ts: p.ts, value: p.bans }))),
+			unit,
+		};
 	}
 	if (metric === "cost_cluster_monthly" || metric === "cost_project_monthly") {
 		const points = await getCostMetricHistory(
@@ -254,7 +288,7 @@ export const getMetricHistory = async (
 			target,
 			minutes,
 		);
-		return { points, unit };
+		return { points: ds(points), unit };
 	}
 	if (!target) return { points: [], unit };
 	const since = new Date(Date.now() - minutes * 60_000).toISOString();
@@ -277,7 +311,77 @@ export const getMetricHistory = async (
 						: 0,
 		}))
 		.sort((a, b) => a.ts - b.ts);
-	return { points, unit };
+	return { points: ds(points), unit };
+};
+
+/** A per-service series (all services) for a service_ metric — multi-line chart. */
+export const getServiceMetricSeriesAll = async (
+	organizationId: string,
+	metric: string,
+	minutes: number,
+): Promise<{ appName: string; label: string; points: MetricPoint[] }[]> => {
+	if (!metric.startsWith("service_")) return [];
+	const targets = await listAlertTargets(organizationId);
+	const since = new Date(Date.now() - minutes * 60_000).toISOString();
+	const out: { appName: string; label: string; points: MetricPoint[] }[] = [];
+	for (const t of targets) {
+		const rows = await db.query.serviceMetricSample.findMany({
+			where: and(
+				eq(serviceMetricSample.appName, t.appName),
+				gte(serviceMetricSample.createdAt, since),
+			),
+		});
+		if (rows.length === 0) continue;
+		const points = rows
+			.map((r) => ({
+				ts: new Date(r.createdAt).getTime(),
+				value:
+					metric === "service_cpu_pct"
+						? r.cpuAllocMhz > 0
+							? (r.cpuUsedMhz / r.cpuAllocMhz) * 100
+							: 0
+						: r.memAllocMb > 0
+							? (r.memUsedMb / r.memAllocMb) * 100
+							: 0,
+			}))
+			.sort((a, b) => a.ts - b.ts);
+		out.push({ appName: t.appName, label: t.label, points: downsample(points) });
+	}
+	return out;
+};
+
+/** Fired/resolved event markers for a metric (+target) within the range. */
+export const getAlertEventMarkers = async (
+	organizationId: string,
+	metric: string,
+	target: string | null | undefined,
+	minutes: number,
+): Promise<{ ts: number; type: string }[]> => {
+	const since = new Date(Date.now() - minutes * 60_000);
+	const rules = await db.query.alertRule.findMany({
+		where: eq(alertRule.organizationId, organizationId),
+	});
+	const ruleIds = new Set(
+		rules
+			.filter(
+				(r) =>
+					r.metric === metric &&
+					(metricNeedsTarget(metric) ? r.target === target : true),
+			)
+			.map((r) => r.alertRuleId),
+	);
+	if (ruleIds.size === 0) return [];
+	const events = await db.query.alertEvent.findMany({
+		where: and(
+			eq(alertEvent.organizationId, organizationId),
+			gte(alertEvent.createdAt, since),
+		),
+		orderBy: desc(alertEvent.createdAt),
+		limit: 200,
+	});
+	return events
+		.filter((e) => ruleIds.has(e.alertRuleId))
+		.map((e) => ({ ts: new Date(e.createdAt).getTime(), type: e.type }));
 };
 
 /**

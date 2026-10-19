@@ -1,6 +1,7 @@
 import {
 	computeCostReport,
 	getCostConfig,
+	getCostHistory,
 	setCostConfig,
 	suggestHetznerPrices,
 } from "@nomploy/server/services/cost";
@@ -50,6 +51,17 @@ export const costRouter = createTRPCRouter({
 	suggestPrices: adminProcedure.query(({ ctx }) =>
 		suggestHetznerPrices(ctx.session.activeOrganizationId),
 	),
+
+	// Cluster run-rate history (stacked allocated / platform / idle) for the chart.
+	history: withPermission("service", "read")
+		.input(
+			z.object({
+				minutes: z.number().int().min(5).max(43200).default(1440),
+			}),
+		)
+		.query(async ({ ctx, input }) =>
+			getCostHistory(ctx.session.activeOrganizationId, input.minutes),
+		),
 
 	// Projects that have cost history — targets for a cost_project_monthly alert /
 	// the Metrics dashboard's project picker. Derived from the report's rollup.
