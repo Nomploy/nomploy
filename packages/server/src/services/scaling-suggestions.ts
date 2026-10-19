@@ -27,6 +27,8 @@ export interface ScalingSuggestion {
 	estMonthlySaving: number;
 	/** Whether the panel can apply the recommendation (applications only for now). */
 	canApply: boolean;
+	/** Whether scale-to-zero (auto-stop) can be enabled here (app/compose). */
+	canAutoStop: boolean;
 }
 
 // Recommended reserved = average use over the window × this headroom factor,
@@ -204,13 +206,16 @@ export const getScalingSuggestions = async (
 			// Applications store cpuLimit/memoryLimit the panel can re-submit; other
 			// types (compose/db) are shown but applied in their own tab for now.
 			canApply: m.type === "application" && curCpuMhz > 0 && meaningful,
+			// Scale-to-zero exists for apps + composes (wakes on request via the
+			// activator); offered on idle services as the "auto-stop" option.
+			canAutoStop: m.type === "application" || m.type === "compose",
 		};
 		const usage = `CPU ${cpuPct}%, mem ${memPct}% of reserved over ${WINDOW_HOURS}h`;
 		if (cpuPct <= 5 && memPct <= 5) {
 			out.push({
 				...base,
 				kind: "idle",
-				message: `Idle — ${usage}. Consider stopping it.`,
+				message: `Barely used — ${usage}. Lower its reserved resources — or enable scale-to-zero to auto-stop between requests.`,
 			});
 		} else if (cpuPct >= 85 || memPct >= 85) {
 			out.push({

@@ -4,6 +4,7 @@ import {
 	Lightbulb,
 	Loader2,
 	Moon,
+	Power,
 	TrendingDown,
 } from "lucide-react";
 import Link from "next/link";
@@ -69,6 +70,57 @@ const KIND = {
 		className: "text-muted-foreground",
 	},
 } as const;
+
+const AutoStopButton = ({
+	serviceType,
+	serviceId,
+	onDone,
+}: {
+	serviceType: string;
+	serviceId: string;
+	onDone: () => void;
+}) => {
+	const appUpdate = api.application.update.useMutation();
+	const composeUpdate = api.compose.update.useMutation();
+	const pending = appUpdate.isPending || composeUpdate.isPending;
+	const enable = async () => {
+		try {
+			if (serviceType === "application") {
+				await appUpdate.mutateAsync({
+					applicationId: serviceId,
+					scaleToZeroEnabled: true,
+				});
+			} else {
+				await composeUpdate.mutateAsync({
+					composeId: serviceId,
+					scaleToZeroEnabled: true,
+				});
+			}
+			toast.success(
+				"Scale-to-zero enabled — it auto-stops when idle and wakes on request (needs the activator, in Settings → Web Server)",
+			);
+			onDone();
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : "Failed to enable");
+		}
+	};
+	return (
+		<DialogAction
+			title="Enable scale-to-zero (auto-stop)?"
+			description="The service will scale to 0 after its idle window and wake automatically on the next request. Needs the activator enabled (Settings → Web Server) so a request can wake it; otherwise it only sleeps/wakes from the buttons in its Advanced tab."
+			onClick={enable}
+		>
+			<Button type="button" size="sm" variant="ghost" disabled={pending}>
+				{pending ? (
+					<Loader2 className="mr-1 size-3.5 animate-spin" />
+				) : (
+					<Power className="mr-1 size-3.5" />
+				)}
+				Auto-stop
+			</Button>
+		</DialogAction>
+	);
+};
 
 /**
  * The full utilization/scaling suggestions list — rendered on the dedicated
@@ -137,21 +189,30 @@ export const SuggestionsList = () => {
 								{s.appName} · {s.samples} samples — open
 							</Link>
 						</div>
-						{s.canApply ? (
-							<ApplyRightsizeButton
-								applicationId={s.serviceId}
-								serviceName={s.serviceName}
-								cpuMhz={s.recommended.cpuMhz}
-								memMb={s.recommended.memMb}
-								onDone={() => refetch()}
-							/>
-						) : (
-							resized && (
-								<span className="shrink-0 self-center text-xs text-muted-foreground">
-									set in Resources
-								</span>
-							)
-						)}
+						<div className="flex shrink-0 flex-col items-end gap-1">
+							{s.canApply ? (
+								<ApplyRightsizeButton
+									applicationId={s.serviceId}
+									serviceName={s.serviceName}
+									cpuMhz={s.recommended.cpuMhz}
+									memMb={s.recommended.memMb}
+									onDone={() => refetch()}
+								/>
+							) : (
+								resized && (
+									<span className="self-center text-xs text-muted-foreground">
+										set in Resources
+									</span>
+								)
+							)}
+							{s.kind === "idle" && s.canAutoStop && (
+								<AutoStopButton
+									serviceType={s.serviceType}
+									serviceId={s.serviceId}
+									onDone={() => refetch()}
+								/>
+							)}
+						</div>
 					</div>
 				);
 			})}
