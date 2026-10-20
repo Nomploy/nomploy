@@ -79,6 +79,18 @@ export const ShowCost = () => {
 	}, [report]);
 	const allNodes = useMemo(() => report?.nodes ?? [], [report]);
 
+	const saveBudget = async () => {
+		try {
+			await saveConfig({
+				monthlyBudget: budget.trim() === "" ? 0 : Math.max(0, Number(budget)),
+			});
+			toast.success("Budget saved");
+			await refetchSpend();
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : "Failed to save");
+		}
+	};
+
 	const save = async () => {
 		// A blank field means "no price here" (inherit the type price / unset) — drop
 		// it rather than persisting Number("") === 0 as an explicit 0 override.
@@ -217,15 +229,27 @@ export const ShowCost = () => {
 										<p className="text-sm text-muted-foreground">
 											Monthly budget
 										</p>
-										<Input
-											type="number"
-											min={0}
-											step="1"
-											placeholder="none"
-											value={budget}
-											onChange={(e) => setBudget(e.target.value)}
-											className="h-8"
-										/>
+										<div className="flex gap-2">
+											<Input
+												type="number"
+												min={0}
+												step="1"
+												placeholder="none"
+												value={budget}
+												onChange={(e) => setBudget(e.target.value)}
+												className="h-8"
+											/>
+											<Button
+												type="button"
+												size="sm"
+												variant="outline"
+												className="h-8 shrink-0"
+												onClick={saveBudget}
+												disabled={saving}
+											>
+												Save
+											</Button>
+										</div>
 									</div>
 								</div>
 								{spend.budget > 0 && (
@@ -244,7 +268,6 @@ export const ShowCost = () => {
 											Projected uses {Math.round(spend.budgetUsedFraction * 100)}%
 											of the {fmt(spend.budget)} budget
 											{spend.budgetUsedFraction > 1 ? " — over budget" : ""}.
-											Save the budget below.
 										</p>
 									</div>
 								)}
