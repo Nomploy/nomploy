@@ -66,6 +66,7 @@ const convertService = (
 	const metricsPort = extractMetricsPort(service);
 	const metricsAuthProfile = extractMetricsAuthProfile(service);
 	const crowdsecEnabled = extractCrowdsecEnabled(service);
+	const dependsOn = extractDependsOn(service);
 
 	return {
 		name,
@@ -83,7 +84,25 @@ const convertService = (
 		metricsPort,
 		metricsAuthProfile,
 		crowdsecEnabled,
+		dependsOn,
 	};
+};
+
+/**
+ * Extract compose `depends_on` as a plain list of service names. Supports both the
+ * short list form (`depends_on: [db]`) and the long map form
+ * (`depends_on: { db: { condition: service_healthy } }`). The condition is not
+ * distinguished — the single-group translation gates on the dependency's port being
+ * reachable, which satisfies both `service_started` and (closely) `service_healthy`.
+ */
+const extractDependsOn = (
+	service: DefinitionsService,
+): string[] | undefined => {
+	const dep = service.depends_on;
+	if (!dep) return undefined;
+	const names = Array.isArray(dep) ? dep : Object.keys(dep);
+	const cleaned = names.filter((n): n is string => typeof n === "string" && n !== "");
+	return cleaned.length > 0 ? cleaned : undefined;
 };
 
 /**

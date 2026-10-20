@@ -53,6 +53,15 @@ export interface NomadServiceSpec {
 	 * out of the per-router bouncer middleware. Undefined/true = protected (default).
 	 */
 	crowdsecEnabled?: boolean;
+	/**
+	 * Compose `depends_on` — the names of services this one starts after. In the
+	 * single shared-netns translation this is honored by starting each dependency as
+	 * a `prestart` sidecar and gating this service's start on the dependency's port
+	 * being reachable (see generateNomadComposeJobSpec). Mirrors compose's
+	 * `condition: service_healthy` ordering closely enough to avoid the app→db boot
+	 * race. Ignored by the independent / Connect-mesh translations.
+	 */
+	dependsOn?: string[];
 	healthCheck?: {
 		type: string;
 		path?: string;
@@ -686,6 +695,46 @@ export const deriveUpdateConfig = (
 		: { canary: 1, autoPromote: true, healthCheck };
 };
 
+// Well-known listen ports by image keyword — used to gate a service's start on a
+// dependency (compose `depends_on`) whose readiness port we can't read from the
+// compose file (a DB rarely publishes a port). Only used when the dependency
+// declares no port of its own.
+const WELL_KNOWN_PORTS: Record<string, number> = {
+	postgres: 5432,
+	postgis: 5432,
+	timescale: 5432,
+	pgvector: 5432,
+	supabase: 5432,
+	mysql: 3306,
+	mariadb: 3306,
+	percona: 3306,
+	mongo: 27017,
+	redis: 6379,
+	valkey: 6379,
+	keydb: 6379,
+	rabbitmq: 5672,
+	nats: 4222,
+	memcached: 11211,
+	clickhouse: 9000,
+	cockroach: 26257,
+	elasticsearch: 9200,
+	opensearch: 9200,
+};
+
+/**
+ * Best-effort readiness port for a dependency service: its first declared port,
+ * else a well-known port inferred from the image name. Undefined when neither is
+ * known (we then skip the wait gate for that edge and rely on the restart stanza).
+ */
+const inferReadinessPort = (s: NomadServiceSpec): number | undefined => {
+	if (s.ports[0]) return s.ports[0].to;
+	const img = s.image.toLowerCase();
+	for (const [kw, port] of Object.entries(WELL_KNOWN_PORTS)) {
+		if (img.includes(kw)) return port;
+	}
+	return undefined;
+};
+
 /**
  * Compose → Nomad, faithful to Docker Compose's single-host networking.
  *
@@ -750,6 +799,58 @@ ${portLines}
 	// Every compose service name resolves to localhost inside the shared netns.
 	const hostAliases = relabeled.map((s) => `"${s.name}:127.0.0.1"`).join(", ");
 
+	// depends_on ordering (compose fidelity): a service that others depend on starts
+	// as a `prestart` sidecar (it comes up first and keeps running), and a dependent
+	// service gets a `prestart` init task that blocks until the dependency's port is
+	// reachable before the dependent's main task starts. This removes the app→db boot
+	// race (ECONNREFUSED → crash → restart) within the single shared-netns group,
+	// which Nomad otherwise has no way to order. Only engages when depends_on is set.
+	const dependedUpon = new Set<string>();
+	for (const s of relabeled) for (const d of s.dependsOn ?? []) dependedUpon.add(d);
+	const readinessPort = new Map<string, number>();
+	for (const s of relabeled) {
+		const p = inferReadinessPort(s);
+		if (p) readinessPort.set(s.name, p);
+	}
+	const lifecycleBlock = (name: string): string =>
+		dependedUpon.has(name)
+			? '\n      lifecycle {\n        hook    = "prestart"\n        sidecar = true\n      }\n'
+			: "";
+	// Init (non-sidecar prestart) tasks that gate the group's main tasks on each
+	// dependency's port being open. busybox `nc` connect test over the shared netns.
+	const waitTasks = relabeled
+		.flatMap((s) =>
+			(s.dependsOn ?? [])
+				.map((dep) => ({ dep, port: readinessPort.get(dep) }))
+				.filter((x): x is { dep: string; port: number } => x.port != null)
+				.map(({ dep, port }) => {
+					const waitCmd =
+						`echo \\\"waiting for ${dep}:${port}\\\"; ` +
+						`for i in $(seq 1 180); do nc -w 2 127.0.0.1 ${port} </dev/null >/dev/null 2>&1 && exit 0; sleep 1; done; ` +
+						`echo \\\"timed out waiting for ${dep}:${port}\\\"; exit 1`;
+					return `    task "wait-${s.name}-${dep}" {
+      driver = "docker"
+
+      lifecycle {
+        hook    = "prestart"
+        sidecar = false
+      }
+
+      config {
+        image   = "busybox:1.37"
+        command = "sh"
+        args    = ["-c", "${waitCmd}"]
+      }
+
+      resources {
+        cpu    = 50
+        memory = 16
+      }
+    }`;
+				}),
+		)
+		.join("\n\n");
+
 	const tasks = relabeled
 		.map((s) => {
 			const envBlock = generateEnvBlock(s.env);
@@ -780,7 +881,7 @@ ${portLines}
 			const mountBlocks = namedVolumeMounts(appName, s.volumes);
 			return `    task "${s.name}" {
       driver = "docker"
-
+${lifecycleBlock(s.name)}
       config {
         image = "${s.image}"${dockerForcePull(s.image, forcePull)}
         extra_hosts = [${hostAliases}]${portsConfig}${entrypointLine}${argsLine}${volumesConfig}${mountBlocks}
@@ -819,7 +920,7 @@ ${groupScaling ? generateScalingBlock(groupScaling) : ""}
     }
 ${networkBlock}
 ${consulServices ? `\n${consulServices}\n` : ""}
-${tasks}
+${waitTasks ? `${waitTasks}\n\n` : ""}${tasks}
   }
 }
 `;

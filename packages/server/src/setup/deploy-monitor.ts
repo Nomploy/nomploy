@@ -60,8 +60,28 @@ const jobState = async (jid: string): Promise<RolloutState> => {
 	const p = encodeURIComponent(jid);
 	// Prefer the deployment status (health-check aware).
 	try {
-		const dep = await nomadFetch<{ Status?: string }>(`/job/${p}/deployment`);
+		const [dep, job] = await Promise.all([
+			nomadFetch<{ Status?: string; JobVersion?: number }>(
+				`/job/${p}/deployment`,
+			),
+			nomadFetch<{ Version?: number }>(`/job/${p}`).catch(
+				() => ({}) as { Version?: number },
+			),
+		]);
 		const st = dep?.Status;
+		// Ignore a deployment that belongs to an OLDER job version than the one just
+		// registered: right after a re-register, /deployment briefly returns the
+		// PREVIOUS deployment (often "failed" from a prior attempt) until Nomad
+		// creates the new one. Treating that as pending avoids spuriously failing a
+		// fresh deploy on a stale result.
+		const curVer = job?.Version;
+		if (
+			typeof curVer === "number" &&
+			typeof dep?.JobVersion === "number" &&
+			dep.JobVersion < curVer
+		) {
+			return "pending";
+		}
 		if (st === "successful") return "ok";
 		if (st === "failed" || st === "cancelled") return "failed";
 		if (st) return "pending"; // running / paused / blocked / pending
