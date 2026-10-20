@@ -19,6 +19,7 @@ import {
 	getLatestCrowdsecBanCount,
 } from "../setup/crowdsec";
 import { getLoadBalancerMetricsHistory } from "../setup/loadbalancer-dns";
+import { getPoolCertMeta } from "../setup/traefik-ha";
 import {
 	getLogAgentHealth,
 	getOtelCollectorHealth,
@@ -110,6 +111,14 @@ export const AVAILABLE_METRICS: MetricMeta[] = [
 		defaultThreshold: 1,
 	},
 	{
+		metric: "cert_min_days_left",
+		label: "Security — TLS cert min days left",
+		unit: "days",
+		needsTarget: false,
+		defaultComparator: "lt",
+		defaultThreshold: 14,
+	},
+	{
 		metric: "cost_cluster_monthly",
 		label: "Cost — cluster run-rate",
 		unit: "€/mo",
@@ -163,6 +172,14 @@ const computeValue = async (rule: AlertRule): Promise<number | null> => {
 	}
 	if (rule.metric === "otel_collector_up") return getOtelCollectorHealth();
 	if (rule.metric === "log_agent_up") return getLogAgentHealth();
+
+	// Min days-left across all served LB certs. Null when no certs are found
+	// (e.g. no HA pool / acme.json yet) so the rule is skipped, not fired.
+	if (rule.metric === "cert_min_days_left") {
+		const certs = getPoolCertMeta();
+		if (certs.length === 0) return null;
+		return Math.min(...certs.map((c) => c.daysLeft));
+	}
 
 	// Cost (instantaneous): the latest sampled run-rate. Null when nothing is
 	// priced / no recent sample, so the rule is skipped rather than fired.
@@ -289,6 +306,13 @@ export const getMetricHistory = async (
 			minutes,
 		);
 		return { points: ds(points), unit };
+	}
+	if (metric === "cert_min_days_left") {
+		// No stored history (it moves ~once a day) — show the current value as a point.
+		const certs = getPoolCertMeta();
+		if (certs.length === 0) return { points: [], unit };
+		const value = Math.min(...certs.map((c) => c.daysLeft));
+		return { points: [{ ts: Date.now(), value }], unit };
 	}
 	if (!target) return { points: [], unit };
 	const since = new Date(Date.now() - minutes * 60_000).toISOString();

@@ -26,6 +26,8 @@ export const ALERT_METRICS = [
 	"crowdsec_detector_up",
 	"otel_collector_up",
 	"log_agent_up",
+	// Min days-left across all served load-balancer TLS certs (catches a stalled renewal).
+	"cert_min_days_left",
 	// Cost (from the cost sampler). Cluster = total run-rate; project needs a target.
 	"cost_cluster_monthly",
 	"cost_project_monthly",
