@@ -29,14 +29,8 @@ const nomad = async <T>(p: string): Promise<T> => {
 	return res.json() as Promise<T>;
 };
 
-const DB_TYPES = new Set([
-	"postgres",
-	"mysql",
-	"mariadb",
-	"mongo",
-	"redis",
-	"libsql",
-]);
+// Database types that CAN be backed up (redis is a cache — no backup path).
+const DB_TYPES = new Set(["postgres", "mysql", "mariadb", "mongo", "libsql"]);
 
 export interface ClusterHealth {
 	currency: string;

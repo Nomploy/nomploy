@@ -129,7 +129,7 @@ export const ShowClusterHealth = () => {
 						: `${h.backups.databases} DB(s) covered`
 				}
 				tone={h.backups.withoutBackup > 0 ? "warn" : "ok"}
-				href="/dashboard/overview"
+				href="/dashboard/backups"
 			/>
 		</div>
 	);

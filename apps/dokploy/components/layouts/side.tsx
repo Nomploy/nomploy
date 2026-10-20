@@ -16,6 +16,7 @@ import {
 	CloudCog,
 	CreditCard,
 	Database,
+	DatabaseBackup,
 	Folder,
 	Forward,
 	GalleryVerticalEnd,
@@ -180,6 +181,15 @@ const MENU: Menu = {
 			// Non-cloud only (reads the local Nomad cluster), admins/owners.
 			isEnabled: ({ isCloud, permissions }) =>
 				!isCloud && !!permissions?.organization.update,
+		},
+		{
+			isSingle: true,
+			title: "Backups",
+			url: "/dashboard/backups",
+			icon: DatabaseBackup,
+			// Backup coverage across databases; needs backup.read.
+			isEnabled: ({ isCloud, permissions }) =>
+				!isCloud && !!permissions?.backup.read,
 		},
 		{
 			isSingle: true,
