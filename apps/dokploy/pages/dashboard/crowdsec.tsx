@@ -2,6 +2,7 @@ import { IS_CLOUD } from "@nomploy/server/constants";
 import { validateRequest } from "@nomploy/server/lib/auth";
 import type { GetServerSidePropsContext } from "next";
 import type { ReactElement } from "react";
+import { ShowCertExpiry } from "@/components/dashboard/security/show-cert-expiry";
 import { Crowdsec } from "@/components/dashboard/settings/web-server/crowdsec";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
 
@@ -16,6 +17,7 @@ const CrowdsecDashboard = () => {
 					load balancer (the WireGuard subnet and allowlist always bypass it).
 				</p>
 			</div>
+			<ShowCertExpiry />
 			<Crowdsec />
 		</div>
 	);
