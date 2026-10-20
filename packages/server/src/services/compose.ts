@@ -70,11 +70,27 @@ export type Compose = typeof compose.$inferSelect;
  * consulCatalog 404 window). Throws on a definitive rollout failure so the deploy
  * is marked failed; warns-and-continues on timeout.
  */
+// Parse a secrets editor blob ("KEY=VALUE" per line, # comments / blanks skipped)
+// into a Nomad Variable Items map. Mirrors the panel's parseSecretItems so a pack's
+// secrets are stored the same way a compose/app's are.
+const parsePackSecretItems = (text: string): Record<string, string> => {
+	const items: Record<string, string> = {};
+	for (const line of text.split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith("#")) continue;
+		const eq = trimmed.indexOf("=");
+		if (eq <= 0) continue;
+		const key = trimmed.slice(0, eq).trim();
+		if (key) items[key] = trimmed.slice(eq + 1);
+	}
+	return items;
+};
+
 const registerPackDeployment = async (
 	entity: NomadComposeNested,
 	logPath: string,
 ): Promise<void> => {
-	const { registerRenderedPackJobs } = await import(
+	const { registerRenderedPackJobs, nomadPut } = await import(
 		"@nomploy/server/setup/pack-nomad"
 	);
 	const { buildPackJobPatch } = await import(
@@ -87,10 +103,27 @@ const registerPackDeployment = async (
 		version: (entity.nomadPackRef || "").trim() || "latest",
 	};
 	const patch = await buildPackJobPatch(entity);
+	// Opt-in secrets: write each pack job's Nomad Variable (nomad/jobs/<jobID>) from
+	// the service's secrets text BEFORE the job registers, so the injected secrets
+	// template (see buildPackJobPatch) renders populated on first start. Keyed to the
+	// job's own id — that's the path the task's workload identity can read.
+	const secretItems = entity.nomadSecretsEnabled
+		? parsePackSecretItems(entity.nomadSecretsText ?? "")
+		: null;
+	const onBeforeRegister =
+		secretItems && Object.keys(secretItems).length > 0
+			? async (job: { ID: string }) => {
+					await nomadPut(`/var/nomad/jobs/${job.ID}`, {
+						Path: `nomad/jobs/${job.ID}`,
+						Items: secretItems,
+					});
+				}
+			: undefined;
 	const ids = await registerRenderedPackJobs(
 		packRenderDir(entity),
 		meta,
 		patch,
+		onBeforeRegister,
 	);
 	const outcome = await waitForRollout(ids, 150_000);
 	const line =

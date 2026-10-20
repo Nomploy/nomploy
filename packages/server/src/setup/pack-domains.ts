@@ -6,7 +6,11 @@ import {
 	applyDefaultCertResolver,
 	getDefaultCertResolver,
 } from "../services/cert-resolver";
-import { generateConsulTags } from "../utils/builders/nomad";
+import {
+	generateConsulTags,
+	type NomadComposeNested,
+	resolveNomadEnvVars,
+} from "../utils/builders/nomad";
 import {
 	getPackJobIds,
 	type NomadJob,
@@ -14,6 +18,57 @@ import {
 	patchPackJobs,
 } from "./pack-nomad";
 import type { PackScalingCompose } from "./pack-scaling";
+
+/**
+ * The secrets-template JSON (same consul-template body as the compose/app builder's
+ * generateSecretsTemplate) that loads the job's Nomad Variable `nomad/jobs/<jobId>`
+ * as env. The task reads it through its own workload identity (Nomad grants read to
+ * its own job path), so the values never touch the job spec. change_mode=restart
+ * rolls the task when a secret changes. Skips config-file keys (nmplcfg_*).
+ */
+const secretsTemplateJson = (jobId: string) => ({
+	DestPath: "secrets/nomploy.env",
+	Envvars: true,
+	ChangeMode: "restart",
+	EmbeddedTmpl: `{{- with nomadVar "nomad/jobs/${jobId}" }}
+{{- range $k, $v := . }}
+{{- $isCfg := false }}
+{{- if ge (len $k) 8 }}{{ if eq (slice $k 0 8) "nmplcfg_" }}{{ $isCfg = true }}{{ end }}{{ end }}
+{{- if not $isCfg }}
+{{ $k }}={{ $v.Value }}
+{{- end }}
+{{- end }}
+{{- end }}
+`,
+});
+
+/**
+ * Inject the panel's Environment-tab env and (opt-in) Nomad-Variable secrets into a
+ * rendered pack job's tasks — the same env + secrets a compose/app service gets, so
+ * extra env / SMTP creds can be set on a pack deploy, not only via the pack's own
+ * HCL variables. Env merges over the pack template's env (user value wins); secrets
+ * are added as a template reading nomad/jobs/<thisJobId> (the Variable is written
+ * separately, keyed to the same job id — see registerPackDeployment).
+ */
+const applyEnvAndSecretsToJob = (
+	job: NomadJob,
+	env: Record<string, string>,
+	secretsEnabled: boolean,
+): void => {
+	const hasEnv = Object.keys(env).length > 0;
+	if (!hasEnv && !secretsEnabled) return;
+	for (const tg of job.TaskGroups ?? []) {
+		for (const task of tg.Tasks ?? []) {
+			if (hasEnv) task.Env = { ...(task.Env ?? {}), ...env };
+			if (secretsEnabled) {
+				task.Templates = [
+					...(task.Templates ?? []),
+					secretsTemplateJson(job.ID),
+				];
+			}
+		}
+	}
+};
 
 type Compose = typeof composeTable.$inferSelect;
 type Domain = typeof domainsTable.$inferSelect;
@@ -220,16 +275,20 @@ export const applyPackJobPatches = async (
  * up front, so the returned patch is synchronous.
  */
 export const buildPackJobPatch = async (
-	compose: Pick<Compose, "appName" | "serviceScaling"> &
-		PackScalingCompose & { domains?: Domain[] },
+	compose: NomadComposeNested & { domains?: Domain[] },
 ): Promise<(job: NomadJob) => void> => {
 	const domains = applyDefaultCertResolver(
 		compose.domains ?? [],
 		await getDefaultCertResolver().catch(() => "letsencrypt"),
 	);
 	const { applyScalingToJob } = await import("./pack-scaling");
+	// Environment-tab env + (opt-in) Nomad-Variable secrets, injected into every
+	// task — so a pack deploy can take extra env / secrets like a compose/app does.
+	const env = resolveNomadEnvVars(compose);
+	const secretsEnabled = !!compose.nomadSecretsEnabled;
 	return (job) => {
 		applyDomainsToJob(job, compose.appName, domains);
 		applyScalingToJob(job, compose);
+		applyEnvAndSecretsToJob(job, env, secretsEnabled);
 	};
 };

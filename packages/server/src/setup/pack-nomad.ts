@@ -165,6 +165,10 @@ export const registerRenderedPackJobs = async (
 	renderDir: string,
 	meta: PackMetaCtx,
 	patch: (job: NomadJob) => void,
+	// Optional async hook run after patch, BEFORE the job is registered — used to
+	// write the job's secrets Nomad Variable (nomad/jobs/<jobID>) so the secrets
+	// template renders populated on the very first start (not empty-then-restart).
+	onBeforeRegister?: (job: NomadJob) => Promise<void>,
 ): Promise<string[]> => {
 	const files = await findNomadFiles(renderDir);
 	const ids: string[] = [];
@@ -185,6 +189,16 @@ export const registerRenderedPackJobs = async (
 			patch(parsed);
 		} catch (e) {
 			console.error(`registerRenderedPackJobs: patch ${parsed.ID} failed:`, e);
+		}
+		if (onBeforeRegister) {
+			try {
+				await onBeforeRegister(parsed);
+			} catch (e) {
+				console.error(
+					`registerRenderedPackJobs: onBeforeRegister ${parsed.ID} failed:`,
+					e,
+				);
+			}
 		}
 		await nomadPost("/jobs", { Job: parsed });
 		ids.push(parsed.ID);
