@@ -25,6 +25,7 @@ import {
 	updateCompose,
 } from "@nomploy/server/services/compose";
 import { checkServicePermissionAndAccess } from "@nomploy/server/services/permission";
+import { getClusterHealth } from "@nomploy/server/services/health";
 import { rightsizeService } from "@nomploy/server/services/rightsize";
 import { getScalingSuggestions } from "@nomploy/server/services/scaling-suggestions";
 import { getProvisioner } from "@nomploy/server/setup/autoscale";
@@ -1038,6 +1039,11 @@ export const nomadRouter = createTRPCRouter({
 	getScalingSuggestions: protectedProcedure.query(async ({ ctx }) => {
 		return getScalingSuggestions(ctx.session.activeOrganizationId);
 	}),
+
+	// One-shot cluster-health snapshot for the Monitoring overview strip.
+	getClusterHealth: withPermission("server", "read").query(async ({ ctx }) =>
+		getClusterHealth(ctx.session.activeOrganizationId),
+	),
 
 	// Apply a right-size recommendation to a service (application or a managed DB):
 	// set its reserved CPU (MHz) + memory (MB) and re-submit the job. Compose is not

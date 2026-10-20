@@ -4,6 +4,7 @@ import { hasPermission } from "@nomploy/server/services/permission";
 import type { GetServerSidePropsContext } from "next";
 import { useRouter } from "next/router";
 import type { ReactElement } from "react";
+import { ShowClusterHealth } from "@/components/dashboard/monitoring/cluster-health";
 import { NomadMonitoring } from "@/components/dashboard/monitoring/nomad-monitoring";
 import { ShowAlerts } from "@/components/dashboard/monitoring/show-alerts";
 import { ShowMetrics } from "@/components/dashboard/metrics/show-metrics";
@@ -48,7 +49,8 @@ const Dashboard = () => {
 					<TabsTrigger value="metrics">Metrics</TabsTrigger>
 					<TabsTrigger value="alerts">Alerts</TabsTrigger>
 				</TabsList>
-				<TabsContent value="overview" className="pt-4">
+				<TabsContent value="overview" className="flex flex-col gap-4 pt-4">
+					<ShowClusterHealth />
 					<NomadMonitoring />
 				</TabsContent>
 				<TabsContent value="metrics" className="pt-4">
