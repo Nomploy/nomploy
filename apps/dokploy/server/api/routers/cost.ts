@@ -8,6 +8,8 @@ import {
 	suggestHetznerPrices,
 } from "@nomploy/server/services/cost";
 import { findMemberByUserId } from "@nomploy/server/services/permission";
+import { applyAllSafeReductions } from "@nomploy/server/services/rightsize";
+import { getCostOptimization } from "@nomploy/server/services/scaling-suggestions";
 import { z } from "zod";
 import { adminProcedure, createTRPCRouter, withPermission } from "@/server/api/trpc";
 
@@ -36,6 +38,16 @@ export const costRouter = createTRPCRouter({
 	// Month-to-date spend + end-of-month projection vs the budget.
 	spend: withPermission("service", "read").query(async ({ ctx }) =>
 		getCostSpend(ctx.session.activeOrganizationId),
+	),
+
+	// Optimization summary: potential savings, score, scale-to-zero adoption.
+	optimization: withPermission("service", "read").query(async ({ ctx }) =>
+		getCostOptimization(ctx.session.activeOrganizationId),
+	),
+
+	// Bulk-apply all safe (zero-downtime application) reductions.
+	applyAllReductions: adminProcedure.mutation(async ({ ctx }) =>
+		applyAllSafeReductions(ctx.session.activeOrganizationId),
 	),
 
 	saveConfig: adminProcedure

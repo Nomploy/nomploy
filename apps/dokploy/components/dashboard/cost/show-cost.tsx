@@ -1,4 +1,4 @@
-import { CircleDollarSign, RefreshCw, Save } from "lucide-react";
+import { CircleDollarSign, RefreshCw, Save, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -8,6 +8,7 @@ import {
 	AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
+import { DialogAction } from "@/components/shared/dialog-action";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -45,6 +46,26 @@ export const ShowCost = () => {
 		undefined,
 		{ refetchInterval: 60000 },
 	);
+	const { data: opt, refetch: refetchOpt } = api.cost.optimization.useQuery(
+		undefined,
+		{ refetchInterval: 60000 },
+	);
+	const { mutateAsync: applyAll, isPending: applyingAll } =
+		api.cost.applyAllReductions.useMutation();
+
+	const runApplyAll = async () => {
+		try {
+			const res = await applyAll();
+			toast.success(
+				res.applied > 0
+					? `Applied ${res.applied} reduction(s) — saving ~${res.saving} ${report?.currency ?? "EUR"}/mo`
+					: "Nothing to apply",
+			);
+			await Promise.all([refetch(), refetchOpt(), refetchSpend()]);
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : "Failed to apply");
+		}
+	};
 
 	const [typePrices, setTypePrices] = useState<Record<string, string>>({});
 	const [nodePrices, setNodePrices] = useState<Record<string, string>>({});
@@ -147,6 +168,52 @@ export const ShowCost = () => {
 				<p className="text-muted-foreground">No data.</p>
 			) : (
 				<>
+					{/* Optimization summary */}
+					{opt && (
+						<Card className="bg-background">
+							<CardContent className="flex flex-col gap-4 pt-6 sm:flex-row sm:items-center sm:justify-between">
+								<div className="flex items-center gap-4">
+									<div className="flex size-16 shrink-0 flex-col items-center justify-center rounded-full border-4 border-emerald-600/30">
+										<span className="text-xl font-bold leading-none">
+											{opt.score}
+										</span>
+										<span className="text-[10px] text-muted-foreground">
+											/100
+										</span>
+									</div>
+									<div>
+										<p className="flex items-center gap-1.5 font-medium">
+											<Sparkles className="size-4 text-emerald-600" />
+											Optimization score
+										</p>
+										<p className="text-sm text-muted-foreground">
+											{opt.potentialSavings > 0
+												? `Up to ${fmt(opt.potentialSavings)}/mo in savings across ${opt.suggestions} suggestion(s).`
+												: "Services look right-sized — nothing flagged."}
+											{opt.autoStopping > 0
+												? ` ${opt.autoStopping} auto-stopping.`
+												: ""}
+										</p>
+									</div>
+								</div>
+								{opt.safeReductions > 0 && (
+									<DialogAction
+										title="Apply all safe reductions?"
+										description={`Right-size ${opt.safeReductions} over-provisioned application(s) down to their recommended reserves, saving ~${fmt(opt.safeSavings)}/mo. These are applications only, so each rolls zero-downtime (canary). Databases aren't included — apply those individually (they restart).`}
+										onClick={runApplyAll}
+									>
+										<Button type="button" disabled={applyingAll}>
+											<Sparkles className="mr-2 size-4" />
+											Apply {opt.safeReductions} safe reduction
+											{opt.safeReductions > 1 ? "s" : ""} (~
+											{fmt(opt.safeSavings)}/mo)
+										</Button>
+									</DialogAction>
+								)}
+							</CardContent>
+						</Card>
+					)}
+
 					{/* Summary */}
 					<div className="grid gap-4 sm:grid-cols-3">
 						<Card className="bg-background">

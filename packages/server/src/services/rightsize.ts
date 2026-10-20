@@ -1,4 +1,5 @@
 import { rightsizeApplication } from "./application";
+import { getScalingSuggestions } from "./scaling-suggestions";
 import { deployLibsql, updateLibsqlById } from "./libsql";
 import { deployMariadb, updateMariadbById } from "./mariadb";
 import { deployMongo, updateMongoById } from "./mongo";
@@ -70,4 +71,39 @@ export const rightsizeService = async (
 		default:
 			throw new Error(`Right-size not supported for service type ${serviceType}`);
 	}
+};
+
+/**
+ * Apply every "safe" reduction at once: application right-sizes that lower reserved
+ * resources (over-provisioned / idle). Apps only, so each rolls zero-downtime
+ * (canary) — DB reductions restart, so they stay one-at-a-time. Returns how many
+ * were applied and the estimated €/mo saved. Failure-isolated per service.
+ */
+export const applyAllSafeReductions = async (
+	orgId: string,
+): Promise<{ applied: number; saving: number }> => {
+	const suggestions = await getScalingSuggestions(orgId);
+	const safe = suggestions.filter(
+		(s) =>
+			s.serviceType === "application" &&
+			s.canApply &&
+			s.kind !== "under_provisioned" &&
+			s.estMonthlySaving > 0,
+	);
+	let applied = 0;
+	let saving = 0;
+	for (const s of safe) {
+		try {
+			await rightsizeApplication(
+				s.serviceId,
+				s.recommended.cpuMhz,
+				s.recommended.memMb,
+			);
+			applied += 1;
+			saving += s.estMonthlySaving;
+		} catch (e) {
+			console.error(`applyAllSafeReductions: ${s.appName} failed:`, e);
+		}
+	}
+	return { applied, saving: Math.round(saving * 100) / 100 };
 };

@@ -1,7 +1,13 @@
-import { eq, gte } from "drizzle-orm";
+import { and, eq, gte } from "drizzle-orm";
 import { db } from "../db";
-import { projects, serviceMetricSample } from "../db/schema";
-import { computeCostReport } from "./cost";
+import {
+	applications,
+	compose,
+	environments,
+	projects,
+	serviceMetricSample,
+} from "../db/schema";
+import { computeCostReport, getCostSpend } from "./cost";
 
 export type SuggestionKind = "under_provisioned" | "over_provisioned" | "idle";
 
@@ -254,4 +260,85 @@ export const getScalingSuggestions = async (
 	};
 	out.sort((a, b) => order[a.kind] - order[b.kind]);
 	return out;
+};
+
+export interface CostOptimization {
+	currency: string;
+	/** Current cluster run-rate (€/mo). */
+	runRate: number;
+	/** €/mo that applying the reduction suggestions would save. */
+	potentialSavings: number;
+	/** Total suggestions right now. */
+	suggestions: number;
+	/** Reductions on applications that can be bulk-applied zero-downtime. */
+	safeReductions: number;
+	/** €/mo those safe (app) reductions would save. */
+	safeSavings: number;
+	/** Services already auto-stopping (scale-to-zero enabled). */
+	autoStopping: number;
+	/** 0–100: share of the run-rate that ISN'T flagged as reducible waste. */
+	score: number;
+}
+
+/**
+ * A cluster cost-optimization summary for the Cost page: potential savings, what's
+ * already optimized (scale-to-zero), and a 0–100 score (100 = nothing flagged as
+ * over-provisioned/idle). "Safe reductions" are application reductions only — they
+ * roll zero-downtime (canary); DB reductions restart, so they're applied one by one.
+ */
+export const getCostOptimization = async (
+	orgId: string,
+): Promise<CostOptimization> => {
+	const suggestions = await getScalingSuggestions(orgId);
+	const spend = await getCostSpend(orgId);
+	const runRate = spend.runRate;
+
+	const reductions = suggestions.filter(
+		(s) => s.kind !== "under_provisioned" && s.estMonthlySaving > 0,
+	);
+	const potentialSavings =
+		Math.round(reductions.reduce((a, s) => a + s.estMonthlySaving, 0) * 100) /
+		100;
+	const safe = reductions.filter(
+		(s) => s.serviceType === "application" && s.canApply,
+	);
+	const safeSavings =
+		Math.round(safe.reduce((a, s) => a + s.estMonthlySaving, 0) * 100) / 100;
+
+	// Count services with scale-to-zero enabled (app + compose) in this org.
+	const countScaleToZero = async (table: typeof applications | typeof compose) =>
+		(
+			await db
+				.select({ id: table.appName })
+				.from(table)
+				.innerJoin(
+					environments,
+					eq(table.environmentId, environments.environmentId),
+				)
+				.innerJoin(projects, eq(environments.projectId, projects.projectId))
+				.where(
+					and(
+						eq(projects.organizationId, orgId),
+						eq(table.scaleToZeroEnabled, true),
+					),
+				)
+		).length;
+	const autoStopping =
+		(await countScaleToZero(applications)) + (await countScaleToZero(compose));
+
+	const score =
+		runRate > 0
+			? Math.max(0, Math.min(100, Math.round((1 - potentialSavings / runRate) * 100)))
+			: 100;
+
+	return {
+		currency: spend.currency,
+		runRate,
+		potentialSavings,
+		suggestions: suggestions.length,
+		safeReductions: safe.length,
+		safeSavings,
+		autoStopping,
+		score,
+	};
 };
