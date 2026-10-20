@@ -11,6 +11,7 @@ import { useRouter } from "next/router";
 import { toast } from "sonner";
 import { ShowBuildChooseForm } from "@/components/dashboard/application/build/show";
 import { ShowProviderForm } from "@/components/dashboard/application/general/generic/show";
+import { DeploymentPanel } from "@/components/dashboard/nomad/deployment-panel";
 import { DialogAction } from "@/components/shared/dialog-action";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -341,6 +342,7 @@ export const ShowGeneralApplication = ({ applicationId }: Props) => {
 					)}
 				</CardContent>
 			</Card>
+			<DeploymentPanel appName={data?.appName || ""} />
 			<ShowProviderForm applicationId={applicationId} />
 			<ShowBuildChooseForm applicationId={applicationId} />
 		</>

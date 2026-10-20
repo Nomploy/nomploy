@@ -1,4 +1,4 @@
-import { CheckCircle2, Loader2, XCircle } from "lucide-react";
+import { CheckCircle2, Loader2, RotateCcw, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { AlertBlock } from "@/components/shared/alert-block";
 import { Badge } from "@/components/ui/badge";
@@ -6,26 +6,29 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/utils/api";
 
 /**
- * Live panel for an in-flight Nomad deployment of a job (application OR compose).
- * Polls the job's latest deployment; while it's running it shows per-group
- * progress and offers:
- *   - Promote — enabled only when a canary is healthy and awaiting promotion.
- *   - Cancel  — always available for a running deployment (fails it → auto_revert
- *               to the last healthy version). This is the escape hatch for a
- *               deployment wedged unhealthy that the service page otherwise can't
- *               clear.
+ * Rollout panel for a job's latest Nomad deployment (application OR compose).
+ * While running it shows per-group canary/health progress and offers Promote
+ * (when a canary is healthy and awaiting it) + Cancel (fails → auto_revert). Once
+ * finished it keeps a compact result line — successful / failed / reverted — so you
+ * can see how the last deploy went instead of the panel just vanishing.
  * Reads/acts via the control plane (no serverId) — one cluster.
  * [[nomploy-nomad-reads-control-plane]]
  */
 export const DeploymentPanel = ({ appName }: { appName: string }) => {
 	const { data: dep, refetch } = api.nomad.getLatestDeployment.useQuery(
 		{ jobId: appName },
-		{ enabled: !!appName, refetchInterval: 5000 },
+		// Poll fast while a deploy is in flight; slower once it settles.
+		{
+			enabled: !!appName,
+			refetchInterval: (q) =>
+				q.state.data?.status === "running" ? 4000 : 20000,
+		},
 	);
 	const promote = api.nomad.promoteDeployment.useMutation();
 	const fail = api.nomad.failDeployment.useMutation();
 
-	if (!dep || dep.status !== "running") return null;
+	if (!dep) return null;
+	const running = dep.status === "running";
 
 	const doPromote = async () => {
 		try {
@@ -46,10 +49,46 @@ export const DeploymentPanel = ({ appName }: { appName: string }) => {
 		}
 	};
 
+	// Terminal state → a compact one-card result line (no action buttons).
+	if (!running) {
+		const ok = dep.status === "successful";
+		const reverted =
+			dep.status === "cancelled" ||
+			/revert/i.test(dep.description ?? "");
+		const Icon = ok ? CheckCircle2 : reverted ? RotateCcw : XCircle;
+		const tone = ok
+			? "text-emerald-600"
+			: reverted
+				? "text-amber-600 dark:text-amber-500"
+				: "text-destructive";
+		const label = ok
+			? "Last rollout successful"
+			: reverted
+				? "Last rollout reverted"
+				: "Last rollout failed";
+		return (
+			<div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border p-3 text-sm">
+				<span className={`flex items-center gap-1.5 font-medium ${tone}`}>
+					<Icon className="size-4" />
+					{label}
+				</span>
+				<span className="text-muted-foreground">{dep.description}</span>
+				{dep.groups.map((g) => (
+					<span key={g.name} className="text-xs text-muted-foreground">
+						{g.name}: {g.healthyAllocs}/{g.desiredTotal} healthy
+					</span>
+				))}
+			</div>
+		);
+	}
+
 	return (
 		<div className="mt-2 space-y-3 rounded-lg border p-4">
 			<div className="flex items-center justify-between">
-				<span className="font-medium">Deployment in progress</span>
+				<span className="flex items-center gap-2 font-medium">
+					<Loader2 className="size-4 animate-spin text-primary" />
+					Deployment in progress
+				</span>
 				<Badge variant={dep.awaitingPromotion ? "default" : "secondary"}>
 					{dep.awaitingPromotion ? "awaiting promotion" : dep.status}
 				</Badge>
@@ -63,25 +102,38 @@ export const DeploymentPanel = ({ appName }: { appName: string }) => {
 				</AlertBlock>
 			)}
 			<div className="space-y-1">
-				{dep.groups.map((g) => (
-					<div key={g.name} className="flex items-center gap-2 text-sm">
-						<span className="font-mono">{g.name}</span>
-						{g.desiredCanaries > 0 ? (
-							<span className="text-muted-foreground">
-								canaries {g.placedCanaries}/{g.desiredCanaries} · healthy{" "}
-								{g.healthyAllocs} · {g.promoted ? "promoted" : "pending"}
-							</span>
-						) : (
-							<span className="text-muted-foreground">
-								{g.healthyAllocs}/{g.desiredTotal} healthy
-							</span>
-						)}
-					</div>
-				))}
+				{dep.groups.map((g) => {
+					const total = g.desiredCanaries > 0 ? g.desiredCanaries : g.desiredTotal;
+					const pct = total > 0 ? Math.min(100, (g.healthyAllocs / total) * 100) : 0;
+					return (
+						<div key={g.name} className="space-y-1">
+							<div className="flex items-center gap-2 text-sm">
+								<span className="font-mono">{g.name}</span>
+								{g.desiredCanaries > 0 ? (
+									<span className="text-muted-foreground">
+										canary {g.placedCanaries}/{g.desiredCanaries} · healthy{" "}
+										{g.healthyAllocs} · {g.promoted ? "promoted" : "pending"}
+									</span>
+								) : (
+									<span className="text-muted-foreground">
+										{g.healthyAllocs}/{g.desiredTotal} healthy
+									</span>
+								)}
+							</div>
+							<div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+								<div
+									className="h-full bg-primary transition-all"
+									style={{ width: `${pct}%` }}
+								/>
+							</div>
+						</div>
+					);
+				})}
 			</div>
 			{dep.awaitingPromotion && (
 				<AlertBlock type="info">
-					Canaries are healthy and waiting for promotion.
+					Canaries are healthy and waiting for promotion. The new version runs
+					beside the old one — Promote to cut over, or Cancel to revert.
 				</AlertBlock>
 			)}
 			<div className="flex gap-2">
