@@ -41,6 +41,8 @@ import { ShowVolumeBackups } from "@/components/dashboard/application/volume-bac
 import { DeleteService } from "@/components/dashboard/compose/delete-service";
 import { ContainerFreeMonitoring } from "@/components/dashboard/monitoring/free/container/show-free-container-monitoring";
 import { ContainerPaidMonitoring } from "@/components/dashboard/monitoring/paid/container/show-paid-container-monitoring";
+import { ShowNomadAllocations } from "@/components/dashboard/nomad/allocations/show-nomad-allocations";
+import { DeploymentPanel } from "@/components/dashboard/nomad/deployment-panel";
 import { ScheduleScale } from "@/components/dashboard/nomad/scaling/schedule-scale";
 import { ServiceMetricsGraph } from "@/components/dashboard/nomad/scaling/service-metrics-graph";
 import { ShowNomadScaling } from "@/components/dashboard/nomad/scaling/show-nomad-scaling";
@@ -77,6 +79,7 @@ type TabState =
 	| "monitoring"
 	| "preview-deployments"
 	| "volume-backups"
+	| "containers"
 	| "icon";
 
 const Service = (
@@ -272,6 +275,11 @@ const Service = (
 											{permissions?.logs.read && (
 												<TabsTrigger value="logs">Logs</TabsTrigger>
 											)}
+											{permissions?.logs.read && (
+												<TabsTrigger value="containers">
+													Containers
+												</TabsTrigger>
+											)}
 											{data?.sourceType !== "docker" && (
 												<TabsTrigger value="patches">Patches</TabsTrigger>
 											)}
@@ -361,6 +369,19 @@ const Service = (
 													appName={data?.appName || ""}
 													serverId={data?.serverId || ""}
 													appType="nomad"
+												/>
+											</div>
+										</TabsContent>
+									)}
+									{permissions?.logs.read && (
+										<TabsContent value="containers">
+											<div className="flex flex-col gap-4 pt-2.5">
+												{/* Live rollout status + Promote/Cancel — the escape
+												    hatch for a deploy wedged unhealthy. */}
+												<DeploymentPanel appName={data?.appName || ""} />
+												<ShowNomadAllocations
+													appName={data?.appName || ""}
+													serverId={data?.serverId || undefined}
 												/>
 											</div>
 										</TabsContent>
