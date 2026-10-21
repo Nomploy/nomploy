@@ -3,6 +3,7 @@ import {
 	createBackup,
 	createCompose,
 	createDomain,
+	generateTraefikMeDomain,
 	createLibsql,
 	createMariadb,
 	createMongo,
@@ -66,6 +67,10 @@ import {
 	projects,
 	redis,
 } from "@/server/db/schema";
+
+/** An auto-generated default domain (traefik.me / sslip.io), vs a real custom host. */
+const isGeneratedDefaultHost = (host: string): boolean =>
+	/\.(sslip\.io|traefik\.me)$/i.test(host);
 
 export const projectRouter = createTRPCRouter({
 	create: protectedProcedure
@@ -977,10 +982,21 @@ export const projectRouter = createTRPCRouter({
 									environmentId: targetProject?.environmentId || "",
 								});
 
+								// Never copy a real CUSTOM domain onto the copy: two services
+								// sharing a host collide, and deleting/renaming one wipes the
+								// shared LB CNAME (the pipoline.sk incident). Regenerate the auto
+								// default (traefik.me/sslip.io) derived from the NEW appName, and
+								// skip custom domains — the user re-adds those on the service they want.
 								for (const domain of domains) {
-									const { domainId, ...rest } = domain;
+									const { domainId, host, ...rest } = domain;
+									if (!isGeneratedDefaultHost(host)) continue;
+									const newHost = await generateTraefikMeDomain(
+										newApplication.appName,
+										ctx.user.ownerId,
+									);
 									await createDomain({
 										...rest,
+										host: newHost,
 										applicationId: newApplication.applicationId,
 										domainType: "application",
 									});
@@ -1063,10 +1079,18 @@ export const projectRouter = createTRPCRouter({
 									});
 								}
 
+								// See the application branch: regenerate the auto default, skip
+								// custom domains (never duplicate a real host onto the copy).
 								for (const domain of domains) {
-									const { domainId, ...rest } = domain;
+									const { domainId, host, ...rest } = domain;
+									if (!isGeneratedDefaultHost(host)) continue;
+									const newHost = await generateTraefikMeDomain(
+										newCompose.appName,
+										ctx.user.ownerId,
+									);
 									await createDomain({
 										...rest,
+										host: newHost,
 										composeId: newCompose.composeId,
 										domainType: "compose",
 									});
