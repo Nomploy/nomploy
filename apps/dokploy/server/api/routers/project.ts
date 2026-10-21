@@ -968,17 +968,19 @@ export const projectRouter = createTRPCRouter({
 									refreshToken,
 									...application
 								} = await findApplicationById(id);
-								const newAppName = appName.substring(
-									0,
-									appName.lastIndexOf("-"),
-								);
+								// Derive appName (→ Nomad job id + built image name) from the
+								// NEW name, not the SOURCE appName — otherwise a clone of
+								// "pipoline" named "spertulo" still gets a pipoline-* appName
+								// and image. createApplication's buildAppName cleans it and
+								// appends a fresh random suffix.
+								const newName = input.duplicateInSameProject
+									? `${application.name} (copy)`
+									: application.name;
 
 								const newApplication = await createApplication({
 									...application,
-									appName: newAppName,
-									name: input.duplicateInSameProject
-										? `${application.name} (copy)`
-										: application.name,
+									appName: newName,
+									name: newName,
 									environmentId: targetProject?.environmentId || "",
 								});
 
@@ -1056,17 +1058,15 @@ export const projectRouter = createTRPCRouter({
 									...compose
 								} = await findComposeById(id);
 
-								const newAppName = appName.substring(
-									0,
-									appName.lastIndexOf("-"),
-								);
+								// Derive appName from the NEW name (see the application branch).
+								const newName = input.duplicateInSameProject
+									? `${compose.name} (copy)`
+									: compose.name;
 
 								const newCompose = await createCompose({
 									...compose,
-									appName: newAppName,
-									name: input.duplicateInSameProject
-										? `${compose.name} (copy)`
-										: compose.name,
+									appName: newName,
+									name: newName,
 									environmentId: targetProject?.environmentId || "",
 								});
 
