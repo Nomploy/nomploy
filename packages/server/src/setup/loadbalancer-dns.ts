@@ -6,6 +6,7 @@ import {
 	cloudProvider,
 	compose,
 	dnsProvider,
+	domains,
 	lbMetricSample,
 	loadBalancer,
 	server,
@@ -770,6 +771,47 @@ export const getDomainDnsPointStatus = async (
 	return { state: "pending", target: lb.hostname };
 };
 
+/**
+ * Is `host` still used by any domain in this org? Called before unpointing so we
+ * never delete a shared LB CNAME that another service still serves on. The caller
+ * removes/renames its own domain row FIRST, so a remaining match is a DIFFERENT
+ * service. Column-trimmed (100-arg json_build_array cap, see reconcileOrgDomains).
+ */
+const hostInUseByOrg = async (
+	organizationId: string,
+	host: string,
+): Promise<boolean> => {
+	const rows = await db.query.domains.findMany({
+		where: eq(domains.host, host),
+		columns: { domainId: true },
+		with: {
+			application: {
+				columns: { applicationId: true },
+				with: {
+					environment: {
+						columns: { environmentId: true },
+						with: { project: { columns: { organizationId: true } } },
+					},
+				},
+			},
+			compose: {
+				columns: { composeId: true },
+				with: {
+					environment: {
+						columns: { environmentId: true },
+						with: { project: { columns: { organizationId: true } } },
+					},
+				},
+			},
+		},
+	});
+	return rows.some(
+		(d) =>
+			(d.application?.environment?.project?.organizationId ??
+				d.compose?.environment?.project?.organizationId) === organizationId,
+	);
+};
+
 /** Remove the auto-created CNAME for a host (only if it points at the LB). */
 export const unpointDomain = async (
 	organizationId: string,
@@ -779,6 +821,12 @@ export const unpointDomain = async (
 		where: eq(loadBalancer.organizationId, organizationId),
 	});
 	if (!lb?.hostname || !host) return;
+	// Don't orphan a host another service still serves on: deleting/renaming one
+	// service's domain must NOT remove the shared LB CNAME while a different service
+	// still has the same host (the bug that killed pipoline.sk when its clone's
+	// domain was renamed). The caller already removed its own row, so any remaining
+	// match belongs to another service.
+	if (await hostInUseByOrg(organizationId, host)) return;
 	const zone = await resolveZoneForHost(organizationId, host);
 	if (!zone) return;
 	// Apex included now: we only delete a CNAME whose content IS the LB (i.e. the
