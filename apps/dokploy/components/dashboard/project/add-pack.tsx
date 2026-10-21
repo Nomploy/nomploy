@@ -34,8 +34,12 @@ import {
 } from "@/components/ui/select";
 import {
 	displayDefault,
+	hasConstraintsVar,
 	isEditable,
 	type PackVar,
+	type Placement,
+	placementConstraintsHcl,
+	PLACEMENT_OPTIONS,
 	toHclLiteral,
 } from "@/lib/pack-vars";
 import { slugify } from "@/lib/slug";
@@ -207,6 +211,7 @@ export const AddPack = ({
 			: null,
 	);
 	const [values, setValues] = useState<Record<string, string>>({});
+	const [placement, setPlacement] = useState<Placement>("any");
 
 	const registryUrl = registry === "__custom__" ? custom.trim() : registry;
 	const { data: packs, isFetching } = api.nomad.listNomadPacks.useQuery(
@@ -304,6 +309,11 @@ export const AddPack = ({
 				lines.push(`${v.name} = ${toHclLiteral(v, cur)}`);
 			}
 		}
+		// Placement → the `constraints` var (only when the pack exposes one).
+		const constraintsHcl = placementConstraintsHcl(placement);
+		if (constraintsHcl && hasConstraintsVar((detail?.variables as PackVar[]) ?? [])) {
+			lines.push(`constraints = ${constraintsHcl}`);
+		}
 		await deploy(lines.length ? `${lines.join("\n")}\n` : undefined);
 	};
 
@@ -399,20 +409,60 @@ export const AddPack = ({
 										<Loader2 className="size-6 animate-spin" />
 										<span className="text-sm">Loading configuration…</span>
 									</div>
-								) : editableVars.length === 0 ? (
-									<AlertBlock type="info">
-										This pack exposes no configurable variables here (or the
-										registry has no variable schema). You can create it with its
-										built-in defaults and edit variables afterwards.
-									</AlertBlock>
 								) : (
-									<PackVarFields
-										variables={(detail?.variables as PackVar[]) ?? []}
-										values={values}
-										onChange={(name, value) =>
-											setValues((s) => ({ ...s, [name]: value }))
-										}
-									/>
+									<>
+										{hasConstraintsVar(
+											(detail?.variables as PackVar[]) ?? [],
+										) && (
+											<div className="space-y-1.5">
+												<Label className="flex items-center gap-2 text-sm">
+													Placement
+												</Label>
+												<Select
+													value={placement}
+													onValueChange={(val) =>
+														setPlacement(val as Placement)
+													}
+												>
+													<SelectTrigger className="w-full sm:w-[320px]">
+														<SelectValue />
+													</SelectTrigger>
+													<SelectContent>
+														{PLACEMENT_OPTIONS.map((o) => (
+															<SelectItem key={o.value} value={o.value}>
+																{o.label}
+															</SelectItem>
+														))}
+													</SelectContent>
+												</Select>
+												<p className="text-muted-foreground text-xs">
+													Where this service may run. "Workers only" keeps a
+													stateless service off the small control-plane node so
+													it can't starve the panel's zero-downtime updates.
+												</p>
+											</div>
+										)}
+										{editableVars.length > 0 ? (
+											<PackVarFields
+												variables={(detail?.variables as PackVar[]) ?? []}
+												values={values}
+												onChange={(name, value) =>
+													setValues((s) => ({ ...s, [name]: value }))
+												}
+											/>
+										) : (
+											!hasConstraintsVar(
+												(detail?.variables as PackVar[]) ?? [],
+											) && (
+												<AlertBlock type="info">
+													This pack exposes no configurable variables here (or
+													the registry has no variable schema). You can create
+													it with its built-in defaults and edit variables
+													afterwards.
+												</AlertBlock>
+											)
+										)}
+									</>
 								)}
 							</div>
 						</ScrollArea>

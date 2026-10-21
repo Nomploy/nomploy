@@ -8,7 +8,13 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { displayDefault, isEditable, type PackVar } from "@/lib/pack-vars";
+import { Textarea } from "@/components/ui/textarea";
+import {
+	displayDefault,
+	isEditable,
+	isStructured,
+	type PackVar,
+} from "@/lib/pack-vars";
 
 interface Props {
 	variables: PackVar[];
@@ -54,6 +60,15 @@ export const PackVarFields = ({ variables, values, onChange }: Props) => {
 								<SelectItem value="false">false</SelectItem>
 							</SelectContent>
 						</Select>
+					) : isStructured(v) ? (
+						<Textarea
+							className="font-mono text-xs"
+							rows={3}
+							spellCheck={false}
+							placeholder={v.type}
+							value={values[v.name] ?? displayDefault(v)}
+							onChange={(e) => onChange(v.name, e.target.value)}
+						/>
 					) : (
 						<Input
 							type={
@@ -67,8 +82,15 @@ export const PackVarFields = ({ variables, values, onChange }: Props) => {
 							onChange={(e) => onChange(v.name, e.target.value)}
 						/>
 					)}
-					{v.description && (
-						<p className="text-muted-foreground text-xs">{v.description}</p>
+					{(v.description || isStructured(v)) && (
+						<p className="text-muted-foreground text-xs">
+							{v.description}
+							{isStructured(v) && (
+								<span className="opacity-70">
+									{v.description ? " " : ""}HCL {v.type}
+								</span>
+							)}
+						</p>
 					)}
 				</div>
 			))}
