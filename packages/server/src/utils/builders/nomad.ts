@@ -668,15 +668,31 @@ const generateJobMeta = (deployedAt?: string): string =>
  * volumeless services stay free to spread. Drop this once state lives in shared
  * (S3/RWX) storage — then the service is stateless and can spread again.
  */
-const controlPlanePin = (services: NomadServiceSpec[]): string =>
-	services.some((s) => (s.volumes ?? []).some((v) => v.mode !== "ro"))
-		? `  constraint {
+const controlPlanePin = (services: NomadServiceSpec[]): string => {
+	const hasRwVolume = services.some((s) =>
+		(s.volumes ?? []).some((v) => v.mode !== "ro"),
+	);
+	// Stateful (RW volume): HARD-pin to the control-plane node where the data lives.
+	if (hasRwVolume)
+		return `  constraint {
     attribute = "\${meta.nomploy_control_plane}"
     operator  = "="
     value     = "true"
   }
-`
-		: "";
+`;
+	// Stateless: a SOFT negative affinity away from the control-plane, so services
+	// prefer worker nodes and don't drift onto the small hub (where they starve the
+	// panel's zero-downtime roll of memory). Soft (not a hard constraint) keeps a
+	// SINGLE-NODE install working — there the hub is the only node, so it still gets
+	// placed. On a multi-node cluster Nomad picks a worker whenever one has room.
+	return `  affinity {
+    attribute = "\${meta.nomploy_control_plane}"
+    operator  = "="
+    value     = "true"
+    weight    = -100
+  }
+`;
+};
 
 export const deriveUpdateConfig = (
 	services: NomadServiceSpec[],

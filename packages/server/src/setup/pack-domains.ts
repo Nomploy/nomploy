@@ -50,6 +50,40 @@ const secretsTemplateJson = (jobId: string) => ({
  * are added as a template reading nomad/jobs/<thisJobId> (the Variable is written
  * separately, keyed to the same job id — see registerPackDeployment).
  */
+/**
+ * Default a STATELESS pack job away from the control-plane node with a soft
+ * negative affinity (mirrors controlPlanePin for compose/app), so packs don't
+ * drift onto the small hub and starve the panel's zero-downtime roll. Soft, so a
+ * single-node install still schedules. Skipped when the job has a volume (stateful
+ * — leave placement alone) or already has a control-plane constraint (the deploy
+ * form's Placement "Workers only" override).
+ */
+const applyStatelessAffinityToJob = (job: NomadJob): void => {
+	const hasVolume = (job.TaskGroups ?? []).some(
+		(tg: NomadJob) =>
+			Object.keys(tg.Volumes ?? {}).length > 0 ||
+			(tg.Tasks ?? []).some((t: NomadJob) => (t.VolumeMounts ?? []).length > 0),
+	);
+	if (hasVolume) return;
+	const hasCpConstraint = (cs: NomadJob): boolean =>
+		(cs ?? []).some((c: NomadJob) =>
+			(c.LTarget ?? "").includes("nomploy_control_plane"),
+		);
+	if (hasCpConstraint(job.Constraints)) return;
+	for (const tg of job.TaskGroups ?? []) {
+		if (hasCpConstraint(tg.Constraints)) continue;
+		tg.Affinities = [
+			...(tg.Affinities ?? []),
+			{
+				LTarget: "${meta.nomploy_control_plane}",
+				RTarget: "true",
+				Operand: "=",
+				Weight: -100,
+			},
+		];
+	}
+};
+
 const applyEnvAndSecretsToJob = (
 	job: NomadJob,
 	env: Record<string, string>,
@@ -290,5 +324,6 @@ export const buildPackJobPatch = async (
 		applyDomainsToJob(job, compose.appName, domains);
 		applyScalingToJob(job, compose);
 		applyEnvAndSecretsToJob(job, env, secretsEnabled);
+		applyStatelessAffinityToJob(job);
 	};
 };
