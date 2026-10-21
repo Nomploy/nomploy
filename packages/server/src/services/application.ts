@@ -261,6 +261,41 @@ export const rightsizeApplication = async (
 	await reloadApplicationJob(applicationId);
 };
 
+/**
+ * A built-from-source app needs a cluster-reachable registry (Nomad pulls images by
+ * name across nodes — a locally-built tag can't be pulled on another node). The
+ * registry picker is buried in Advanced → Cluster Settings, so instead of failing
+ * the deploy when none is selected, auto-assign the org's registry — preferring the
+ * self-hosted one. Only when the org has NO registry at all does
+ * assertBuiltImageRunnable still throw its actionable "add a registry" error.
+ * Mutates the passed application (registryId + the registry relation) so the build
+ * and job spec see it this deploy, and persists it for the next one.
+ */
+const autoAssignRegistry = async (application: {
+	applicationId: string;
+	sourceType: string;
+	registryId?: string | null;
+	buildRegistryId?: string | null;
+	// biome-ignore lint/suspicious/noExplicitAny: the loaded registry relation
+	registry?: any;
+	environment: { project: { organizationId: string } };
+}): Promise<void> => {
+	if (application.sourceType === "docker") return;
+	if (application.registryId || application.buildRegistryId) return;
+	const { findAllRegistryByOrganizationId } = await import("./registry");
+	const regs = await findAllRegistryByOrganizationId(
+		application.environment.project.organizationId,
+	).catch(() => []);
+	// Prefer the self-hosted registry; else the first one. None → assert throws.
+	const pick = regs.find((r) => r.registryType === "selfHosted") ?? regs[0];
+	if (!pick) return;
+	await updateApplication(application.applicationId, {
+		registryId: pick.registryId,
+	});
+	application.registryId = pick.registryId;
+	application.registry = pick;
+};
+
 export const deployApplication = async ({
 	applicationId,
 	titleLog = "Manual deployment",
@@ -285,6 +320,7 @@ export const deployApplication = async ({
 	});
 
 	try {
+		await autoAssignRegistry(application);
 		assertBuiltImageRunnable(application);
 		let command = "set -e;";
 		if (application.sourceType === "github") {
@@ -440,6 +476,7 @@ export const rebuildApplication = async ({
 	});
 
 	try {
+		await autoAssignRegistry(application);
 		assertBuiltImageRunnable(application);
 		let command = "set -e;";
 		// Check case for docker only
