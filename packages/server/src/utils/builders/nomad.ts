@@ -1838,6 +1838,10 @@ const generateConsulServices = (
 /**
  * Generate Traefik-compatible Consul tags for a specific port's domains
  */
+// The HTTP→HTTPS redirect middleware defined in the pool/hub Traefik dynamic config
+// (setup/traefik-ha.ts), referenced via the file provider.
+const HTTPS_REDIRECT_MIDDLEWARE_REF = "redirect-to-https@file";
+
 export const generateConsulTags = (
 	appName: string,
 	serviceName: string,
@@ -1860,9 +1864,17 @@ export const generateConsulTags = (
 			`traefik.http.routers.${routerName}.rule=Host(\`${domain.host}\`)${pathRule}`,
 			`traefik.http.routers.${routerName}.entrypoints=web`,
 		);
-		if (crowdsecProtect)
+		// Middlewares on the HTTP router (comma-separated, applied in order): CrowdSec
+		// first (block banned IPs), then redirect→HTTPS when the domain is HTTPS — so a
+		// plain-http request to an HTTPS domain gets a 301 to https instead of being
+		// served on :80. Without the redirect the `redirect-to-https@file` middleware
+		// (defined in the pool/hub Traefik dynamic config) was never attached.
+		const httpMiddlewares: string[] = [];
+		if (crowdsecProtect) httpMiddlewares.push(CROWDSEC_MIDDLEWARE_REF);
+		if (domain.https) httpMiddlewares.push(HTTPS_REDIRECT_MIDDLEWARE_REF);
+		if (httpMiddlewares.length > 0)
 			tags.push(
-				`traefik.http.routers.${routerName}.middlewares=${CROWDSEC_MIDDLEWARE_REF}`,
+				`traefik.http.routers.${routerName}.middlewares=${httpMiddlewares.join(",")}`,
 			);
 
 		// HTTPS router
