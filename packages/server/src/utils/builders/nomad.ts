@@ -1484,20 +1484,25 @@ const MOVING_IMAGE_TAGS = new Set([
 	"stable",
 	"canary",
 ]);
-const dockerForcePull = (image: string, force?: boolean): string => {
-	// Explicit setting wins: `true` = always re-pull (even pinned tags), `false` =
-	// never. When unset, fall back to the smart default (re-pull only moving tags).
-	if (force === true) return "\n        force_pull = true";
-	if (force === false) return "";
+/**
+ * Whether the docker driver should force-pull this image: explicit `force` wins
+ * (true = always re-pull even pinned tags, false = never); when unset, re-pull
+ * only a moving tag (latest/edge/…). Shared by the HCL builder (dockerForcePull)
+ * and the pack patch (applyForcePullToJob) so packs honor the Force Pull toggle too.
+ */
+export const resolveForcePull = (image: string, force?: boolean): boolean => {
+	if (force === true) return true;
+	if (force === false) return false;
 	const lastColon = image.lastIndexOf(":");
 	const lastSlash = image.lastIndexOf("/");
 	// A ":" after the last "/" is the tag; otherwise it's a registry port → no tag
 	// (Docker defaults that to :latest, which is moving).
 	const tag = lastColon > lastSlash ? image.slice(lastColon + 1) : "latest";
-	return MOVING_IMAGE_TAGS.has(tag.toLowerCase())
-		? "\n        force_pull = true"
-		: "";
+	return MOVING_IMAGE_TAGS.has(tag.toLowerCase());
 };
+
+const dockerForcePull = (image: string, force?: boolean): string =>
+	resolveForcePull(image, force) ? "\n        force_pull = true" : "";
 
 /** Docker volume names must be [a-zA-Z0-9][a-zA-Z0-9_.-]* — sanitize a source. */
 const sanitizeVolumeName = (s: string): string =>

@@ -9,6 +9,7 @@ import {
 import {
 	generateConsulTags,
 	type NomadComposeNested,
+	resolveForcePull,
 	resolveNomadEnvVars,
 } from "../utils/builders/nomad";
 import {
@@ -58,6 +59,22 @@ const secretsTemplateJson = (jobId: string) => ({
  * — leave placement alone) or already has a control-plane constraint (the deploy
  * form's Placement "Workers only" override).
  */
+/**
+ * Honor the service's Force Pull toggle on a pack job: set each docker task's
+ * `force_pull` from resolveForcePull (the same rule compose/app use). Without this
+ * a pack never re-pulled a moving tag (e.g. :latest), because its docker config
+ * comes from the rendered template, not the builder.
+ */
+const applyForcePullToJob = (job: NomadJob, forcePull?: boolean): void => {
+	for (const tg of job.TaskGroups ?? []) {
+		for (const task of tg.Tasks ?? []) {
+			const image = task.Config?.image;
+			if (task.Driver !== "docker" || !image) continue;
+			task.Config.force_pull = resolveForcePull(image, forcePull);
+		}
+	}
+};
+
 const applyStatelessAffinityToJob = (job: NomadJob): void => {
 	const hasVolume = (job.TaskGroups ?? []).some(
 		(tg: NomadJob) =>
@@ -325,5 +342,6 @@ export const buildPackJobPatch = async (
 		applyScalingToJob(job, compose);
 		applyEnvAndSecretsToJob(job, env, secretsEnabled);
 		applyStatelessAffinityToJob(job);
+		applyForcePullToJob(job, compose.forcePull ?? undefined);
 	};
 };
