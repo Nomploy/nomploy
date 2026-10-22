@@ -169,10 +169,10 @@ importers:
         version: 2.0.30(zod@4.3.6)
       '@better-auth/api-key':
         specifier: 1.6.33
-        version: 1.6.33(@better-auth/core@1.6.33(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.3.6))(jose@6.1.3)(kysely@0.28.17)(nanostores@1.1.1))(@better-auth/utils@0.4.2)(better-auth@1.6.33(887b9591b4ca6bca84d443fb3c888444))(better-call@1.4.0(zod@4.3.6))
+        version: 1.6.33(@better-auth/core@1.6.33(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.3.6))(jose@6.1.3)(kysely@0.28.17)(nanostores@1.1.1))(@better-auth/utils@0.4.2)(better-auth@1.6.33(b2956591bd2a1aa7697592a7224b7c92))(better-call@1.4.0(zod@4.3.6))
       '@better-auth/sso':
         specifier: 1.6.33
-        version: 1.6.33(@better-auth/core@1.6.33(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.3.6))(jose@6.1.3)(kysely@0.28.17)(nanostores@1.1.1))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-auth@1.6.33(887b9591b4ca6bca84d443fb3c888444))(better-call@1.4.0(zod@4.3.6))
+        version: 1.6.33(@better-auth/core@1.6.33(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.3.6))(jose@6.1.3)(kysely@0.28.17)(nanostores@1.1.1))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-auth@1.6.33(b2956591bd2a1aa7697592a7224b7c92))(better-call@1.4.0(zod@4.3.6))
       '@better-auth/utils':
         specifier: 0.4.2
         version: 0.4.2
@@ -340,7 +340,7 @@ importers:
         version: 6.0.0
       better-auth:
         specifier: 1.6.33
-        version: 1.6.33(887b9591b4ca6bca84d443fb3c888444)
+        version: 1.6.33(b2956591bd2a1aa7697592a7224b7c92)
       better-call:
         specifier: 1.4.0
         version: 1.4.0(zod@4.3.6)
@@ -476,6 +476,9 @@ importers:
       slugify:
         specifier: ^1.6.6
         version: 1.6.6
+      socket.io-client:
+        specifier: 4.8.1
+        version: 4.8.1
       sonner:
         specifier: ^1.7.4
         version: 1.7.4(react-dom@18.2.0(react@18.2.0))(react@18.2.0)
@@ -602,13 +605,13 @@ importers:
         version: 5.9.3
       vite:
         specifier: ^7.3.5
-        version: 7.3.6(@types/node@24.10.13)(jiti@2.6.1)(tsx@4.16.2)(yaml@2.9.1)
+        version: 7.3.6(@types/node@24.10.13)(jiti@1.21.7)(tsx@4.16.2)(yaml@2.9.1)
       vite-tsconfig-paths:
         specifier: 4.3.2
-        version: 4.3.2(typescript@5.9.3)(vite@7.3.6(@types/node@24.10.13)(jiti@2.6.1)(tsx@4.16.2)(yaml@2.9.1))
+        version: 4.3.2(typescript@5.9.3)(vite@7.3.6(@types/node@24.10.13)(jiti@1.21.7)(tsx@4.16.2)(yaml@2.9.1))
       vitest:
         specifier: ^4.1.11
-        version: 4.1.11(@opentelemetry/api@1.9.0)(@types/node@24.10.13)(vite@7.3.6(@types/node@24.10.13)(jiti@2.6.1)(tsx@4.16.2)(yaml@2.9.1))
+        version: 4.1.11(@opentelemetry/api@1.9.0)(@types/node@24.10.13)(vite@7.3.6(@types/node@24.10.13)(jiti@1.21.7)(tsx@4.16.2)(yaml@2.9.1))
 
   apps/schedules:
     dependencies:
@@ -696,10 +699,10 @@ importers:
         version: 2.0.30(zod@4.3.6)
       '@better-auth/api-key':
         specifier: 1.6.33
-        version: 1.6.33(@better-auth/core@1.6.33(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.3.6))(jose@6.1.3)(kysely@0.28.17)(nanostores@1.1.1))(@better-auth/utils@0.4.2)(better-auth@1.6.33(b2956591bd2a1aa7697592a7224b7c92))(better-call@1.4.0(zod@4.3.6))
+        version: 1.6.33(@better-auth/core@1.6.33(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.3.6))(jose@6.1.3)(kysely@0.28.17)(nanostores@1.1.1))(@better-auth/utils@0.4.2)(better-auth@1.6.33(887b9591b4ca6bca84d443fb3c888444))(better-call@1.4.0(zod@4.3.6))
       '@better-auth/sso':
         specifier: 1.6.33
-        version: 1.6.33(@better-auth/core@1.6.33(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.3.6))(jose@6.1.3)(kysely@0.28.17)(nanostores@1.1.1))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-auth@1.6.33(b2956591bd2a1aa7697592a7224b7c92))(better-call@1.4.0(zod@4.3.6))
+        version: 1.6.33(@better-auth/core@1.6.33(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.3.6))(jose@6.1.3)(kysely@0.28.17)(nanostores@1.1.1))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-auth@1.6.33(887b9591b4ca6bca84d443fb3c888444))(better-call@1.4.0(zod@4.3.6))
       '@better-auth/utils':
         specifier: 0.4.2
         version: 0.4.2
@@ -741,7 +744,7 @@ importers:
         version: 6.0.0
       better-auth:
         specifier: 1.6.33
-        version: 1.6.33(b2956591bd2a1aa7697592a7224b7c92)
+        version: 1.6.33(887b9591b4ca6bca84d443fb3c888444)
       better-call:
         specifier: 1.4.0
         version: 1.4.0(zod@4.3.6)
@@ -11662,7 +11665,6 @@ snapshots:
       magic-string: 0.30.21
     optionalDependencies:
       vite: 7.3.6(@types/node@24.10.13)(jiti@1.21.7)(tsx@4.16.2)(yaml@2.9.1)
-    optional: true
 
   '@vitest/mocker@4.1.11(vite@7.3.6(@types/node@24.10.13)(jiti@2.6.1)(tsx@4.16.2)(yaml@2.9.1))':
     dependencies:
@@ -11671,6 +11673,7 @@ snapshots:
       magic-string: 0.30.21
     optionalDependencies:
       vite: 7.3.6(@types/node@24.10.13)(jiti@2.6.1)(tsx@4.16.2)(yaml@2.9.1)
+    optional: true
 
   '@vitest/pretty-format@4.1.11':
     dependencies:
@@ -15611,13 +15614,13 @@ snapshots:
       d3-time: 3.1.0
       d3-timer: 3.0.1
 
-  vite-tsconfig-paths@4.3.2(typescript@5.9.3)(vite@7.3.6(@types/node@24.10.13)(jiti@2.6.1)(tsx@4.16.2)(yaml@2.9.1)):
+  vite-tsconfig-paths@4.3.2(typescript@5.9.3)(vite@7.3.6(@types/node@24.10.13)(jiti@1.21.7)(tsx@4.16.2)(yaml@2.9.1)):
     dependencies:
       debug: 4.4.3
       globrex: 0.1.2
       tsconfck: 3.1.6(typescript@5.9.3)
     optionalDependencies:
-      vite: 7.3.6(@types/node@24.10.13)(jiti@2.6.1)(tsx@4.16.2)(yaml@2.9.1)
+      vite: 7.3.6(@types/node@24.10.13)(jiti@1.21.7)(tsx@4.16.2)(yaml@2.9.1)
     transitivePeerDependencies:
       - supports-color
       - typescript
@@ -15636,7 +15639,6 @@ snapshots:
       jiti: 1.21.7
       tsx: 4.16.2
       yaml: 2.9.1
-    optional: true
 
   vite@7.3.6(@types/node@24.10.13)(jiti@2.6.1)(tsx@4.16.2)(yaml@2.9.1):
     dependencies:
@@ -15652,6 +15654,7 @@ snapshots:
       jiti: 2.6.1
       tsx: 4.16.2
       yaml: 2.9.1
+    optional: true
 
   vitest@4.1.11(@opentelemetry/api@1.9.0)(@types/node@24.10.13)(vite@7.3.6(@types/node@24.10.13)(jiti@1.21.7)(tsx@4.16.2)(yaml@2.9.1)):
     dependencies:
@@ -15680,7 +15683,6 @@ snapshots:
       '@types/node': 24.10.13
     transitivePeerDependencies:
       - msw
-    optional: true
 
   vitest@4.1.11(@opentelemetry/api@1.9.0)(@types/node@24.10.13)(vite@7.3.6(@types/node@24.10.13)(jiti@2.6.1)(tsx@4.16.2)(yaml@2.9.1)):
     dependencies:
@@ -15709,6 +15711,7 @@ snapshots:
       '@types/node': 24.10.13
     transitivePeerDependencies:
       - msw
+    optional: true
 
   w3c-keyname@2.2.8: {}
 
