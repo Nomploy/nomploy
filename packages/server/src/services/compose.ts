@@ -46,7 +46,7 @@ import { getCreateComposeFileCommand } from "@nomploy/server/utils/providers/raw
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 import type { z } from "zod";
-import { encodeBase64 } from "../utils/docker/utils";
+import { encodeBase64, sanitizeEnvValue } from "../utils/docker/utils";
 import { getNomployUrl } from "./admin";
 import {
 	createDeploymentCompose,
@@ -81,7 +81,9 @@ const parsePackSecretItems = (text: string): Record<string, string> => {
 		const eq = trimmed.indexOf("=");
 		if (eq <= 0) continue;
 		const key = trimmed.slice(0, eq).trim();
-		if (key) items[key] = trimmed.slice(eq + 1);
+		// Strip control chars (e.g. a pasted TAB) — they make Nomad reject the env
+		// template and brick the deploy with a cryptic "failed allocation".
+		if (key) items[key] = sanitizeEnvValue(trimmed.slice(eq + 1));
 	}
 	return items;
 };

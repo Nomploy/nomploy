@@ -485,6 +485,18 @@ export const parseEnvironmentKeyValuePair = (
 	return [key, valueParts.join("=")];
 };
 
+/**
+ * Strip control characters that are invalid in a single-line env value. Nomad's
+ * env-file template parser rejects raw control chars (e.g. a pasted TAB → "0x09
+ * is an invalid value character"), which fails the whole template render and
+ * bricks the deploy ("failed allocation") with no obvious cause. A tab/CR pasted
+ * into an env value is always an accident, so we drop it. Newline (0x0A) is kept
+ * — it terminates (not corrupts) a value in the parser, and may be intentional.
+ */
+export const sanitizeEnvValue = (value: string): string =>
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally stripping control chars
+	value.replace(/[\x00-\x09\x0B-\x1F\x7F]/g, "");
+
 export const getEnvironmentVariablesObject = (
 	input: string | null,
 	projectEnv?: string | null,
@@ -497,7 +509,7 @@ export const getEnvironmentVariablesObject = (
 	for (const pair of envs) {
 		const [key, value] = parseEnvironmentKeyValuePair(pair);
 		if (key && value) {
-			jsonObject[key] = value;
+			jsonObject[key] = sanitizeEnvValue(value);
 		}
 	}
 
