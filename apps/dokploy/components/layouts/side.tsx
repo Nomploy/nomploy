@@ -434,6 +434,13 @@ const MENU: Menu = {
 		},
 		{
 			isSingle: true,
+			title: "Uptime Kuma",
+			url: "/dashboard/settings/uptime-kuma",
+			icon: Activity,
+			isEnabled: ({ permissions }) => !!permissions?.server.read,
+		},
+		{
+			isSingle: true,
 			title: "Certificates",
 			url: "/dashboard/settings/certificates",
 			icon: ShieldCheck,

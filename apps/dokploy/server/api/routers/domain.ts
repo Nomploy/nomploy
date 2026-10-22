@@ -9,6 +9,7 @@ import {
 	generateTraefikMeDomain,
 	getWebServerSettings,
 	manageDomain,
+	nudgeUptimeKuma,
 	removeDomain,
 	removeDomainById,
 	updateApplication,
@@ -66,6 +67,8 @@ export const domainRouter = createTRPCRouter({
 						ctx.session.activeOrganizationId,
 						domain.host,
 					).catch((e) => console.error("pointDomainAtLb failed:", e));
+				// Keep Uptime Kuma monitors in sync with the new domain (best-effort).
+				nudgeUptimeKuma(ctx.session.activeOrganizationId);
 				await audit(ctx, {
 					action: "create",
 					resourceType: "domain",
@@ -154,6 +157,7 @@ export const domainRouter = createTRPCRouter({
 				await pointDomainAtLb(org, domain.host).catch((e) =>
 					console.error("pointDomainAtLb failed:", e),
 				);
+			nudgeUptimeKuma(org);
 			await audit(ctx, {
 				action: "update",
 				resourceType: "domain",
@@ -236,6 +240,8 @@ export const domainRouter = createTRPCRouter({
 					ctx.session.activeOrganizationId,
 					domain.host,
 				).catch((e) => console.error("unpointDomain failed:", e));
+			// Prune the monitor for the removed domain (best-effort).
+			nudgeUptimeKuma(ctx.session.activeOrganizationId);
 			await audit(ctx, {
 				action: "delete",
 				resourceType: "domain",

@@ -50,6 +50,7 @@ import { settingsRouter } from "./routers/settings";
 import { sshRouter } from "./routers/ssh-key";
 import { stripeRouter } from "./routers/stripe";
 import { tagRouter } from "./routers/tag";
+import { uptimeKumaRouter } from "./routers/uptime-kuma";
 import { userRouter } from "./routers/user";
 import { volumeBackupsRouter } from "./routers/volume-backups";
 /**
@@ -112,6 +113,7 @@ export const appRouter = createTRPCRouter({
 	environment: environmentRouter,
 	tag: tagRouter,
 	patch: patchRouter,
+	uptimeKuma: uptimeKumaRouter,
 });
 
 // export type definition of API

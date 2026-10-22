@@ -149,6 +149,12 @@ void (async () => {
 						"@nomploy/server/services/alerts"
 					);
 					startAlertLoop(60);
+					// Keep Uptime Kuma monitors in sync with pointed LB domains
+					// (self-healing reconcile; a no-op for orgs without it enabled).
+					const { startUptimeKumaSyncLoop } = await import(
+						"@nomploy/server/services/uptime-kuma"
+					);
+					startUptimeKumaSyncLoop(2);
 					// Sample cost into a rolling history (powers the Metrics dashboard
 					// charts + the cost alert rules, which read the latest sample).
 					const { startCostSampler } = await import(
