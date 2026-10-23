@@ -189,7 +189,9 @@ const buildHttpMonitor = (
 	timeout: 48,
 	maxredirects: 10,
 	accepted_statuscodes: ["200-299", "300-399"],
-	expiryNotification: false,
+	// Notify on TLS cert expiry (the "days in advance" is Uptime Kuma's own global
+	// setting). nomploy also tracks cert expiry itself, so this is a second source.
+	expiryNotification: true,
 	ignoreTls: false,
 	upsideDown: false,
 	notificationIDList: {},
