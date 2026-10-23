@@ -23,6 +23,8 @@ export type KumaMonitor = {
 	url: string | null;
 	type: string;
 	active: boolean;
+	/** Tag names attached to the monitor (from the pushed monitorList). */
+	tags: string[];
 };
 
 const CONNECT_TIMEOUT_MS = 12_000;
@@ -91,6 +93,11 @@ const monitorListFromPush = (raw: unknown): KumaMonitor[] => {
 		url: typeof m.url === "string" ? m.url : null,
 		type: String(m.type ?? ""),
 		active: m.active !== false && m.active !== 0,
+		tags: Array.isArray(m.tags)
+			? (m.tags as { name?: string }[])
+					.map((t) => String(t?.name ?? ""))
+					.filter(Boolean)
+			: [],
 	}));
 };
 

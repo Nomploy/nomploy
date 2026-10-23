@@ -194,16 +194,33 @@ export const syncUptimeKumaMonitors = async (
 			s.monitors.map((m) => (m.url ?? "").replace(/\/$/, "")),
 		);
 		const existingIds = new Set(s.monitors.map((m) => m.id));
+		const monitorById = new Map(s.monitors.map((m) => [m.id, m]));
 		// Wire created monitors to the "Default" notifications (opt-out) so they
 		// actually alert, and tag them "nomploy" so they're identifiable in Kuma.
 		const notifIds = row.attachDefaultNotifications
 			? s.defaultNotificationIds()
 			: [];
 
-		// Create missing monitors.
+		// Tag a monitor "nomploy" if it isn't already (backfills monitors created
+		// before tagging existed). Best-effort — never fail a sync over a tag.
+		const ensureTagged = async (monitorId: number, host: string) => {
+			if (monitorById.get(monitorId)?.tags.includes("nomploy")) return;
+			try {
+				const tagId = await s.ensureTag("nomploy", "#10b981");
+				await s.attachTag(monitorId, tagId);
+			} catch (e) {
+				console.error(`uptime-kuma: tag monitor ${host} failed:`, e);
+			}
+		};
+
+		// Create missing monitors (and tag existing managed ones).
 		for (const d of desired) {
-			if (managed[d.host] && existingIds.has(managed[d.host] as number))
+			const managedId = managed[d.host];
+			if (managedId && existingIds.has(managedId)) {
+				// Already ours — just make sure it carries the tag (backfill).
+				await ensureTagged(managedId, d.host);
 				continue;
+			}
 			// A user-made monitor already covers this URL — adopt by skipping (no dupe,
 			// and we won't delete it since it's not recorded as managed).
 			if (existingUrls.has(d.url.replace(/\/$/, ""))) continue;
@@ -211,13 +228,7 @@ export const syncUptimeKumaMonitors = async (
 				const id = await s.addMonitor(d.host, d.url, notifIds);
 				managed[d.host] = id;
 				added++;
-				// Tag it "nomploy" (best-effort — never fail the create over a tag).
-				try {
-					const tagId = await s.ensureTag("nomploy", "#10b981");
-					await s.attachTag(id, tagId);
-				} catch (e) {
-					console.error(`uptime-kuma: tag monitor ${d.host} failed:`, e);
-				}
+				await ensureTagged(id, d.host);
 			} catch (e) {
 				console.error(`uptime-kuma: add monitor ${d.host} failed:`, e);
 			}
