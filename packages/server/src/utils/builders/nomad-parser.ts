@@ -527,21 +527,73 @@ const substituteEnvVars = (
 	content: string,
 	envVars: Record<string, string>,
 ): string => {
-	// Supports `$VAR`, `${VAR}`, and the default forms `${VAR:-default}` (default
-	// when VAR is unset OR empty) and `${VAR-default}` (default only when unset) —
-	// a very common compose pattern (e.g. `TZ=${TZ:-UTC}`). The old regex captured
-	// the `:-default` suffix but the callback discarded it, substituting "" instead
-	// of the default — which broke apps that relied on it (an empty TZ made a cron
-	// library throw "invalid date" and crash the container on boot).
-	return content.replace(
-		/\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:?-)([^}]*))?\}|\$([A-Za-z_][A-Za-z0-9_]*)/g,
-		(_match, braced, op, defaultVal, bare) => {
-			const varName = braced || bare;
-			const val = envVars[varName];
-			if (op === ":-")
-				return val !== undefined && val !== "" ? val : defaultVal;
-			if (op === "-") return val !== undefined ? val : defaultVal;
-			return val ?? "";
-		},
-	);
+	// Supports `$VAR`, `${VAR}`, the default forms `${VAR:-default}` (default when
+	// VAR is unset OR empty) and `${VAR-default}` (default only when unset) — e.g.
+	// `TZ=${TZ:-UTC}` — and the required forms `${VAR:?msg}` (error when unset or
+	// empty) and `${VAR?msg}` (error only when unset), which fail the deploy with
+	// msg like docker compose does. The default/message is itself interpolated, so
+	// nested defaults such as `${A:-${B:-x}}` resolve. A scanner (not a regex) so the
+	// closing brace of a nested `${…}` doesn't end the outer one.
+	const bareVar = /\$([A-Za-z_][A-Za-z0-9_]*)/y;
+	let out = "";
+	let i = 0;
+	while (i < content.length) {
+		if (content[i] !== "$") {
+			out += content[i++];
+			continue;
+		}
+		if (content[i + 1] === "{") {
+			// Find the matching `}` (brace depth, so nested `${…}` stay inside).
+			let depth = 1;
+			let j = i + 2;
+			for (; j < content.length; j++) {
+				if (content[j] === "{") depth++;
+				else if (content[j] === "}" && --depth === 0) break;
+			}
+			if (depth > 0) {
+				// Unterminated `${` — leave the rest verbatim.
+				out += content.slice(i);
+				break;
+			}
+			const expr = content
+				.slice(i + 2, j)
+				.match(/^([A-Za-z_][A-Za-z0-9_]*)(?:(:?[-?])([\s\S]*))?$/);
+			if (!expr?.[1]) {
+				// Not a variable reference (e.g. `${}`) — keep it literally.
+				out += content.slice(i, j + 1);
+				i = j + 1;
+				continue;
+			}
+			i = j + 1;
+			const [, name, op, arg = ""] = expr;
+			const val = envVars[name];
+			const isSet = val !== undefined;
+			const isSetNonEmpty = isSet && val !== "";
+			if (op === ":-" || op === "-") {
+				out += (op === ":-" ? isSetNonEmpty : isSet)
+					? val
+					: substituteEnvVars(arg, envVars);
+			} else if (op === ":?" || op === "?") {
+				if (!(op === ":?" ? isSetNonEmpty : isSet)) {
+					const msg = substituteEnvVars(arg, envVars);
+					throw new Error(
+						`Required variable ${name} is missing a value${msg ? `: ${msg}` : ""}`,
+					);
+				}
+				out += val;
+			} else {
+				out += val ?? "";
+			}
+			continue;
+		}
+		bareVar.lastIndex = i;
+		const bare = bareVar.exec(content);
+		if (bare?.[1]) {
+			out += envVars[bare[1]] ?? "";
+			i = bareVar.lastIndex;
+		} else {
+			out += content[i++];
+		}
+	}
+	return out;
 };

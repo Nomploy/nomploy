@@ -7,12 +7,14 @@ import {
 } from "@nomploy/server/services/cert-resolver";
 import type { Domain } from "@nomploy/server/services/domain";
 import type { InferResultType } from "@nomploy/server/types/with";
+import { quote } from "shell-quote";
 import {
 	CROWDSEC_MIDDLEWARE_REF,
 	isCrowdsecPerServiceActive,
 } from "../../setup/crowdsec-flag";
 import { allServers, readCluster } from "../../setup/nomad-mesh";
 import { encodeBase64, getEnvironmentVariablesObject } from "../docker/utils";
+import { execAsyncRemote } from "../process/execAsync";
 import { parseComposeToNomadServices } from "./nomad-parser";
 
 export type NomadComposeNested = InferResultType<
@@ -287,16 +289,32 @@ export const getBuildNomadCommand = async (
 	// of truth (edited in the panel). For a GIT source the real compose lives in the
 	// freshly-cloned repo at composePath — the stored composeFile is a stale snapshot,
 	// so a `git push` (e.g. removing a service) would otherwise never change the
-	// deployed job. Read the cloned file instead. (Control-plane deploys only; a remote
-	// server's clone isn't on this filesystem — fall back to the stored copy there.)
+	// deployed job. Read the cloned file instead — locally for control-plane deploys,
+	// over SSH for a remote server (its clone isn't on this filesystem, and the stored
+	// snapshot is never filled for git sources, so falling back to it parsed "").
 	const relComposePath =
 		compose.sourceType === "raw"
 			? "docker-compose.yml"
 			: compose.composePath || "docker-compose.yml";
 	let composeFile = compose.composeFile;
-	if (compose.sourceType !== "raw" && !compose.serverId) {
+	if (compose.sourceType !== "raw") {
 		const clonedPath = join(projectPath, relComposePath);
-		if (existsSync(clonedPath)) composeFile = readFileSync(clonedPath, "utf8");
+		if (compose.serverId) {
+			const { stdout } = await execAsyncRemote(
+				compose.serverId,
+				`cat ${quote([clonedPath])}`,
+			).catch(() => ({ stdout: "" }));
+			if (stdout.trim()) composeFile = stdout;
+		} else if (existsSync(clonedPath)) {
+			composeFile = readFileSync(clonedPath, "utf8");
+		}
+		if (!composeFile?.trim()) {
+			throw new Error(
+				`Compose file "${relComposePath}" not found or empty at ${clonedPath}` +
+					(compose.serverId ? ` on server ${compose.serverId}` : "") +
+					" — check the compose path and that the repository was cloned.",
+			);
+		}
 	}
 
 	// Native Nomad jobspec passthrough: if the source is already a Nomad HCL job
