@@ -41,6 +41,11 @@ export const uptimeKuma = pgTable("uptime_kuma", {
 	enabled: boolean("enabled").notNull().default(false),
 	// When true, monitors are auto-created/removed to match pointed LB domains.
 	autoMonitor: boolean("autoMonitor").notNull().default(true),
+	// When true, created monitors are wired to Uptime Kuma's "Default" notifications
+	// (so they actually alert, e.g. to Slack) like a UI-created monitor.
+	attachDefaultNotifications: boolean("attachDefaultNotifications")
+		.notNull()
+		.default(true),
 	// host → Uptime Kuma monitor id, for every monitor Nomploy created. Used so the
 	// reconcile prunes only our monitors and never clobbers user-made ones.
 	managedMonitors: jsonb("managedMonitors")
@@ -76,6 +81,7 @@ export const apiConnectUptimeKuma = z.object({
 export const apiUpdateUptimeKuma = z.object({
 	enabled: z.boolean().optional(),
 	autoMonitor: z.boolean().optional(),
+	attachDefaultNotifications: z.boolean().optional(),
 });
 
 export type UptimeKuma = typeof uptimeKuma.$inferSelect;

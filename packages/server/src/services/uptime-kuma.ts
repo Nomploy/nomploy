@@ -188,6 +188,11 @@ export const syncUptimeKumaMonitors = async (
 			s.monitors.map((m) => (m.url ?? "").replace(/\/$/, "")),
 		);
 		const existingIds = new Set(s.monitors.map((m) => m.id));
+		// Wire created monitors to the "Default" notifications (opt-out) so they
+		// actually alert, and tag them "nomploy" so they're identifiable in Kuma.
+		const notifIds = row.attachDefaultNotifications
+			? s.defaultNotificationIds()
+			: [];
 
 		// Create missing monitors.
 		for (const d of desired) {
@@ -197,9 +202,16 @@ export const syncUptimeKumaMonitors = async (
 			// and we won't delete it since it's not recorded as managed).
 			if (existingUrls.has(d.url.replace(/\/$/, ""))) continue;
 			try {
-				const id = await s.addMonitor(d.host, d.url);
+				const id = await s.addMonitor(d.host, d.url, notifIds);
 				managed[d.host] = id;
 				added++;
+				// Tag it "nomploy" (best-effort — never fail the create over a tag).
+				try {
+					const tagId = await s.ensureTag("nomploy", "#10b981");
+					await s.attachTag(id, tagId);
+				} catch (e) {
+					console.error(`uptime-kuma: tag monitor ${d.host} failed:`, e);
+				}
 			} catch (e) {
 				console.error(`uptime-kuma: add monitor ${d.host} failed:`, e);
 			}

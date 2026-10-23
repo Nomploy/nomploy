@@ -187,6 +187,7 @@ export const ShowUptimeKuma = () => {
 	const toggle = async (patch: {
 		enabled?: boolean;
 		autoMonitor?: boolean;
+		attachDefaultNotifications?: boolean;
 	}) => {
 		await update(patch)
 			.then(async () => {
@@ -369,6 +370,23 @@ export const ShowUptimeKuma = () => {
 									<Switch
 										checked={data.autoMonitor}
 										onCheckedChange={(v) => toggle({ autoMonitor: v })}
+									/>
+								</div>
+								<div className="flex items-center justify-between gap-3">
+									<div>
+										<p className="font-medium text-sm">
+											Use default notifications
+										</p>
+										<p className="text-muted-foreground text-xs">
+											Attach Uptime Kuma's "Default" notifications to created
+											monitors so they alert (e.g. Slack).
+										</p>
+									</div>
+									<Switch
+										checked={data.attachDefaultNotifications}
+										onCheckedChange={(v) =>
+											toggle({ attachDefaultNotifications: v })
+										}
 									/>
 								</div>
 								{data.lastSyncStatus && (

@@ -1,0 +1,1 @@
+ALTER TABLE "uptime_kuma" ADD COLUMN "attachDefaultNotifications" boolean DEFAULT true NOT NULL;

@@ -68,8 +68,18 @@ export type KumaSession = {
 	monitors: KumaMonitor[];
 	/** Latest heartbeat status per monitor id: 1=up, 0=down, 2=pending, 3=maint. */
 	statusOf: (id: number) => number | null;
-	addMonitor: (name: string, url: string) => Promise<number>;
+	/** Ids of the notifications marked "Default" in Uptime Kuma. */
+	defaultNotificationIds: () => number[];
+	addMonitor: (
+		name: string,
+		url: string,
+		notificationIds?: number[],
+	) => Promise<number>;
 	deleteMonitor: (id: number) => Promise<void>;
+	/** Find or create a tag by name; returns its id (cached per session). */
+	ensureTag: (name: string, color: string) => Promise<number>;
+	/** Attach a tag to a monitor (no-op-safe if already attached). */
+	attachTag: (monitorId: number, tagId: number) => Promise<void>;
 };
 
 const monitorListFromPush = (raw: unknown): KumaMonitor[] => {
@@ -120,6 +130,17 @@ export const withUptimeKuma = async <T>(
 			beatStatus.set(Number(beat.monitorID), Number(beat.status));
 	});
 
+	// Notifications Uptime Kuma pushes after login — capture the "Default" ones so
+	// created monitors can be wired to alert (e.g. Slack) like a UI-made monitor.
+	let defaultNotifIds: number[] = [];
+	socket.on("notificationList", (raw: unknown) => {
+		const arr = Array.isArray(raw) ? raw : [];
+		defaultNotifIds = arr
+			.filter((n) => n && (n as { isDefault?: boolean }).isDefault)
+			.map((n) => Number((n as { id?: number }).id))
+			.filter((id) => Number.isFinite(id));
+	});
+
 	try {
 		await withTimeout(
 			new Promise<void>((resolve, reject) => {
@@ -149,20 +170,48 @@ export const withUptimeKuma = async <T>(
 		// Give the server a beat to push the initial monitorList after login.
 		await new Promise((r) => setTimeout(r, 400));
 
+		let cachedTagId: number | null = null;
 		const session: KumaSession = {
 			socket,
 			get monitors() {
 				return latestMonitors;
 			},
 			statusOf: (id: number) => beatStatus.get(id) ?? null,
-			addMonitor: async (name, url) => {
-				const res = await emitAck(socket, "add", buildHttpMonitor(name, url));
+			defaultNotificationIds: () => defaultNotifIds,
+			addMonitor: async (name, url, notificationIds) => {
+				const res = await emitAck(
+					socket,
+					"add",
+					buildHttpMonitor(name, url, notificationIds),
+				);
 				if (!res.monitorID)
 					throw new Error("Uptime Kuma: add returned no monitor id");
 				return res.monitorID;
 			},
 			deleteMonitor: async (id) => {
 				await emitAck(socket, "deleteMonitor", id);
+			},
+			ensureTag: async (name, color) => {
+				if (cachedTagId != null) return cachedTagId;
+				const list = (await emitAck(socket, "getTags")) as {
+					tags?: { id: number; name: string }[];
+				};
+				const found = (list.tags ?? []).find((t) => t.name === name);
+				if (found) {
+					cachedTagId = found.id;
+					return found.id;
+				}
+				const added = (await emitAck(socket, "addTag", { name, color })) as {
+					tag?: { id: number };
+				};
+				const id = added.tag?.id;
+				if (!id) throw new Error("Uptime Kuma: addTag returned no id");
+				cachedTagId = id;
+				return id;
+			},
+			attachTag: async (monitorId, tagId) => {
+				// addMonitorTag(tagId, monitorID, value) — value is a free-text label.
+				await emitAck(socket, "addMonitorTag", tagId, monitorId, "");
 			},
 		} as KumaSession;
 
@@ -177,6 +226,7 @@ export const withUptimeKuma = async <T>(
 const buildHttpMonitor = (
 	name: string,
 	url: string,
+	notificationIds?: number[],
 ): Record<string, unknown> => ({
 	type: "http",
 	name,
@@ -194,7 +244,11 @@ const buildHttpMonitor = (
 	expiryNotification: true,
 	ignoreTls: false,
 	upsideDown: false,
-	notificationIDList: {},
+	// Uptime Kuma's notificationIDList is a { [id]: true } map; wire the given
+	// notifications (e.g. the "Default" ones) so the monitor actually alerts.
+	notificationIDList: Object.fromEntries(
+		(notificationIds ?? []).map((id) => [id, true]),
+	),
 	// Required by Uptime Kuma 2.x — `add` fails without it (the new conditions
 	// column; harmless on 1.x). Empty = no extra pass/fail conditions.
 	conditions: [],
