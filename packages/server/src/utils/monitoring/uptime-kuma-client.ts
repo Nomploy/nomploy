@@ -193,6 +193,9 @@ const buildHttpMonitor = (
 	ignoreTls: false,
 	upsideDown: false,
 	notificationIDList: {},
+	// Required by Uptime Kuma 2.x — `add` fails without it (the new conditions
+	// column; harmless on 1.x). Empty = no extra pass/fail conditions.
+	conditions: [],
 });
 
 /** Quick connectivity + credential check. Returns the current monitor count. */
