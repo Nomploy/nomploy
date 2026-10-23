@@ -187,6 +187,9 @@ export const applications = pgTable("application", {
 	// app out of the per-router bouncer, which only takes effect when CrowdSec runs
 	// in per-service mode (otherwise the bouncer rides the entrypoints globally).
 	crowdsecEnabled: boolean("crowdsecEnabled").notNull().default(true),
+	// Uptime Kuma per-service opt-out. Monitored by default (true); false excludes
+	// this app's domains from the Uptime Kuma auto-sync (see services/uptime-kuma).
+	uptimeKumaEnabled: boolean("uptimeKumaEnabled").notNull().default(true),
 	// Scale-to-zero: when enabled, this app may be scaled to 0 allocations (manually
 	// or, later, after idleMinutes without requests) and woken on the next request
 	// by the activator. Only meaningful for HTTP-routed (domain-bearing) services.
@@ -418,6 +421,7 @@ const createSchema = createInsertSchema(applications, {
 		.nullable()
 		.optional(),
 	crowdsecEnabled: z.boolean().optional(),
+	uptimeKumaEnabled: z.boolean().optional(),
 	scaleToZeroEnabled: z.boolean().optional(),
 	idleMinutes: z.number().int().positive().optional(),
 	enableSubmodules: z.boolean().optional(),

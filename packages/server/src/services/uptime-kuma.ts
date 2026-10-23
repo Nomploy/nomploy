@@ -123,7 +123,7 @@ const getDesiredMonitors = async (
 		columns: { host: true, https: true },
 		with: {
 			application: {
-				columns: { applicationId: true },
+				columns: { applicationId: true, uptimeKumaEnabled: true },
 				with: {
 					environment: {
 						columns: { environmentId: true },
@@ -132,7 +132,7 @@ const getDesiredMonitors = async (
 				},
 			},
 			compose: {
-				columns: { composeId: true },
+				columns: { composeId: true, uptimeKumaEnabled: true },
 				with: {
 					environment: {
 						columns: { environmentId: true },
@@ -150,6 +150,12 @@ const getDesiredMonitors = async (
 			d.compose?.environment?.project?.organizationId;
 		if (org !== organizationId || !d.host) continue;
 		if (isGeneratedDefaultHost(d.host)) continue;
+		// Per-service opt-out: skip domains of a service that turned monitoring off.
+		if (
+			d.application?.uptimeKumaEnabled === false ||
+			d.compose?.uptimeKumaEnabled === false
+		)
+			continue;
 		const url = `${d.https ? "https" : "http"}://${d.host}`;
 		const prev = byHost.get(d.host);
 		if (!prev || (d.https && prev.url.startsWith("http://"))) {

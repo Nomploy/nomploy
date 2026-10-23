@@ -26,6 +26,7 @@ import { ShowDeployStrategy } from "@/components/dashboard/application/advanced/
 import { ShowResources } from "@/components/dashboard/application/advanced/show-resources";
 import { ShowVersionHistory } from "@/components/dashboard/application/advanced/show-version-history";
 import { ShowTraefikConfig } from "@/components/dashboard/application/advanced/traefik/show-traefik-config";
+import { ShowApplicationUptimeKuma } from "@/components/dashboard/application/advanced/uptime-kuma/show-uptime-kuma";
 import { ShowVolumes } from "@/components/dashboard/application/advanced/volumes/show-volumes";
 import { ShowDeployments } from "@/components/dashboard/application/deployments/show-deployments";
 import { ShowDomains } from "@/components/dashboard/application/domains/show-domains";
@@ -276,9 +277,7 @@ const Service = (
 												<TabsTrigger value="logs">Logs</TabsTrigger>
 											)}
 											{permissions?.logs.read && (
-												<TabsTrigger value="containers">
-													Containers
-												</TabsTrigger>
+												<TabsTrigger value="containers">Containers</TabsTrigger>
 											)}
 											{data?.sourceType !== "docker" && (
 												<TabsTrigger value="patches">Patches</TabsTrigger>
@@ -499,6 +498,9 @@ const Service = (
 														applicationId={applicationId}
 													/>
 													<ShowApplicationCrowdsec
+														applicationId={applicationId}
+													/>
+													<ShowApplicationUptimeKuma
 														applicationId={applicationId}
 													/>
 													<ShowApplicationScaleToZero

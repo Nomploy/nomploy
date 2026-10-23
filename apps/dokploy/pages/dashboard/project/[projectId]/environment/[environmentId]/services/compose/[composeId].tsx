@@ -27,6 +27,7 @@ import { AddCommandCompose } from "@/components/dashboard/compose/advanced/add-c
 import { IsolatedDeploymentTab } from "@/components/dashboard/compose/advanced/add-isolation";
 import { ShowComposeCrowdsec } from "@/components/dashboard/compose/advanced/crowdsec/show-crowdsec";
 import { ShowComposeScaleToZero } from "@/components/dashboard/compose/advanced/scale-to-zero/show-scale-to-zero";
+import { ShowComposeUptimeKuma } from "@/components/dashboard/compose/advanced/uptime-kuma/show-uptime-kuma";
 import { ShowComposeContainers } from "@/components/dashboard/compose/containers/show-compose-containers";
 import { DeleteService } from "@/components/dashboard/compose/delete-service";
 import { ShowGeneralCompose } from "@/components/dashboard/compose/general/show";
@@ -470,6 +471,7 @@ const Service = (
 											<div className="flex flex-col gap-4 pt-2.5">
 												<AddCommandCompose composeId={composeId} />
 												<ShowComposeCrowdsec composeId={composeId} />
+												<ShowComposeUptimeKuma composeId={composeId} />
 												<ShowComposeScaleToZero composeId={composeId} />
 												<ShowVolumes id={composeId} type="compose" />
 												<ShowVersionHistory

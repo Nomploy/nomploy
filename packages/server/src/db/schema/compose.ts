@@ -101,6 +101,9 @@ export const compose = pgTable("compose", {
 	// this compose-level flag opts the whole stack out. Only effective in CrowdSec
 	// per-service mode.
 	crowdsecEnabled: boolean("crowdsecEnabled").notNull().default(true),
+	// Uptime Kuma per-service opt-out. Monitored by default (true); false excludes
+	// this stack's domains from the Uptime Kuma auto-sync.
+	uptimeKumaEnabled: boolean("uptimeKumaEnabled").notNull().default(true),
 	// Scale-to-zero (stack-level): may scale every service in this stack to 0 and
 	// wake on request. Only meaningful for HTTP-routed services.
 	scaleToZeroEnabled: boolean("scaleToZeroEnabled").notNull().default(false),
