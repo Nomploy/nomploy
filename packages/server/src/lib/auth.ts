@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import { apiKey } from "@better-auth/api-key";
+import { passkey } from "@better-auth/passkey";
 import { sso } from "@better-auth/sso";
 import * as bcrypt from "bcrypt";
 import { betterAuth } from "better-auth";
@@ -400,6 +401,9 @@ const { handler, api } = betterAuth({
 		}),
 		sso(),
 		twoFactor(),
+		// WebAuthn passkeys. rpID/origin are omitted so the plugin derives them from
+		// the request host — correct for nomploy's per-install panel domains.
+		passkey({ rpName: "Nomploy" }),
 		organization({
 			ac,
 			roles: {

@@ -5,6 +5,7 @@ import type { ReactElement } from "react";
 import superjson from "superjson";
 import { ShowApiKeys } from "@/components/dashboard/settings/api/show-api-keys";
 import { LinkingAccount } from "@/components/dashboard/settings/linking-account/linking-account";
+import { ManagePasskeys } from "@/components/dashboard/settings/profile/manage-passkeys";
 import { ProfileForm } from "@/components/dashboard/settings/profile/profile-form";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
 import { appRouter } from "@/server/api/root";
@@ -18,6 +19,7 @@ const Page = () => {
 		<div className="w-full">
 			<div className="h-full rounded-xl max-w-5xl mx-auto flex flex-col gap-4">
 				<ProfileForm />
+				<ManagePasskeys />
 				{isCloud && <LinkingAccount />}
 				{permissions?.api.read && <ShowApiKeys />}
 			</div>
