@@ -214,6 +214,10 @@ export const twoFactor = pgTable("two_factor", {
 	userId: text("user_id")
 		.notNull()
 		.references(() => user.id, { onDelete: "cascade" }),
+	// better-auth 1.6.x's twoFactor plugin expects this field; without it enabling
+	// 2FA fails with `The field "verified" does not exist in the "twoFactor" Drizzle
+	// schema`. better-auth sets it true once the TOTP is verified.
+	verified: boolean("verified").notNull().default(false),
 });
 
 export const apikey = pgTable("apikey", {
