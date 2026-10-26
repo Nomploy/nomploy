@@ -108,9 +108,12 @@ export const ShowEnvironment = ({ applicationId }: Props) => {
 	// Add keyboard shortcut for Ctrl+S/Cmd+S
 	useEffect(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
-			if ((e.ctrlKey || e.metaKey) && e.code === "KeyS" && !isPending) {
+			if ((e.ctrlKey || e.metaKey) && e.code === "KeyS") {
 				e.preventDefault();
-				form.handleSubmit(onSubmit)();
+				// Only save THIS section if it actually changed, so Ctrl/Cmd+S saves
+				// every changed section on the page (env + runtime secrets + config
+				// files) instead of always re-saving this first one.
+				if (!isPending && hasChanges) form.handleSubmit(onSubmit)();
 			}
 		};
 
@@ -118,7 +121,7 @@ export const ShowEnvironment = ({ applicationId }: Props) => {
 		return () => {
 			document.removeEventListener("keydown", handleKeyDown);
 		};
-	}, [form, onSubmit, isPending]);
+	}, [form, onSubmit, isPending, hasChanges]);
 
 	return (
 		<div className="flex flex-col gap-4">

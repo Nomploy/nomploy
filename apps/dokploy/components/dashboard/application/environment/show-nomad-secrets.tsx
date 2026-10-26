@@ -87,6 +87,20 @@ export const ShowNomadSecrets = ({ applicationId, composeId }: Props) => {
 
 	const handleCancel = () => form.reset({ secrets: loaded });
 
+	// Ctrl/Cmd+S saves this section too — but only when it changed, so one shortcut
+	// saves every changed section on the page (Environment Settings, Runtime
+	// Secrets, Config Files), not just the first.
+	useEffect(() => {
+		const handleKeyDown = (e: KeyboardEvent) => {
+			if ((e.ctrlKey || e.metaKey) && e.code === "KeyS") {
+				e.preventDefault();
+				if (!isPending && hasChanges) form.handleSubmit(onSubmit)();
+			}
+		};
+		document.addEventListener("keydown", handleKeyDown);
+		return () => document.removeEventListener("keydown", handleKeyDown);
+	}, [form, onSubmit, isPending, hasChanges]);
+
 	return (
 		<Card className="bg-background px-6 pb-6">
 			<Form {...form}>

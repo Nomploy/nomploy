@@ -97,6 +97,19 @@ export const ShowNomadConfigFiles = ({ applicationId, composeId }: Props) => {
 
 	const handleCancel = () => setFiles(loaded);
 
+	// Ctrl/Cmd+S saves this section too, but only when it changed — so the shortcut
+	// saves every changed section on the page, not just the first.
+	useEffect(() => {
+		const handleKeyDown = (e: KeyboardEvent) => {
+			if ((e.ctrlKey || e.metaKey) && e.code === "KeyS") {
+				e.preventDefault();
+				if (!isPending && hasChanges) void onSubmit();
+			}
+		};
+		document.addEventListener("keydown", handleKeyDown);
+		return () => document.removeEventListener("keydown", handleKeyDown);
+	}, [onSubmit, isPending, hasChanges]);
+
 	return (
 		<Card className="flex flex-col gap-4 bg-background px-6 pb-6 pt-6">
 			<div className="flex flex-col gap-1">
