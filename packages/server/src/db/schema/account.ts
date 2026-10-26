@@ -218,6 +218,11 @@ export const twoFactor = pgTable("two_factor", {
 	// 2FA fails with `The field "verified" does not exist in the "twoFactor" Drizzle
 	// schema`. better-auth sets it true once the TOTP is verified.
 	verified: boolean("verified").notNull().default(false),
+	// better-auth 1.6.x twoFactor also tracks failed verification attempts; missing
+	// it fails enabling 2FA with `The field "failedVerificationCount" does not exist`.
+	failedVerificationCount: integer("failed_verification_count")
+		.notNull()
+		.default(0),
 });
 
 // WebAuthn passkeys (@better-auth/passkey plugin). Property keys match the plugin's
