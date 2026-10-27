@@ -65,7 +65,8 @@ export const ShowGeneralCompose = ({ composeId }: Props) => {
 			) : (
 				<ShowProviderFormCompose composeId={composeId} />
 			)}
-			{data?.composeType === "nomad" && (
+			{(data?.composeType === "nomad" ||
+				data?.composeType === "nomad-pack") && (
 				<ShowComposeNodePool composeId={composeId} />
 			)}
 			{(data?.composeType === "nomad" ||

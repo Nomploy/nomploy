@@ -13,6 +13,7 @@ import {
 	resolveForcePull,
 	resolveNomadEnvVars,
 } from "../utils/builders/nomad";
+import { isCrowdsecPerServiceActive } from "./crowdsec-flag";
 import {
 	getPackJobIds,
 	type NomadJob,
@@ -270,6 +271,7 @@ export const applyDomainsToJob = (
 	job: NomadJob,
 	appName: string,
 	domains: Domain[],
+	crowdsecProtect = false,
 ): boolean => {
 	let changed = false;
 	for (const tg of job.TaskGroups ?? []) {
@@ -294,7 +296,12 @@ export const applyDomainsToJob = (
 			);
 			// consulCatalog routes this once it's a Consul service with the tags.
 			s.Provider = "consul";
-			const traefikTags = generateConsulTags(appName, s.Name, svcDomains);
+			const traefikTags = generateConsulTags(
+				appName,
+				s.Name,
+				svcDomains,
+				crowdsecProtect,
+			);
 			s.Tags = [...traefikTags, ...metricsTags];
 			// Hide a canary alloc from Traefik until it's promoted — the same
 			// mechanism the panel job uses (see nomad-panel.ts canary_tags).
@@ -322,6 +329,23 @@ export const applyDomainsToJob = (
 		}
 	}
 	return changed;
+};
+
+/**
+ * Pin a pack's job to a node pool (autoscaling group), the same placement knob
+ * apps (nomad-application.ts) and compose services (nomad.ts node_pool) already
+ * have. Nomad's `NodePool` is a job-level field; a null/"default" value means the
+ * default pool, so the panel's choice always wins over whatever the pack template
+ * baked in. Idempotent; returns whether the job changed.
+ */
+export const applyNodePoolToJob = (
+	job: NomadJob,
+	nodePool?: string | null,
+): boolean => {
+	const target = nodePool && nodePool !== "default" ? nodePool : "default";
+	if (job.NodePool === target) return false;
+	job.NodePool = target;
+	return true;
 };
 
 /**
@@ -355,18 +379,24 @@ export const applyPackDomains = async (
  * passes would re-register (and reschedule) the pack twice.
  */
 export const applyPackJobPatches = async (
-	compose: Pick<Compose, "appName" | "serviceScaling"> &
+	compose: Pick<
+		Compose,
+		"appName" | "serviceScaling" | "crowdsecEnabled" | "nodePool"
+	> &
 		PackScalingCompose & { domains?: Domain[] },
 ): Promise<void> => {
 	const domains = applyDefaultCertResolver(
 		compose.domains ?? [],
 		await getDefaultCertResolver().catch(() => "letsencrypt"),
 	);
+	const crowdsecProtect =
+		compose.crowdsecEnabled !== false && isCrowdsecPerServiceActive();
 	const { applyScalingToJob } = await import("./pack-scaling");
 	await patchPackJobs(compose.appName, (job) => {
-		const d = applyDomainsToJob(job, compose.appName, domains);
+		const d = applyDomainsToJob(job, compose.appName, domains, crowdsecProtect);
+		const n = applyNodePoolToJob(job, compose.nodePool);
 		const s = applyScalingToJob(job, compose);
-		return d || s;
+		return d || n || s;
 	});
 };
 
@@ -393,8 +423,15 @@ export const buildPackJobPatch = async (
 	// task — so a pack deploy can take extra env / secrets like a compose/app does.
 	const env = resolveNomadEnvVars(compose);
 	const secretsEnabled = !!compose.nomadSecretsEnabled;
+	// Per-service CrowdSec: attach the bouncer middleware to this pack's routers
+	// unless it opted out (crowdsecEnabled === false) — mirrors the compose/app
+	// builder (nomad.ts). In global mode (or CrowdSec off) this is false and the
+	// bouncer rides the entrypoints instead.
+	const crowdsecProtect =
+		compose.crowdsecEnabled !== false && isCrowdsecPerServiceActive();
 	return (job) => {
-		applyDomainsToJob(job, compose.appName, domains);
+		applyDomainsToJob(job, compose.appName, domains, crowdsecProtect);
+		applyNodePoolToJob(job, compose.nodePool);
 		applyScalingToJob(job, compose);
 		applyEnvAndSecretsToJob(job, env, secretsEnabled);
 		applyStatelessAffinityToJob(job);
