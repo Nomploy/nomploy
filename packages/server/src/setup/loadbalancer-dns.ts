@@ -13,6 +13,14 @@ import {
 	serviceRequestSample,
 } from "../db/schema";
 import { execAsync } from "../utils/process/execAsync";
+import {
+	type R53Zone,
+	route53ListZones,
+	route53PointDomain,
+	route53PointStatus,
+	route53UnpointDomain,
+	route53ZoneForHost,
+} from "./route53-dns";
 import { syncTraefikCertsToConsulKV, TRAEFIK_HA_JOB_NAME } from "./traefik-ha";
 
 const HETZNER_API = "https://api.hetzner.cloud/v1";
@@ -601,6 +609,32 @@ const classifyApexDns = async (
  * Cloudflare flattened CNAME — never a delete-then-create, which once orphaned a
  * live apex. A correct manual apex (A records == LB IPs) is left as-is.
  */
+// Find a Route 53 DNS provider in the org whose hosted zone governs `host`.
+// Returns the provider's creds token + the matched zone, or null (then the
+// Cloudflare path handles it). Route 53 providers store creds in `token` as
+// accessKeyId:secretAccessKey[:region].
+const resolveRoute53ForHost = async (
+	organizationId: string,
+	host: string,
+): Promise<{ token: string; zone: R53Zone } | null> => {
+	const providers = await db.query.dnsProvider.findMany({
+		where: and(
+			eq(dnsProvider.organizationId, organizationId),
+			eq(dnsProvider.provider, "route53"),
+		),
+	});
+	for (const p of providers) {
+		if (!p.token) continue;
+		try {
+			const zone = await route53ZoneForHost(p.token, host);
+			if (zone) return { token: p.token, zone };
+		} catch {
+			// try the next provider
+		}
+	}
+	return null;
+};
+
 export const pointDomainAtLb = async (
 	organizationId: string,
 	host: string,
@@ -610,6 +644,13 @@ export const pointDomainAtLb = async (
 	});
 	if (!lb?.autoPointDomains || !lb.hostname) return;
 	if (!host || host === lb.hostname) return;
+	// Route 53 path: apex → A records = pool IPs; subdomain → CNAME → LB hostname.
+	const r53 = await resolveRoute53ForHost(organizationId, host);
+	if (r53) {
+		const ips = await lbPublicIps(organizationId);
+		await route53PointDomain(r53.token, host, lb.hostname, ips, r53.zone);
+		return;
+	}
 	const zone = await resolveZoneForHost(organizationId, host);
 	if (!zone) return; // unmanaged zone — leave DNS to the user
 	// Apex: only safe to act when it's empty — create a flattened CNAME (no
@@ -711,6 +752,23 @@ export const getDomainDnsPointStatus = async (
 	});
 	if (!lb?.hostname || !lb.autoPointDomains) return { state: "disabled" };
 	if (!host || host === lb.hostname) return { state: "pointed" };
+	// Route 53 path.
+	const r53 = await resolveRoute53ForHost(organizationId, host);
+	if (r53) {
+		const ips = await lbPublicIps(organizationId);
+		const st = await route53PointStatus(
+			r53.token,
+			host,
+			ips,
+			lb.hostname,
+		).catch(() => null);
+		if (!st) return { state: "pending", target: lb.hostname };
+		return {
+			state: st.pointed ? "pointed" : "pending",
+			target: lb.hostname,
+			detail: st.detail,
+		};
+	}
 	const zone = await resolveZoneForHost(organizationId, host);
 	if (!zone) {
 		return {
@@ -827,6 +885,12 @@ export const unpointDomain = async (
 	// domain was renamed). The caller already removed its own row, so any remaining
 	// match belongs to another service.
 	if (await hostInUseByOrg(organizationId, host)) return;
+	// Route 53 path.
+	const r53 = await resolveRoute53ForHost(organizationId, host);
+	if (r53) {
+		await route53UnpointDomain(r53.token, host);
+		return;
+	}
 	const zone = await resolveZoneForHost(organizationId, host);
 	if (!zone) return;
 	// Apex included now: we only delete a CNAME whose content IS the LB (i.e. the
@@ -897,6 +961,91 @@ export const reconcileOrgDomains = async (
 		}
 	}
 	return { pointed, skipped };
+};
+
+/**
+ * Keep Route 53 APEX domains' A records equal to the healthy pool IPs, so apex
+ * failover works (an apex can't CNAME to the pool-tracking LB hostname, so its A
+ * records must be maintained directly). Runs each DNS-loop tick. Subdomains need no
+ * per-tick sync — they're a CNAME → the LB hostname, which already tracks the pool.
+ * No-op for orgs without a Route 53 provider, and never wipes to empty on a
+ * transient "no healthy nodes" read.
+ */
+export const reconcileRoute53ApexDomains = async (
+	organizationId: string,
+): Promise<number> => {
+	const providers = await db.query.dnsProvider.findMany({
+		where: and(
+			eq(dnsProvider.organizationId, organizationId),
+			eq(dnsProvider.provider, "route53"),
+		),
+	});
+	if (providers.length === 0) return 0;
+	const lb = await db.query.loadBalancer.findFirst({
+		where: eq(loadBalancer.organizationId, organizationId),
+	});
+	if (!lb?.autoPointDomains || !lb.hostname) return 0;
+	const ips = await lbPublicIps(organizationId);
+	if (ips.length === 0) return 0; // don't blank out the apex on a transient blip
+
+	const provZones: { token: string; zones: R53Zone[] }[] = [];
+	for (const p of providers) {
+		if (!p.token) continue;
+		try {
+			provZones.push({
+				token: p.token,
+				zones: await route53ListZones(p.token),
+			});
+		} catch {
+			// skip a provider whose zones can't be listed this tick
+		}
+	}
+
+	const rows = await db.query.domains.findMany({
+		columns: { host: true },
+		with: {
+			application: {
+				columns: { applicationId: true },
+				with: {
+					environment: {
+						columns: { environmentId: true },
+						with: { project: { columns: { organizationId: true } } },
+					},
+				},
+			},
+			compose: {
+				columns: { composeId: true },
+				with: {
+					environment: {
+						columns: { environmentId: true },
+						with: { project: { columns: { organizationId: true } } },
+					},
+				},
+			},
+		},
+	});
+	let synced = 0;
+	const seen = new Set<string>();
+	for (const d of rows) {
+		const org =
+			d.application?.environment?.project?.organizationId ??
+			d.compose?.environment?.project?.organizationId;
+		if (org !== organizationId || !d.host || seen.has(d.host)) continue;
+		seen.add(d.host);
+		for (const pz of provZones) {
+			// Only an apex (host === zone root) needs A-record sync.
+			const apexZone = pz.zones.find((z) => z.name === d.host);
+			if (!apexZone) continue;
+			try {
+				await route53PointDomain(pz.token, d.host, lb.hostname, ips, apexZone);
+				synced++;
+			} catch (e) {
+				console.error(`route53: apex sync ${d.host} failed:`, e);
+			}
+			break;
+		}
+	}
+	return synced;
 };
 
 // ---------------------------------------------------------------------------
@@ -1488,6 +1637,16 @@ export const startLoadBalancerDnsLoop = (
 				} catch (e) {
 					console.error(
 						`loadbalancer-dns: reconcile failed for org ${lb.organizationId}:`,
+						e,
+					);
+				}
+				// Route 53 apex A-record failover (no-op unless a route53 provider +
+				// apex domains exist). Subdomains follow the LB hostname's CNAME.
+				try {
+					await reconcileRoute53ApexDomains(lb.organizationId);
+				} catch (e) {
+					console.error(
+						`route53: apex reconcile failed for org ${lb.organizationId}:`,
 						e,
 					);
 				}
