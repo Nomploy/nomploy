@@ -343,5 +343,13 @@ export const buildPackJobPatch = async (
 		applyEnvAndSecretsToJob(job, env, secretsEnabled);
 		applyStatelessAffinityToJob(job);
 		applyForcePullToJob(job, compose.forcePull ?? undefined);
+		// Stamp a changing meta so every deploy is a NEW job version → a fresh alloc,
+		// otherwise an identically-rendered pack (same `:latest` image + same vars) is
+		// a no-op and Nomad never reschedules — so force_pull never runs and the new
+		// image is never pulled. Mirrors how apps bump meta.deployed_at.
+		job.Meta = {
+			...(job.Meta ?? {}),
+			nomploy_deployed_at: String(Date.now()),
+		};
 	};
 };
