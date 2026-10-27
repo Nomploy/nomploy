@@ -626,15 +626,17 @@ export const writeTraefikSetup = async (input: TraefikOptions) => {
 	// the DNS reconfigure all go through it), so a later env/port change never drops
 	// DNS-01. The token never appears in traefik.yml.
 	const env = [...(input.env ?? [])];
-	const activeDns = await db.query.dnsProvider.findFirst({
+	// Inject creds for EVERY enabled DNS provider — Traefik holds a separate
+	// `letsencrypt-<provider>` resolver per provider, so e.g. Cloudflare + Route 53
+	// certs can be issued side by side (each needs its own env: CF_DNS_API_TOKEN vs
+	// AWS_*). Different providers use different env keys, so they don't collide.
+	const activeDnsProviders = await db.query.dnsProvider.findMany({
 		where: eq(dnsProvider.enabled, true),
 		columns: { provider: true, token: true },
 	});
-	if (activeDns?.token) {
-		for (const entry of dnsProviderEnvEntries(
-			activeDns.provider,
-			activeDns.token,
-		)) {
+	for (const p of activeDnsProviders) {
+		if (!p.token) continue;
+		for (const entry of dnsProviderEnvEntries(p.provider, p.token)) {
 			const key = entry.split("=")[0];
 			if (!env.some((e) => e.startsWith(`${key}=`))) env.push(entry);
 		}
@@ -665,7 +667,8 @@ export const writeTraefikSetup = async (input: TraefikOptions) => {
 export const reconfigureTraefikForDns = async (serverId?: string) => {
 	const { MAIN_TRAEFIK_PATH } = paths(!!serverId);
 	const ymlPath = join(MAIN_TRAEFIK_PATH, "traefik.yml");
-	const active = await db.query.dnsProvider.findFirst({
+	// ALL enabled providers (multiple can be active — one resolver per provider).
+	const enabledProviders = await db.query.dnsProvider.findMany({
 		where: eq(dnsProvider.enabled, true),
 		columns: { provider: true },
 	});
@@ -674,25 +677,44 @@ export const reconfigureTraefikForDns = async (serverId?: string) => {
 		const cfg = (parse(readFileSync(ymlPath, "utf8")) ?? {}) as any;
 		cfg.certificatesResolvers = cfg.certificatesResolvers ?? {};
 		// NOTE: never modify the default "letsencrypt" (HTTP-01) resolver here.
-		const spec = active ? DNS01_PROVIDERS[active.provider] : undefined;
-		if (spec) {
-			const email =
-				cfg.certificatesResolvers.letsencrypt?.acme?.email ??
-				"office@localhost";
-			cfg.certificatesResolvers["letsencrypt-dns"] = {
-				acme: {
-					email,
-					// Same store as HTTP-01; Traefik keys certs per resolver name.
-					storage: "/etc/traefik/acme.json",
-					dnsChallenge: {
-						// lego provider id (may differ from our provider id, e.g. gandiv5).
-						provider: spec.lego,
-						resolvers: ["1.1.1.1:53", "8.8.8.8:53"],
-					},
+		const email =
+			cfg.certificatesResolvers.letsencrypt?.acme?.email ?? "office@localhost";
+		const mkResolver = (lego: string) => ({
+			acme: {
+				email,
+				// Same store as HTTP-01; Traefik keys certs per resolver name.
+				storage: "/etc/traefik/acme.json",
+				dnsChallenge: {
+					provider: lego,
+					resolvers: ["1.1.1.1:53", "8.8.8.8:53"],
 				},
-			};
-		} else {
-			delete cfg.certificatesResolvers["letsencrypt-dns"];
+			},
+		});
+		// Drop any stale per-provider resolvers we previously wrote; rebuild from the
+		// current enabled set. (Leaves non-"letsencrypt-*" resolvers untouched.)
+		for (const name of Object.keys(cfg.certificatesResolvers)) {
+			if (name.startsWith("letsencrypt-"))
+				delete cfg.certificatesResolvers[name];
+		}
+		// A `letsencrypt-<provider>` resolver per enabled provider; each domain is
+		// stamped with the one whose zone owns it (services/cert-resolver.ts).
+		const specs = enabledProviders
+			.map((p) => ({ provider: p.provider, spec: DNS01_PROVIDERS[p.provider] }))
+			.filter((x) => x.spec);
+		for (const { provider, spec } of specs) {
+			if (spec)
+				cfg.certificatesResolvers[`letsencrypt-${provider}`] = mkResolver(
+					spec.lego,
+				);
+		}
+		// Back-compat alias used as the default/fallback (panel + already-stamped
+		// domains reference `letsencrypt-dns`): prefer Cloudflare if enabled, else the
+		// first enabled provider. Removed entirely when nothing is enabled.
+		const fallback = specs.find((x) => x.provider === "cloudflare") ?? specs[0];
+		if (fallback?.spec) {
+			cfg.certificatesResolvers["letsencrypt-dns"] = mkResolver(
+				fallback.spec.lego,
+			);
 		}
 		writeFileSync(ymlPath, stringify(cfg));
 	}

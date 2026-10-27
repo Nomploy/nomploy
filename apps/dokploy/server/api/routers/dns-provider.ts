@@ -180,13 +180,10 @@ export const dnsProviderRouter = createTRPCRouter({
 				),
 			});
 			if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-			// Only one active provider per org (Traefik's resolver holds one token).
-			await db
-				.update(dnsProvider)
-				.set({ enabled: false })
-				.where(
-					eq(dnsProvider.organizationId, ctx.session.activeOrganizationId),
-				);
+			// Multiple providers can be active at once — Traefik gets a separate
+			// `letsencrypt-<provider>` resolver per enabled provider and each domain
+			// uses the one whose zone owns it (see services/cert-resolver.ts). So just
+			// enable THIS provider; don't disable the others.
 			await db
 				.update(dnsProvider)
 				.set({ enabled: true })

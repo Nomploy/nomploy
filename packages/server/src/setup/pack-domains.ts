@@ -4,6 +4,7 @@ import type {
 } from "../db/schema";
 import {
 	applyDefaultCertResolver,
+	applyPerHostCertResolver,
 	getDefaultCertResolver,
 } from "../services/cert-resolver";
 import {
@@ -381,10 +382,12 @@ export const applyPackJobPatches = async (
 export const buildPackJobPatch = async (
 	compose: NomadComposeNested & { domains?: Domain[] },
 ): Promise<(job: NomadJob) => void> => {
-	const domains = applyDefaultCertResolver(
+	// Per-host resolver so a pack's domains across different DNS providers (e.g.
+	// Cloudflare + Route 53) each get the right DNS-01 resolver.
+	const domains = await applyPerHostCertResolver(
+		compose.environment.project.organizationId,
 		compose.domains ?? [],
-		await getDefaultCertResolver().catch(() => "letsencrypt"),
-	);
+	).catch(() => compose.domains ?? []);
 	const { applyScalingToJob } = await import("./pack-scaling");
 	// Environment-tab env + (opt-in) Nomad-Variable secrets, injected into every
 	// task — so a pack deploy can take extra env / secrets like a compose/app does.

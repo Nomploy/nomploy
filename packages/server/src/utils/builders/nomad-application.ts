@@ -1,9 +1,6 @@
 import { join } from "node:path";
 import { paths } from "@nomploy/server/constants";
-import {
-	applyDefaultCertResolver,
-	getDefaultCertResolver,
-} from "@nomploy/server/services/cert-resolver";
+import { applyPerHostCertResolver } from "@nomploy/server/services/cert-resolver";
 import type { Domain } from "@nomploy/server/services/domain";
 import { getRegistryTag } from "../cluster/upload";
 import { encodeBase64, getEnvironmentVariablesObject } from "../docker/utils";
@@ -220,7 +217,11 @@ export const generateApplicationNomadJob = (
 	// An auto-defaulted canary must auto-promote (otherwise the deploy waits for a
 	// manual promote and never completes). A user-set canary keeps its own setting.
 	const autoPromote =
-		canary > 0 ? (userCanary > 0 ? (application.autoPromote ?? false) : true) : false;
+		canary > 0
+			? userCanary > 0
+				? (application.autoPromote ?? false)
+				: true
+			: false;
 	return generateNomadJobSpec(
 		application.appName,
 		[spec],
@@ -259,11 +260,12 @@ export const getBuildNomadApplicationCommand = async (
 	const projectPath = join(APPLICATIONS_PATH, application.appName, "code");
 	const jobFilePath = join(projectPath, `${application.appName}.nomad.hcl`);
 	const image = imageOverride ?? resolveApplicationImage(application);
-	// Point Let's Encrypt domains at the DNS-01 resolver when one is configured —
-	// HTTP-01 can't work behind the HA LoadBalancer pool. No-op otherwise.
-	const resolvedDomains = applyDefaultCertResolver(
+	// Point each Let's Encrypt domain at the DNS-01 resolver of the provider that
+	// owns its zone (Cloudflare / Route 53 / …) — HTTP-01 can't work behind the HA
+	// LoadBalancer pool. No-op when no DNS provider is enabled.
+	const resolvedDomains = await applyPerHostCertResolver(
+		application.environment.project.organizationId,
 		domains,
-		await getDefaultCertResolver(),
 	);
 	const jobSpec = generateApplicationNomadJob(
 		application,

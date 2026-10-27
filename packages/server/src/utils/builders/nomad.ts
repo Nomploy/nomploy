@@ -1,10 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { paths } from "@nomploy/server/constants";
-import {
-	applyDefaultCertResolver,
-	getDefaultCertResolver,
-} from "@nomploy/server/services/cert-resolver";
+import { applyPerHostCertResolver } from "@nomploy/server/services/cert-resolver";
 import type { Domain } from "@nomploy/server/services/domain";
 import type { InferResultType } from "@nomploy/server/types/with";
 import {
@@ -274,11 +271,12 @@ export const getBuildNomadCommand = async (
 ): Promise<string> => {
 	const { COMPOSE_PATH } = paths(!!compose.serverId);
 	const { appName } = compose;
-	// Point Let's Encrypt domains at the DNS-01 resolver when one is configured —
-	// HTTP-01 can't work behind the HA LoadBalancer pool. No-op otherwise.
-	const domains = applyDefaultCertResolver(
+	// Point each Let's Encrypt domain at the DNS-01 resolver of the provider that
+	// owns its zone — HTTP-01 can't work behind the HA LoadBalancer pool. No-op
+	// when no DNS provider is enabled.
+	const domains = await applyPerHostCertResolver(
+		compose.environment.project.organizationId,
 		compose.domains ?? [],
-		await getDefaultCertResolver(),
 	);
 	const projectPath = join(COMPOSE_PATH, appName, "code");
 	const jobFilePath = join(projectPath, `${appName}.nomad.hcl`);
@@ -822,7 +820,8 @@ ${portLines}
 	// race (ECONNREFUSED → crash → restart) within the single shared-netns group,
 	// which Nomad otherwise has no way to order. Only engages when depends_on is set.
 	const dependedUpon = new Set<string>();
-	for (const s of relabeled) for (const d of s.dependsOn ?? []) dependedUpon.add(d);
+	for (const s of relabeled)
+		for (const d of s.dependsOn ?? []) dependedUpon.add(d);
 	const readinessPort = new Map<string, number>();
 	for (const s of relabeled) {
 		const p = inferReadinessPort(s);
