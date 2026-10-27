@@ -1,7 +1,7 @@
 import { validateRequest } from "@nomploy/server/lib/auth";
 import { createServerSideHelpers } from "@trpc/react-query/server";
 import copy from "copy-to-clipboard";
-import { HelpCircle, ServerOff } from "lucide-react";
+import { ChevronDown, HelpCircle, ServerOff } from "lucide-react";
 import type {
 	GetServerSidePropsContext,
 	InferGetServerSidePropsType,
@@ -58,6 +58,12 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -83,6 +89,18 @@ type TabState =
 	| "containers"
 	| "icon";
 
+// Infra/advanced tabs collapsed into a "More" dropdown so the far-right tabs
+// (Scaling — which holds autoscaling — Resources, Storage, Network, Advanced)
+// stay reachable instead of being pushed off the end of the overflowing bar.
+const MORE_TABS = [
+	{ value: "scaling", label: "Scaling" },
+	{ value: "resources", label: "Resources" },
+	{ value: "storage", label: "Storage" },
+	{ value: "network", label: "Network" },
+	{ value: "advanced", label: "Advanced" },
+] as const;
+const MORE_TAB_VALUES = MORE_TABS.map((t) => t.value) as readonly string[];
+
 const Service = (
 	props: InferGetServerSidePropsType<typeof getServerSideProps>,
 ) => {
@@ -97,6 +115,13 @@ const Service = (
 			setTab(router.query.tab as TabState);
 		}
 	}, [router.query.tab]);
+
+	const goToTab = (value: string) => {
+		setTab(value as TabState);
+		router.push(
+			`/dashboard/project/${projectId}/environment/${environmentId}/services/application/${applicationId}?tab=${value}`,
+		);
+	};
 
 	const { data } = api.application.one.useQuery(
 		{ applicationId },
@@ -238,63 +263,85 @@ const Service = (
 									value={tab}
 									defaultValue="general"
 									className="w-full"
-									onValueChange={(e) => {
-										setTab(e as TabState);
-										const newPath = `/dashboard/project/${projectId}/environment/${environmentId}/services/application/${applicationId}?tab=${e}`;
-										router.push(newPath);
-									}}
+									onValueChange={(e) => goToTab(e)}
 								>
-									<div className="flex flex-row items-center justify-between w-full overflow-auto">
-										<TabsList className="flex gap-8 max-md:gap-4 justify-start">
-											<TabsTrigger value="general">General</TabsTrigger>
-											{permissions?.envVars.read && (
-												<TabsTrigger value="environment">
-													Environment
-												</TabsTrigger>
-											)}
-											{permissions?.domain.read && (
-												<TabsTrigger value="domains">Domains</TabsTrigger>
-											)}
-											{permissions?.deployment.read && (
-												<TabsTrigger value="deployments">
-													Deployments
-												</TabsTrigger>
-											)}
-											{permissions?.deployment.read && (
-												<TabsTrigger value="preview-deployments">
-													Preview Deployments
-												</TabsTrigger>
-											)}
-											{permissions?.schedule.read && (
-												<TabsTrigger value="schedules">Schedules</TabsTrigger>
-											)}
-											{permissions?.volumeBackup.read && (
-												<TabsTrigger value="volume-backups">
-													Volume Backups
-												</TabsTrigger>
-											)}
-											{permissions?.logs.read && (
-												<TabsTrigger value="logs">Logs</TabsTrigger>
-											)}
-											{permissions?.logs.read && (
-												<TabsTrigger value="containers">Containers</TabsTrigger>
-											)}
-											{data?.sourceType !== "docker" && (
-												<TabsTrigger value="patches">Patches</TabsTrigger>
-											)}
-											{permissions?.monitoring.read && (
-												<TabsTrigger value="monitoring">Monitoring</TabsTrigger>
-											)}
-											{permissions?.service.create && (
-												<>
-													<TabsTrigger value="scaling">Scaling</TabsTrigger>
-													<TabsTrigger value="resources">Resources</TabsTrigger>
-													<TabsTrigger value="storage">Storage</TabsTrigger>
-													<TabsTrigger value="network">Network</TabsTrigger>
-													<TabsTrigger value="advanced">Advanced</TabsTrigger>
-												</>
-											)}
-										</TabsList>
+									<div className="flex flex-row items-center justify-between w-full gap-2">
+										<div className="overflow-auto">
+											<TabsList className="flex gap-8 max-md:gap-4 justify-start">
+												<TabsTrigger value="general">General</TabsTrigger>
+												{permissions?.envVars.read && (
+													<TabsTrigger value="environment">
+														Environment
+													</TabsTrigger>
+												)}
+												{permissions?.domain.read && (
+													<TabsTrigger value="domains">Domains</TabsTrigger>
+												)}
+												{permissions?.deployment.read && (
+													<TabsTrigger value="deployments">
+														Deployments
+													</TabsTrigger>
+												)}
+												{permissions?.deployment.read && (
+													<TabsTrigger value="preview-deployments">
+														Preview Deployments
+													</TabsTrigger>
+												)}
+												{permissions?.schedule.read && (
+													<TabsTrigger value="schedules">Schedules</TabsTrigger>
+												)}
+												{permissions?.volumeBackup.read && (
+													<TabsTrigger value="volume-backups">
+														Volume Backups
+													</TabsTrigger>
+												)}
+												{permissions?.logs.read && (
+													<TabsTrigger value="logs">Logs</TabsTrigger>
+												)}
+												{permissions?.logs.read && (
+													<TabsTrigger value="containers">
+														Containers
+													</TabsTrigger>
+												)}
+												{data?.sourceType !== "docker" && (
+													<TabsTrigger value="patches">Patches</TabsTrigger>
+												)}
+												{permissions?.monitoring.read && (
+													<TabsTrigger value="monitoring">
+														Monitoring
+													</TabsTrigger>
+												)}
+											</TabsList>
+										</div>
+										{permissions?.service.create && (
+											<DropdownMenu>
+												<DropdownMenuTrigger asChild>
+													<button
+														type="button"
+														data-state={
+															MORE_TAB_VALUES.includes(tab)
+																? "active"
+																: "inactive"
+														}
+														className="inline-flex shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+													>
+														More
+														<ChevronDown className="size-4" />
+													</button>
+												</DropdownMenuTrigger>
+												<DropdownMenuContent align="end">
+													{MORE_TABS.map((t) => (
+														<DropdownMenuItem
+															key={t.value}
+															className={tab === t.value ? "bg-accent" : ""}
+															onSelect={() => goToTab(t.value)}
+														>
+															{t.label}
+														</DropdownMenuItem>
+													))}
+												</DropdownMenuContent>
+											</DropdownMenu>
+										)}
 									</div>
 
 									<TabsContent value="general">
