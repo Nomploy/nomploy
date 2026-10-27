@@ -577,7 +577,38 @@ export const DNS01_PROVIDERS: Record<string, { lego: string; env: string[] }> =
 		vultr: { lego: "vultr", env: ["VULTR_API_KEY"] },
 		hetzner: { lego: "hetzner", env: ["HETZNER_API_KEY"] },
 		gandi: { lego: "gandiv5", env: ["GANDIV5_PERSONAL_ACCESS_TOKEN"] },
+		// AWS Route 53. Creds are stored in the single `token` field as
+		// `accessKeyId:secretAccessKey[:region]` (region optional — Route 53 is global,
+		// defaults to us-east-1). lego's route53 provider reads them from AWS_* env.
+		route53: {
+			lego: "route53",
+			env: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION"],
+		},
 	};
+
+/**
+ * The `KEY=VALUE` env entries to inject into Traefik for a DNS-01 provider's creds.
+ * Most providers use one token for every env key; Route 53 packs
+ * `accessKeyId:secretAccessKey[:region]` into `token` and maps the parts to the
+ * AWS_* vars positionally (region defaults to us-east-1).
+ */
+export const dnsProviderEnvEntries = (
+	provider: string,
+	token: string,
+): string[] => {
+	const spec = DNS01_PROVIDERS[provider];
+	if (!spec || !token) return [];
+	if (provider === "route53") {
+		const [accessKeyId, secretAccessKey, region] = token.split(":");
+		if (!accessKeyId || !secretAccessKey) return [];
+		return [
+			`AWS_ACCESS_KEY_ID=${accessKeyId}`,
+			`AWS_SECRET_ACCESS_KEY=${secretAccessKey}`,
+			`AWS_REGION=${region || "us-east-1"}`,
+		];
+	}
+	return spec.env.map((key) => `${key}=${token}`);
+};
 
 export const writeTraefikSetup = async (input: TraefikOptions) => {
 	const resourceType = await getDockerResourceType(
@@ -599,11 +630,13 @@ export const writeTraefikSetup = async (input: TraefikOptions) => {
 		where: eq(dnsProvider.enabled, true),
 		columns: { provider: true, token: true },
 	});
-	const dnsSpec = activeDns ? DNS01_PROVIDERS[activeDns.provider] : undefined;
-	if (dnsSpec && activeDns?.token) {
-		for (const key of dnsSpec.env) {
-			if (!env.some((e) => e.startsWith(`${key}=`)))
-				env.push(`${key}=${activeDns.token}`);
+	if (activeDns?.token) {
+		for (const entry of dnsProviderEnvEntries(
+			activeDns.provider,
+			activeDns.token,
+		)) {
+			const key = entry.split("=")[0];
+			if (!env.some((e) => e.startsWith(`${key}=`))) env.push(entry);
 		}
 	}
 	await initializeStandaloneTraefik({

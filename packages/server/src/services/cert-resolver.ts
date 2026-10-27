@@ -24,7 +24,10 @@ export const getDefaultCertResolver = async (): Promise<string> => {
 		where: eq(dnsProvider.enabled, true),
 		columns: { provider: true },
 	});
-	return active?.provider === "cloudflare" ? "letsencrypt-dns" : "letsencrypt";
+	// Any enabled DNS provider (cloudflare, route53, …) issues via DNS-01 — the only
+	// challenge that works behind the HA pool. reconfigureTraefikForDns sets up the
+	// `letsencrypt-dns` resolver for whichever provider is enabled.
+	return active ? "letsencrypt-dns" : "letsencrypt";
 };
 
 /**

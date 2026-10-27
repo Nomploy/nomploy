@@ -41,6 +41,21 @@ const testProviderToken = async (
 			detail: `Token valid (status: ${data.result?.status ?? "active"}).`,
 		};
 	}
+	if (provider === "route53") {
+		// Creds are `accessKeyId:secretAccessKey[:region]`. Validate the shape here
+		// (a live AWS check needs SigV4/SDK — added with the apex auto-failover phase).
+		const [accessKeyId, secretAccessKey] = token.split(":");
+		if (!accessKeyId || !secretAccessKey)
+			throw new Error(
+				"Route 53 credentials must be accessKeyId:secretAccessKey[:region]",
+			);
+		if (secretAccessKey.length < 20)
+			throw new Error("Route 53 secret access key looks too short");
+		return {
+			ok: true,
+			detail: "Credentials format OK (not verified against AWS yet).",
+		};
+	}
 	throw new Error(`Unsupported DNS provider: ${provider}`);
 };
 

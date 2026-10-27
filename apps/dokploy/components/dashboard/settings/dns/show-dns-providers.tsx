@@ -76,6 +76,12 @@ const DNS_PROVIDERS: {
 		tokenLabel: "Personal access token",
 		help: "Certs only — point DNS yourself.",
 	},
+	{
+		id: "route53",
+		label: "AWS Route 53",
+		tokenLabel: "Credentials",
+		help: "Format: accessKeyId:secretAccessKey:region (region optional, defaults us-east-1). IAM creds with Route53 change-record permissions. Certs via DNS-01; apex A-record auto-failover coming next.",
+	},
 ];
 
 // Create/edit dialog. On edit the token is left blank (masked) and only
