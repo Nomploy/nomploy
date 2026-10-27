@@ -1313,6 +1313,7 @@ const NodeTag = ({ node }: { node: string }) => (
 /** Consolidated, instance-tagged, searchable Traefik logs across the pool. */
 const LogsView = () => {
 	const { data: nodes } = api.nomad.getLoadBalancerNodes.useQuery();
+	const { data: lbStatus } = api.nomad.getLoadBalancerStatus.useQuery();
 	const [scope, setScope] = useState<string>("all");
 	const [logType, setLogType] = useState<"stdout" | "stderr">("stdout");
 	const [query, setQuery] = useState("");
@@ -1438,7 +1439,13 @@ const LogsView = () => {
 								? "Loading…"
 								: q || errorsOnly
 									? "No matching requests."
-									: "No access logs yet. (Redeploy the pool if it predates the access-log config.)"}
+									: lbStatus?.lbLogsOtlp
+										? `Access logs are exported via OTLP${
+												lbStatus.otlpEndpoint
+													? ` to ${lbStatus.otlpEndpoint}`
+													: ""
+											}, not to Traefik stdout — so they appear in your observability backend, not here. Turn off “Ship load balancer logs” in OTel settings (then redeploy the pool) to tail them in this tab instead.`
+										: "No access logs yet. (Redeploy the pool if it predates the access-log config.)"}
 						</p>
 					) : (
 						<div className="max-h-[28rem] overflow-auto rounded-lg border">

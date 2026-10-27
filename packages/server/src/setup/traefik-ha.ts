@@ -2,6 +2,7 @@ import { createHash, X509Certificate } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { paths } from "../constants";
+import { DNS01_PROVIDERS } from "../services/settings";
 import { encodeBase64 } from "../utils/docker/utils";
 import { execAsync } from "../utils/process/execAsync";
 import { getCrowdsecBouncer } from "./crowdsec";
@@ -10,6 +11,20 @@ import { getTraefikVersion } from "./traefik-setup";
 
 const JOB_NAME = "nomploy-traefik-ha";
 const CONSUL_ADDR = "http://127.0.0.1:8500";
+
+// Every cert-resolver name a catalog router's `tls.certresolver=…` tag can carry.
+// The hub issues with these (base HTTP-01 `letsencrypt`, the `letsencrypt-dns`
+// fallback, and one `letsencrypt-<provider>` per DNS-01 provider); the pool only
+// SERVES the resulting certs from Consul KV. But Traefik logs
+// `Router uses a nonexistent certificate resolver` for any referenced resolver it
+// doesn't define, so the pool defines all of them as DORMANT stubs (see
+// generateTraefikHaJob) — they exist for tag validation and never issue, because a
+// valid cert for the domain is already present in the KV-served set.
+const POOL_CERT_RESOLVERS = [
+	"letsencrypt",
+	"letsencrypt-dns",
+	...Object.keys(DNS01_PROVIDERS).map((p) => `letsencrypt-${p}`),
+];
 // Traefik's own consul KV provider (rootKey "traefik") reads the shared TLS certs
 // straight from here, using the token in its config — NOT via Nomad's template
 // `key` integration (that uses a different, KV-less Consul token and 403s). Certs
@@ -19,9 +34,10 @@ const KV_CERTS_PREFIX = "traefik/tls/certificates";
 const consulToken = (): string => process.env.CONSUL_TOKEN ?? "";
 
 /**
- * The ACME contact email for the LB nodes' `letsencrypt` resolver. The resolver
- * only has to *exist* so the catalog routers' `tls.certresolver=letsencrypt`
- * tags validate — certs are served from the KV store, so it stays dormant.
+ * The ACME contact email for the LB nodes' dormant cert resolvers (see
+ * POOL_CERT_RESOLVERS). The resolvers only have to *exist* so the catalog
+ * routers' `tls.certresolver=…` tags validate — certs are served from the KV
+ * store, so they stay dormant.
  * Mirror the hub's email when we can read it; fall back to a sane default.
  */
 const resolveAcmeEmail = (): string => {
@@ -55,9 +71,10 @@ const resolveAcmeEmail = (): string => {
  *    (no consul lookup). Required because the panel's router pins the middleware
  *    to `redirect-to-https@file`.
  *
- * A `letsencrypt` resolver is defined so catalog routers referencing it validate;
- * with certs pre-seeded in the KV store it never issues. Everything renders into
- * the task dir (auto-mounted at /local) — no host bind.
+ * A dormant resolver is defined for every name a router tag may reference (base
+ * `letsencrypt` plus the hub's DNS-01 resolvers — see POOL_CERT_RESOLVERS) so
+ * catalog routers validate; with certs pre-seeded in the KV store none issues.
+ * Everything renders into the task dir (auto-mounted at /local) — no host bind.
  */
 export const generateTraefikHaJob = (opts: {
 	consulToken?: string;
@@ -124,6 +141,18 @@ export const generateTraefikHaJob = (opts: {
           clientTrustedIPs:
 ${cs.trustedIPs.map((ip) => `            - ${JSON.stringify(ip)}`).join("\n")}`
 		: "";
+	// Dormant resolver stubs — one per name a router tag may reference — so Traefik
+	// doesn't log "nonexistent certificate resolver" for the hub's DNS-01 resolvers
+	// (letsencrypt-dns / letsencrypt-<provider>). All share one acme.json and an
+	// httpChallenge stub; with the cert already in the KV-served set none ever runs.
+	const certResolversBlock = POOL_CERT_RESOLVERS.map(
+		(name) => `  ${name}:
+    acme:
+      email: "${email}"
+      storage: "/local/acme.json"
+      httpChallenge:
+        entryPoint: web`,
+	).join("\n");
 	const accessLogBlock = lb
 		? `accessLog:
   otlp:
@@ -200,12 +229,7 @@ providers:
     filename: "/local/dynamic.yml"
     watch: true
 certificatesResolvers:
-  letsencrypt:
-    acme:
-      email: "${email}"
-      storage: "/local/acme.json"
-      httpChallenge:
-        entryPoint: web
+${certResolversBlock}
 api:
   insecure: true
   dashboard: true

@@ -74,6 +74,7 @@ import {
 	serverMeshMembers,
 	writeCluster,
 } from "@nomploy/server/setup/nomad-mesh";
+import { getOtelConfig } from "@nomploy/server/setup/otel-collector";
 import {
 	type GalleryPack,
 	mapRegistryPacks,
@@ -1373,7 +1374,16 @@ export const nomadRouter = createTRPCRouter({
 				const res = await client.request(
 					withNs(`/job/${TRAEFIK_HA_JOB_NAME}/allocations`, cfg.namespace),
 				);
-				if (!res.ok) return { deployed: false, members: [] };
+				// When LB access logs are shipped over OTLP they no longer go to the
+				// pool's stdout, so the Logs tab (which tails stdout) looks empty —
+				// surface this so the UI can say where the logs actually went.
+				const otel = getOtelConfig();
+				const lbLogsOtlp = !!(otel.enabled && otel.shipLoadBalancerLogs);
+				const otlpEndpoint = lbLogsOtlp
+					? (otel.otlpEndpoint ?? "").trim() || undefined
+					: undefined;
+				if (!res.ok)
+					return { deployed: false, members: [], lbLogsOtlp, otlpEndpoint };
 				// biome-ignore lint/suspicious/noExplicitAny: Nomad alloc stub shape
 				const allocs = (await res.json()) as any[];
 				// A redeployed system job leaves old complete/lost allocs behind; only
@@ -1385,9 +1395,11 @@ export const nomadRouter = createTRPCRouter({
 						node: a.NodeName as string,
 						status: a.ClientStatus as string,
 					})),
+					lbLogsOtlp,
+					otlpEndpoint,
 				};
 			} catch {
-				return { deployed: false, members: [] };
+				return { deployed: false, members: [], lbLogsOtlp: false };
 			}
 		},
 	),
