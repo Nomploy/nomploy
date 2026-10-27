@@ -75,6 +75,59 @@ const applyForcePullToJob = (job: NomadJob, forcePull?: boolean): void => {
 	}
 };
 
+// Nomad durations are nanoseconds in the job JSON.
+const SECONDS = 1_000_000_000;
+
+const tagsAreHttp = (tags: string[]): boolean =>
+	tags.some((t) => t.includes("Host(") || t === "traefik.enable=true");
+
+// A group is stateful (can't run two allocs at once) if it mounts any persistent
+// volume — a Nomad group volume, a group VolumeMount, or a docker named-volume
+// `mount { type = "volume" }` in a task's Config.
+const groupHasVolume = (tg: NomadJob): boolean => {
+	if (Object.keys(tg.Volumes ?? {}).length > 0) return true;
+	return (tg.Tasks ?? []).some((t: NomadJob) => {
+		if ((t.VolumeMounts ?? []).length > 0) return true;
+		const m = t.Config?.mount;
+		const mounts = Array.isArray(m) ? m : m ? [m] : [];
+		return mounts.some((x: NomadJob) => x?.type === "volume");
+	});
+};
+
+/**
+ * Make pack deploys zero-downtime where it's safe: enable a canary rollout on every
+ * STATELESS HTTP group (has a Traefik `Host(...)` router, no persistent volume). The
+ * canary runs dark (`canary_tags = ["traefik.enable=false"]`) until healthy, then
+ * auto-promotes (traffic cuts over) and the old alloc drains via the group's
+ * shutdown_delay. health_check uses Consul "checks" when the service has one, else
+ * "task_states" (the task simply running) — otherwise canary=1 with nothing to check
+ * would stall until the healthy_deadline. Stateful/DB groups (volume) stay rolling —
+ * two allocs can't share one volume.
+ */
+const applyCanaryToJob = (job: NomadJob): void => {
+	for (const tg of job.TaskGroups ?? []) {
+		const services = (tg.Services ?? []) as NomadJob[];
+		const httpServices = services.filter((s) => tagsAreHttp(s.Tags ?? []));
+		if (httpServices.length === 0) continue; // only user-facing HTTP groups
+		if (groupHasVolume(tg)) continue; // stateful — can't overlap allocs
+		const hasCheck = services.some((s) => (s.Checks ?? []).length > 0);
+		tg.Update = {
+			...(tg.Update ?? {}),
+			Canary: 1,
+			MaxParallel: 1,
+			AutoPromote: true,
+			AutoRevert: true,
+			HealthCheck: hasCheck ? "checks" : "task_states",
+			MinHealthyTime: tg.Update?.MinHealthyTime ?? 10 * SECONDS,
+			HealthyDeadline: tg.Update?.HealthyDeadline ?? 300 * SECONDS,
+		};
+		// The canary must not take traffic until it's promoted.
+		for (const s of httpServices) {
+			s.CanaryTags = ["traefik.enable=false"];
+		}
+	}
+};
+
 const applyStatelessAffinityToJob = (job: NomadJob): void => {
 	const hasVolume = (job.TaskGroups ?? []).some(
 		(tg: NomadJob) =>
@@ -343,6 +396,8 @@ export const buildPackJobPatch = async (
 		applyEnvAndSecretsToJob(job, env, secretsEnabled);
 		applyStatelessAffinityToJob(job);
 		applyForcePullToJob(job, compose.forcePull ?? undefined);
+		// Zero-downtime: canary rollout on stateless HTTP groups.
+		applyCanaryToJob(job);
 		// Stamp a changing meta so every deploy is a NEW job version → a fresh alloc,
 		// otherwise an identically-rendered pack (same `:latest` image + same vars) is
 		// a no-op and Nomad never reschedules — so force_pull never runs and the new
