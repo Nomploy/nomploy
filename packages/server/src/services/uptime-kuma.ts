@@ -8,6 +8,10 @@ import {
 	type UptimeKumaConn,
 	withUptimeKuma,
 } from "../utils/monitoring/uptime-kuma-client";
+import {
+	addMonitorUnlessMatching,
+	normalizeMonitorUrl,
+} from "./uptime-kuma-url";
 
 // Generated default hosts are throwaway preview URLs — never worth an external
 // uptime monitor. Mirrors the check in routers/project.ts.
@@ -191,7 +195,7 @@ export const syncUptimeKumaMonitors = async (
 
 	const result = await withUptimeKuma(connOf(row), async (s: KumaSession) => {
 		const existingUrls = new Set(
-			s.monitors.map((m) => (m.url ?? "").replace(/\/$/, "")),
+			s.monitors.map((m) => normalizeMonitorUrl(m.url ?? "")),
 		);
 		const existingIds = new Set(s.monitors.map((m) => m.id));
 		const monitorById = new Map(s.monitors.map((m) => [m.id, m]));
@@ -223,9 +227,11 @@ export const syncUptimeKumaMonitors = async (
 			}
 			// A user-made monitor already covers this URL — adopt by skipping (no dupe,
 			// and we won't delete it since it's not recorded as managed).
-			if (existingUrls.has(d.url.replace(/\/$/, ""))) continue;
 			try {
-				const id = await s.addMonitor(d.host, d.url, notifIds);
+				const id = await addMonitorUnlessMatching(existingUrls, d.url, () =>
+					s.addMonitor(d.host, d.url, notifIds),
+				);
+				if (id === undefined) continue;
 				managed[d.host] = id;
 				added++;
 				await ensureTagged(id, d.host);
