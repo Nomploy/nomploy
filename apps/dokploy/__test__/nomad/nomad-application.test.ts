@@ -151,3 +151,43 @@ describe("nomad application builder — application → HCL", () => {
 		expect(hcl).toContain('left_delimiter  = "[[[["');
 	});
 });
+
+describe("nomad application builder — force pull", () => {
+	// Docker-source app on a PINNED/custom tag (:staging) — the case where a
+	// re-pushed image silently wouldn't land without force_pull.
+	const dockerApp = {
+		...application,
+		sourceType: "docker",
+		registry: null,
+		dockerImage: "registry.example.com/app:staging",
+		// biome-ignore lint/suspicious/noExplicitAny: test mock of ApplicationNested
+	} as any;
+
+	it("does not force_pull a pinned tag when forcePull is unset", () => {
+		const hcl = generateApplicationNomadJob(
+			{ ...dockerApp, forcePull: undefined },
+			[],
+		);
+		expect(hcl).not.toContain("force_pull");
+	});
+
+	it("force_pulls a pinned tag when forcePull is on", () => {
+		const hcl = generateApplicationNomadJob(
+			{ ...dockerApp, forcePull: true },
+			[],
+		);
+		expect(hcl).toContain("force_pull = true");
+	});
+
+	it("skips force_pull for a moving tag when forcePull is off", () => {
+		const hcl = generateApplicationNomadJob(
+			{
+				...dockerApp,
+				dockerImage: "registry.example.com/app:latest",
+				forcePull: false,
+			},
+			[],
+		);
+		expect(hcl).not.toContain("force_pull");
+	});
+});

@@ -45,6 +45,7 @@ export const ShowDeployStrategy = ({ applicationId, appName }: Props) => {
 	const [canaryCount, setCanaryCount] = useState(1);
 	const [autoPromote, setAutoPromote] = useState(false);
 	const [allowCanaryWithVolume, setAllowCanaryWithVolume] = useState(false);
+	const [forcePull, setForcePull] = useState(true);
 
 	useEffect(() => {
 		if (!data) return;
@@ -54,6 +55,7 @@ export const ShowDeployStrategy = ({ applicationId, appName }: Props) => {
 		setCanaryCount(canary > 0 ? canary : (data.replicas ?? 1));
 		setAutoPromote(!!data.autoPromote);
 		setAllowCanaryWithVolume(!!data.allowCanaryWithVolume);
+		setForcePull(data.forcePull ?? true);
 	}, [data]);
 
 	const onSave = async () => {
@@ -64,6 +66,7 @@ export const ShowDeployStrategy = ({ applicationId, appName }: Props) => {
 				canaryCount: mode === "canary" ? Math.max(1, canaryCount) : 0,
 				autoPromote,
 				allowCanaryWithVolume,
+				forcePull,
 			});
 			toast.success("Deployment strategy saved — redeploy to apply");
 			await refetch();
@@ -159,6 +162,19 @@ export const ShowDeployStrategy = ({ applicationId, appName }: Props) => {
 							</div>
 						</>
 					)}
+					<div className="flex items-center justify-between rounded-lg border p-3 sm:col-span-2">
+						<div className="space-y-0.5">
+							<Label>Force pull image</Label>
+							<p className="text-muted-foreground text-xs">
+								Re-pull the image on every deploy. Keep on when you re-push the
+								same tag (e.g. a moved <code>:staging</code>) — off, Nomad only
+								re-pulls moving tags (:latest, :edge, …) and a pinned/custom tag
+								keeps running the cached image. Turn off to skip the extra
+								registry round-trip for immutable tags.
+							</p>
+						</div>
+						<Switch checked={forcePull} onCheckedChange={setForcePull} />
+					</div>
 				</div>
 				<div>
 					<Button type="button" onClick={onSave} disabled={save.isPending}>

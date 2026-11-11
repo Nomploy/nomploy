@@ -1,0 +1,1 @@
+ALTER TABLE "application" ADD COLUMN "forcePull" boolean DEFAULT true NOT NULL;

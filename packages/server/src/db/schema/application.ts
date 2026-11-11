@@ -231,6 +231,12 @@ export const applications = pgTable("application", {
 	allowCanaryWithVolume: boolean("allowCanaryWithVolume")
 		.notNull()
 		.default(false),
+	// Force the docker driver to re-pull the image on every deploy. Default on
+	// (like compose) so a moved tag — e.g. a re-pushed :staging — actually lands;
+	// otherwise Nomad only re-pulls MOVING_IMAGE_TAGS (:latest, :edge, …) and a
+	// pinned/custom tag silently keeps running the cached image. Turn off to skip
+	// the extra registry round-trip for immutable tags.
+	forcePull: boolean("forcePull").notNull().default(true),
 	applicationStatus: applicationStatus("applicationStatus")
 		.notNull()
 		.default("idle"),

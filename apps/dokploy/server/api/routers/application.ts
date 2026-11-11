@@ -497,6 +497,7 @@ export const applicationRouter = createTRPCRouter({
 				canaryCount: z.number().int().min(0).max(50),
 				autoPromote: z.boolean(),
 				allowCanaryWithVolume: z.boolean().optional(),
+				forcePull: z.boolean().optional(),
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
@@ -508,6 +509,7 @@ export const applicationRouter = createTRPCRouter({
 				canaryCount: input.canaryCount,
 				autoPromote: input.autoPromote,
 				allowCanaryWithVolume: input.allowCanaryWithVolume ?? false,
+				forcePull: input.forcePull ?? true,
 				// Deploy-strategy change only takes effect on the next deploy.
 				pendingDeploy: true,
 			});
