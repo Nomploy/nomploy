@@ -5,6 +5,7 @@ import {
 	createCommand,
 	createCompose,
 	createComposeByTemplate,
+	createDeploymentCompose,
 	createDomain,
 	createMount,
 	deleteMount,
@@ -640,9 +641,18 @@ export const composeRouter = createTRPCRouter({
 				});
 				return true;
 			}
+			// Queued row up-front → visible while it waits in the concurrency-1 queue.
+			const queued = await createDeploymentCompose(
+				{
+					composeId: input.composeId,
+					title: jobData.titleLog,
+					description: jobData.descriptionLog,
+				},
+				{ queued: true },
+			);
 			await myQueue.add(
 				"deployments",
-				{ ...jobData },
+				{ ...jobData, deploymentId: queued.deploymentId },
 				{
 					removeOnComplete: true,
 					removeOnFail: true,
@@ -690,9 +700,18 @@ export const composeRouter = createTRPCRouter({
 				});
 				return true;
 			}
+			// Queued row up-front → visible while it waits in the concurrency-1 queue.
+			const queued = await createDeploymentCompose(
+				{
+					composeId: input.composeId,
+					title: jobData.titleLog,
+					description: jobData.descriptionLog,
+				},
+				{ queued: true },
+			);
 			await myQueue.add(
 				"deployments",
-				{ ...jobData },
+				{ ...jobData, deploymentId: queued.deploymentId },
 				{
 					removeOnComplete: true,
 					removeOnFail: true,

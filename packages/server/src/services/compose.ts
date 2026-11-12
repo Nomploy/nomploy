@@ -50,6 +50,7 @@ import { encodeBase64, sanitizeEnvValue } from "../utils/docker/utils";
 import { getNomployUrl } from "./admin";
 import {
 	createDeploymentCompose,
+	markDeploymentRunning,
 	updateDeployment,
 	updateDeploymentStatus,
 } from "./deployment";
@@ -318,21 +319,27 @@ export const deployCompose = async ({
 	composeId,
 	titleLog = "Manual deployment",
 	descriptionLog = "",
+	deploymentId,
 }: {
 	composeId: string;
 	titleLog: string;
 	descriptionLog: string;
+	deploymentId?: string;
 }) => {
 	const compose = await findComposeById(composeId);
 
 	const buildLink = `${await getNomployUrl()}/dashboard/project/${
 		compose.environment.projectId
 	}/environment/${compose.environmentId}/services/compose/${compose.composeId}?tab=deployments`;
-	const deployment = await createDeploymentCompose({
-		composeId: composeId,
-		title: titleLog,
-		description: descriptionLog,
-	});
+	// Reuse the "queued" row created at enqueue (flip it to running); fall back to
+	// creating one if missing or none was pre-created (webhook/legacy paths).
+	const deployment =
+		(deploymentId && (await markDeploymentRunning(deploymentId))) ||
+		(await createDeploymentCompose({
+			composeId: composeId,
+			title: titleLog,
+			description: descriptionLog,
+		}));
 
 	try {
 		const entity = {
@@ -517,18 +524,22 @@ export const rebuildCompose = async ({
 	composeId,
 	titleLog = "Rebuild deployment",
 	descriptionLog = "",
+	deploymentId,
 }: {
 	composeId: string;
 	titleLog: string;
 	descriptionLog: string;
+	deploymentId?: string;
 }) => {
 	const compose = await findComposeById(composeId);
 
-	const deployment = await createDeploymentCompose({
-		composeId: composeId,
-		title: titleLog,
-		description: descriptionLog,
-	});
+	const deployment =
+		(deploymentId && (await markDeploymentRunning(deploymentId))) ||
+		(await createDeploymentCompose({
+			composeId: composeId,
+			title: titleLog,
+			description: descriptionLog,
+		}));
 
 	try {
 		let command = "set -e;";

@@ -160,6 +160,11 @@ export const createDeployment = async (
 		z.infer<typeof apiCreateDeployment>,
 		"deploymentId" | "createdAt" | "status" | "logPath"
 	>,
+	// When queued, the row is created up-front (at enqueue) with status "queued"
+	// and no startedAt, so a deploy waiting behind another in the concurrency-1
+	// queue is visible immediately. The worker flips it to "running" via
+	// markDeploymentRunning when it actually starts.
+	options?: { queued?: boolean },
 ) => {
 	const application = await findApplicationById(deployment.applicationId);
 	await removeLastTenDeployments(
@@ -197,10 +202,12 @@ export const createDeployment = async (
 			.values({
 				applicationId: deployment.applicationId,
 				title: deployment.title || "Deployment",
-				status: "running",
+				status: options?.queued ? "queued" : "running",
 				logPath: logFilePath,
 				description: deployment.description || "",
-				startedAt: new Date().toISOString(),
+				...(options?.queued
+					? {}
+					: { startedAt: new Date().toISOString() }),
 				...(application.buildServerId && {
 					buildServerId: application.buildServerId,
 				}),
@@ -234,6 +241,21 @@ export const createDeployment = async (
 			message: "Error creating the deployment",
 		});
 	}
+};
+
+/**
+ * Flip a pre-created "queued" deployment row to "running" (stamping startedAt)
+ * when the worker actually starts it. Returns the updated row, or undefined if
+ * the row no longer exists (e.g. cancelled while queued) — callers fall back to
+ * creating a fresh deployment so the deploy still proceeds.
+ */
+export const markDeploymentRunning = async (deploymentId: string) => {
+	const [row] = await db
+		.update(deployments)
+		.set({ status: "running", startedAt: new Date().toISOString() })
+		.where(eq(deployments.deploymentId, deploymentId))
+		.returning();
+	return row;
 };
 
 export const createDeploymentPreview = async (
@@ -323,6 +345,9 @@ export const createDeploymentCompose = async (
 		z.infer<typeof apiCreateDeploymentCompose>,
 		"deploymentId" | "createdAt" | "status" | "logPath"
 	>,
+	// See createDeployment: when queued, the row is created up-front with status
+	// "queued" and no startedAt; markDeploymentRunning flips it when the worker starts.
+	options?: { queued?: boolean },
 ) => {
 	const compose = await findComposeById(deployment.composeId);
 	await removeLastTenDeployments(
@@ -358,9 +383,11 @@ echo "Initializing deployment\n" >> ${logFilePath};
 				composeId: deployment.composeId,
 				title: deployment.title || "Deployment",
 				description: deployment.description || "",
-				status: "running",
+				status: options?.queued ? "queued" : "running",
 				logPath: logFilePath,
-				startedAt: new Date().toISOString(),
+				...(options?.queued
+					? {}
+					: { startedAt: new Date().toISOString() }),
 			})
 			.returning();
 		if (deploymentCreate.length === 0 || !deploymentCreate[0]) {
@@ -725,7 +752,12 @@ const removeLastTenDeployments = async (
 ) => {
 	const deploymentList = await getDeploymentsByType(id, type);
 	if (deploymentList.length > 10) {
-		const deploymentsToDelete = deploymentList.slice(10);
+		// Never prune an in-flight deployment (queued/running) even if it has aged
+		// past the keep-10 window — e.g. one deploy running while 10+ are queued
+		// up-front would otherwise delete the running row and unlink its log.
+		const deploymentsToDelete = deploymentList
+			.slice(10)
+			.filter((d) => d.status !== "running" && d.status !== "queued");
 		if (serverId) {
 			let command = "";
 			for (const oldDeployment of deploymentsToDelete) {

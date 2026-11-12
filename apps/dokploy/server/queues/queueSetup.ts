@@ -1,12 +1,27 @@
 import { IS_CLOUD } from "@nomploy/server";
+import { db } from "@nomploy/server/db";
+import { deployments } from "@nomploy/server/db/schema";
 import {
 	execAsync,
 	execAsyncRemote,
 } from "@nomploy/server/utils/process/execAsync";
 import type { Job } from "bullmq";
 import { Queue } from "bullmq";
+import { and, eq } from "drizzle-orm";
 import { deploymentWorker } from "./deployments-queue";
 import { redisConfig } from "./redis-connection";
+
+/** Cancel still-"queued" deployment rows whose BullMQ jobs we just removed, so
+ * they don't hang showing "Queued" forever after the queue is cleaned. */
+const cancelQueuedDeployments = async (
+	column: typeof deployments.applicationId | typeof deployments.composeId,
+	id: string,
+) => {
+	await db
+		.update(deployments)
+		.set({ status: "cancelled", finishedAt: new Date().toISOString() })
+		.where(and(eq(column, id), eq(deployments.status, "queued")));
+};
 
 /** No-op queue when Redis is disabled (e.g. IS_CLOUD). Avoids BullMQ connection errors. */
 const createNoopQueue = () => ({
@@ -56,6 +71,7 @@ export const cleanQueuesByApplication = async (applicationId: string) => {
 			console.log(`Removed job ${job.id} for application ${applicationId}`);
 		}
 	}
+	await cancelQueuedDeployments(deployments.applicationId, applicationId);
 };
 
 export const cleanAllDeploymentQueue = async () => {
@@ -72,6 +88,7 @@ export const cleanQueuesByCompose = async (composeId: string) => {
 			console.log(`Removed job ${job.id} for compose ${composeId}`);
 		}
 	}
+	await cancelQueuedDeployments(deployments.composeId, composeId);
 };
 
 export const killDockerBuild = async (

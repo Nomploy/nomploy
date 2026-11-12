@@ -1604,6 +1604,13 @@
       "when": 1794385935807,
       "tag": "0228_unknown_mentor",
       "breakpoints": true
+    },
+    {
+      "idx": 229,
+      "version": "7",
+      "when": 1794471543694,
+      "tag": "0229_talented_stranger",
+      "breakpoints": true
     }
   ]
 }

@@ -40,6 +40,7 @@ import { getNomployUrl } from "./admin";
 import {
 	createDeployment,
 	createDeploymentPreview,
+	markDeploymentRunning,
 	updateDeployment,
 	updateDeploymentStatus,
 } from "./deployment";
@@ -300,10 +301,12 @@ export const deployApplication = async ({
 	applicationId,
 	titleLog = "Manual deployment",
 	descriptionLog = "",
+	deploymentId,
 }: {
 	applicationId: string;
 	titleLog: string;
 	descriptionLog: string;
+	deploymentId?: string;
 }) => {
 	const application = await findApplicationById(applicationId);
 	const serverId = application.buildServerId || application.serverId;
@@ -313,11 +316,15 @@ export const deployApplication = async ({
 	};
 
 	const buildLink = `${await getNomployUrl()}/dashboard/project/${application.environment.projectId}/environment/${application.environmentId}/services/application/${application.applicationId}?tab=deployments`;
-	const deployment = await createDeployment({
-		applicationId: applicationId,
-		title: titleLog,
-		description: descriptionLog,
-	});
+	// Reuse the "queued" row created at enqueue (flip it to running); fall back to
+	// creating one if it's missing or none was pre-created (webhook/legacy paths).
+	const deployment =
+		(deploymentId && (await markDeploymentRunning(deploymentId))) ||
+		(await createDeployment({
+			applicationId: applicationId,
+			title: titleLog,
+			description: descriptionLog,
+		}));
 
 	try {
 		await autoAssignRegistry(application);
@@ -460,20 +467,24 @@ export const rebuildApplication = async ({
 	applicationId,
 	titleLog = "Rebuild deployment",
 	descriptionLog = "",
+	deploymentId,
 }: {
 	applicationId: string;
 	titleLog: string;
 	descriptionLog: string;
+	deploymentId?: string;
 }) => {
 	const application = await findApplicationById(applicationId);
 	const serverId = application.buildServerId || application.serverId;
 	const buildLink = `${await getNomployUrl()}/dashboard/project/${application.environment.projectId}/environment/${application.environmentId}/services/application/${application.applicationId}?tab=deployments`;
 
-	const deployment = await createDeployment({
-		applicationId: applicationId,
-		title: titleLog,
-		description: descriptionLog,
-	});
+	const deployment =
+		(deploymentId && (await markDeploymentRunning(deploymentId))) ||
+		(await createDeployment({
+			applicationId: applicationId,
+			title: titleLog,
+			description: descriptionLog,
+		}));
 
 	try {
 		await autoAssignRegistry(application);

@@ -1,6 +1,7 @@
 import {
 	clearOldDeployments,
 	createApplication,
+	createDeployment,
 	deleteAllMiddlewares,
 	findApplicationById,
 	findEnvironmentById,
@@ -426,9 +427,18 @@ export const applicationRouter = createTRPCRouter({
 				});
 				return true;
 			}
+			// Queued row up-front → visible while it waits in the concurrency-1 queue.
+			const queued = await createDeployment(
+				{
+					applicationId: input.applicationId,
+					title: jobData.titleLog,
+					description: jobData.descriptionLog,
+				},
+				{ queued: true },
+			);
 			await myQueue.add(
 				"deployments",
-				{ ...jobData },
+				{ ...jobData, deploymentId: queued.deploymentId },
 				{
 					removeOnComplete: true,
 					removeOnFail: true,
@@ -836,9 +846,19 @@ export const applicationRouter = createTRPCRouter({
 				});
 				return true;
 			}
+			// Create the deployment row as "queued" now so it's visible immediately
+			// while it waits behind other deploys in the concurrency-1 queue.
+			const queued = await createDeployment(
+				{
+					applicationId: input.applicationId,
+					title: jobData.titleLog,
+					description: jobData.descriptionLog,
+				},
+				{ queued: true },
+			);
 			await myQueue.add(
 				"deployments",
-				{ ...jobData },
+				{ ...jobData, deploymentId: queued.deploymentId },
 				{
 					removeOnComplete: true,
 					removeOnFail: true,
