@@ -1,4 +1,5 @@
 import {
+	applyCanaryToJob,
 	applyDomainsToJob,
 	applyNodePoolToJob,
 } from "@nomploy/server/setup/pack-domains";
@@ -42,6 +43,65 @@ describe("applyNodePoolToJob — pack job JSON patch", () => {
 		// already at target → no further change
 		expect(applyNodePoolToJob(job, "default")).toBe(false);
 		expect(applyNodePoolToJob(job, undefined)).toBe(false);
+	});
+});
+
+describe("applyCanaryToJob — canary only where a 2nd alloc can coexist", () => {
+	// biome-ignore lint/suspicious/noExplicitAny: loose Nomad job fixtures.
+	const httpGroup = (over: Record<string, any> = {}): any => ({
+		Name: "app",
+		Count: 1,
+		Services: [{ Name: "app", PortLabel: "http", Tags: ["traefik.enable=true"] }],
+		Tasks: [{ Name: "server", Config: {} }],
+		Networks: [{ Mode: "bridge", DynamicPorts: [{ Label: "http", To: 8080 }] }],
+		...over,
+	});
+
+	it("enables canary for a stateless HTTP group on a dynamic port", () => {
+		const job = { ID: "pack-app", TaskGroups: [httpGroup()] };
+		applyCanaryToJob(job);
+		expect(job.TaskGroups[0].Update?.Canary).toBe(1);
+		expect(job.TaskGroups[0].Services[0].CanaryTags).toEqual([
+			"traefik.enable=false",
+		]);
+	});
+
+	it("skips canary when the group pins a static host port", () => {
+		const job = {
+			ID: "pack-app",
+			TaskGroups: [
+				httpGroup({
+					Networks: [
+						{ Mode: "host", ReservedPorts: [{ Label: "http", Value: 4321 }] },
+					],
+				}),
+			],
+		};
+		applyCanaryToJob(job);
+		expect(job.TaskGroups[0].Update).toBeUndefined();
+		expect(job.TaskGroups[0].Services[0].CanaryTags).toBeUndefined();
+	});
+
+	it("skips canary when the group mounts a volume", () => {
+		const job = {
+			ID: "pack-app",
+			TaskGroups: [
+				httpGroup({
+					Tasks: [{ Name: "server", Config: { mount: { type: "volume" } } }],
+				}),
+			],
+		};
+		applyCanaryToJob(job);
+		expect(job.TaskGroups[0].Update).toBeUndefined();
+	});
+
+	it("leaves non-HTTP groups untouched", () => {
+		const job = {
+			ID: "pack-app",
+			TaskGroups: [httpGroup({ Services: [{ Name: "worker", Tags: [] }] })],
+		};
+		applyCanaryToJob(job);
+		expect(job.TaskGroups[0].Update).toBeUndefined();
 	});
 });
 

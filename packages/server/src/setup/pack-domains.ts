@@ -96,6 +96,16 @@ const groupHasVolume = (tg: NomadJob): boolean => {
 	});
 };
 
+// A group can't run two allocs on one node if it pins a STATIC host port
+// (ReservedPorts in the canonicalized job). The second (canary) alloc can't bind
+// the port the running alloc already holds, so it stays pending and the rollout
+// never completes — the old alloc (old image) keeps serving and force_pull never
+// fires. Such groups must stay a plain stop-then-start replace (no canary).
+const groupHasStaticPort = (tg: NomadJob): boolean =>
+	(tg.Networks ?? []).some(
+		(n: NomadJob) => (n.ReservedPorts ?? []).length > 0,
+	);
+
 /**
  * Make pack deploys zero-downtime where it's safe: enable a canary rollout on every
  * STATELESS HTTP group (has a Traefik `Host(...)` router, no persistent volume). The
@@ -104,14 +114,16 @@ const groupHasVolume = (tg: NomadJob): boolean => {
  * shutdown_delay. health_check uses Consul "checks" when the service has one, else
  * "task_states" (the task simply running) — otherwise canary=1 with nothing to check
  * would stall until the healthy_deadline. Stateful/DB groups (volume) stay rolling —
- * two allocs can't share one volume.
+ * two allocs can't share one volume. Groups that pin a static host port also stay a
+ * plain replace — two allocs can't bind the same port (a canary would deadlock).
  */
-const applyCanaryToJob = (job: NomadJob): void => {
+export const applyCanaryToJob = (job: NomadJob): void => {
 	for (const tg of job.TaskGroups ?? []) {
 		const services = (tg.Services ?? []) as NomadJob[];
 		const httpServices = services.filter((s) => tagsAreHttp(s.Tags ?? []));
 		if (httpServices.length === 0) continue; // only user-facing HTTP groups
 		if (groupHasVolume(tg)) continue; // stateful — can't overlap allocs
+		if (groupHasStaticPort(tg)) continue; // static port — 2nd alloc can't bind it
 		const hasCheck = services.some((s) => (s.Checks ?? []).length > 0);
 		tg.Update = {
 			...(tg.Update ?? {}),
