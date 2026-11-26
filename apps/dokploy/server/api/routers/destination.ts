@@ -8,8 +8,10 @@ import {
 	updateDestinationById,
 } from "@nomploy/server";
 import { db } from "@nomploy/server/db";
+import { setDefaultBackupDestination } from "@nomploy/server/services/backup-defaults";
 import { TRPCError } from "@trpc/server";
 import { desc, eq } from "drizzle-orm";
+import { z } from "zod";
 import { createTRPCRouter, withPermission } from "@/server/api/trpc";
 import { audit } from "@/server/api/utils/audit";
 import {
@@ -145,6 +147,30 @@ export const destinationRouter = createTRPCRouter({
 			} catch (error) {
 				throw error;
 			}
+		}),
+	// Mark a destination as the org's default backup target (+ optional
+	// auto-protect of new databases). Clears the flag on every other destination.
+	setBackupDefaults: withPermission("destination", "create")
+		.input(
+			z.object({
+				destinationId: z.string().min(1),
+				isDefaultBackup: z.boolean(),
+				autoProtectNewDatabases: z.boolean(),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			const result = await setDefaultBackupDestination(
+				ctx.session.activeOrganizationId,
+				input.destinationId,
+				input,
+			);
+			await audit(ctx, {
+				action: "update",
+				resourceType: "destination",
+				resourceId: input.destinationId,
+				resourceName: result.name,
+			});
+			return result;
 		}),
 	update: withPermission("destination", "create")
 		.input(apiUpdateDestination)

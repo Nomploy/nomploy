@@ -19,6 +19,7 @@ import {
 	stopServiceRemote,
 	updateLibsqlById,
 } from "@nomploy/server";
+import { autoProtectNewDatabase } from "@nomploy/server/services/backup-defaults";
 import {
 	addNewService,
 	checkServiceAccess,
@@ -84,6 +85,12 @@ export const libsqlRouter = createTRPCRouter({
 					...input,
 				});
 				await addNewService(ctx, newLibsql.libsqlId);
+				// Auto-protect (if the default S3 destination opts in). Never throws.
+				await autoProtectNewDatabase({
+					databaseType: "libsql",
+					serviceId: newLibsql.libsqlId,
+					organizationId: ctx.session.activeOrganizationId,
+				});
 
 				await createMount({
 					serviceId: newLibsql.libsqlId,

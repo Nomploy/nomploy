@@ -28,6 +28,12 @@ import {
 	scheduleBackup,
 	updateBackupById,
 } from "@nomploy/server";
+import {
+	createDefaultDatabaseBackup,
+	findDefaultBackupDestination,
+	PROTECTABLE_DATABASE_TYPES,
+	suggestDefaultBackup,
+} from "@nomploy/server/services/backup-defaults";
 import { findLatestBackupRuns } from "@nomploy/server/services/deployment";
 import { findDestinationById } from "@nomploy/server/services/destination";
 import { checkServicePermissionAndAccess } from "@nomploy/server/services/permission";
@@ -158,6 +164,99 @@ export const backupRouter = createTRPCRouter({
 	listWebServerBackups: withPermission("backup", "read").query(async () => {
 		return findWebServerBackups();
 	}),
+	// The org's default backup destination (flagged, or the only one) — drives
+	// whether the UI offers one-click "Protect".
+	defaultDestination: protectedProcedure.query(async ({ ctx }) => {
+		const d = await findDefaultBackupDestination(
+			ctx.session.activeOrganizationId,
+		);
+		return d
+			? {
+					destinationId: d.destinationId,
+					name: d.name,
+					autoProtectNewDatabases: d.autoProtectNewDatabases,
+				}
+			: null;
+	}),
+	// Prefill values for the "Create Backup" dialog of one database.
+	suggestedDefaults: protectedProcedure
+		.input(
+			z.object({
+				serviceId: z.string().min(1),
+				databaseType: z.enum(PROTECTABLE_DATABASE_TYPES),
+			}),
+		)
+		.query(async ({ input, ctx }) => {
+			await checkServicePermissionAndAccess(ctx, input.serviceId, {
+				backup: ["read"],
+			});
+			return suggestDefaultBackup({
+				...input,
+				organizationId: ctx.session.activeOrganizationId,
+			});
+		}),
+	// One-click: back up the given databases on the default destination with
+	// default settings (daily staggered, keep 7). Already-protected DBs are
+	// skipped; per-DB failures are reported, not thrown.
+	protectDatabases: protectedProcedure
+		.input(
+			z.object({
+				databases: z
+					.array(
+						z.object({
+							serviceId: z.string().min(1),
+							databaseType: z.enum(PROTECTABLE_DATABASE_TYPES),
+						}),
+					)
+					.min(1)
+					.max(200),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			const results: {
+				serviceId: string;
+				status: "created" | "exists" | "unsupported" | "error";
+				message?: string;
+			}[] = [];
+			for (const db of input.databases) {
+				try {
+					await checkServicePermissionAndAccess(ctx, db.serviceId, {
+						backup: ["create"],
+					});
+					const r = await createDefaultDatabaseBackup({
+						databaseType: db.databaseType,
+						serviceId: db.serviceId,
+						organizationId: ctx.session.activeOrganizationId,
+					});
+					if (r.status === "created") {
+						await audit(ctx, {
+							action: "create",
+							resourceType: "backup",
+							resourceId: r.backupId,
+						});
+					}
+					results.push({
+						serviceId: db.serviceId,
+						status: r.status,
+						message: r.status === "unsupported" ? r.reason : undefined,
+					});
+				} catch (error) {
+					// No destination at all → same for every DB; fail the whole call.
+					if (
+						error instanceof TRPCError &&
+						error.code === "PRECONDITION_FAILED"
+					) {
+						throw error;
+					}
+					results.push({
+						serviceId: db.serviceId,
+						status: "error",
+						message: error instanceof Error ? error.message : String(error),
+					});
+				}
+			}
+			return results;
+		}),
 	// Latest run (status + time) per backup, for the "last run" health badge.
 	lastRuns: protectedProcedure
 		.input(z.object({ backupIds: z.array(z.string()) }))

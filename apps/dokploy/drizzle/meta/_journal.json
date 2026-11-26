@@ -1611,6 +1611,13 @@
       "when": 1794471543694,
       "tag": "0229_talented_stranger",
       "breakpoints": true
+    },
+    {
+      "idx": 230,
+      "version": "7",
+      "when": 1795682998462,
+      "tag": "0230_new_maddog",
+      "breakpoints": true
     }
   ]
 }

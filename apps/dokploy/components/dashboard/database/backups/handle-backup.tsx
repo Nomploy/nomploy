@@ -7,7 +7,7 @@ import {
 	PlusIcon,
 	RefreshCw,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -187,7 +187,17 @@ interface Props {
 	databaseType?: DatabaseType;
 	refetch: () => void;
 	backupType: "database" | "compose";
+	/** Custom dialog trigger (e.g. a small "Customize" button). */
+	trigger?: ReactNode;
 }
+
+const PREFILLABLE = new Set([
+	"postgres",
+	"mysql",
+	"mariadb",
+	"mongo",
+	"libsql",
+]);
 
 export const HandleBackup = ({
 	id,
@@ -195,8 +205,25 @@ export const HandleBackup = ({
 	databaseType = "postgres",
 	refetch,
 	backupType = "database",
+	trigger,
 }: Props) => {
 	const [isOpen, setIsOpen] = useState(false);
+	// New database backup: prefill destination/db name/schedule/retention from
+	// the org's default S3 destination + the DB row (fetched when opened).
+	const { data: suggested } = api.backup.suggestedDefaults.useQuery(
+		{
+			serviceId: id ?? "",
+			databaseType: databaseType as "postgres",
+		},
+		{
+			enabled:
+				isOpen &&
+				!backupId &&
+				!!id &&
+				backupType === "database" &&
+				PREFILLABLE.has(databaseType),
+		},
+	);
 
 	const { data, isPending } = api.destination.all.useQuery();
 	const { data: backup } = api.backup.one.useQuery(
@@ -255,22 +282,25 @@ export const HandleBackup = ({
 		form.reset({
 			database: backup?.database
 				? backup?.database
-				: databaseType === "web-server"
-					? "nomploy"
-					: databaseType === "libsql"
-						? "iku.db"
-						: "",
-			destinationId: backup?.destinationId ?? "",
+				: suggested?.database
+					? suggested.database
+					: databaseType === "web-server"
+						? "nomploy"
+						: databaseType === "libsql"
+							? "iku.db"
+							: "",
+			destinationId: backup?.destinationId ?? suggested?.destinationId ?? "",
 			enabled: backup?.enabled ?? true,
 			prefix: backup?.prefix ?? "/",
-			schedule: backup?.schedule ?? "",
-			keepLatestCount: backup?.keepLatestCount ?? undefined,
+			schedule: backup?.schedule ?? suggested?.schedule ?? "",
+			keepLatestCount:
+				backup?.keepLatestCount ?? suggested?.keepLatestCount ?? undefined,
 			serviceName: backup?.serviceName ?? null,
 			databaseType: backup?.databaseType ?? databaseType,
 			backupType: backup?.backupType ?? backupType,
 			metadata: backup?.metadata ?? {},
 		});
-	}, [form, form.reset, backupId, backup]);
+	}, [form, form.reset, backupId, backup, suggested]);
 
 	const onSubmit = async (data: z.infer<typeof Schema>) => {
 		const getDatabaseId =
@@ -331,7 +361,9 @@ export const HandleBackup = ({
 	return (
 		<Dialog open={isOpen} onOpenChange={setIsOpen}>
 			<DialogTrigger asChild>
-				{backupId ? (
+				{trigger ? (
+					trigger
+				) : backupId ? (
 					<Button
 						variant="ghost"
 						size="icon"

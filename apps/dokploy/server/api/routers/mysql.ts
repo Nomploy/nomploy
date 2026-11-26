@@ -24,6 +24,7 @@ import {
 	updateMySqlById,
 } from "@nomploy/server";
 import { db } from "@nomploy/server/db";
+import { autoProtectNewDatabase } from "@nomploy/server/services/backup-defaults";
 import {
 	addNewService,
 	checkServiceAccess,
@@ -95,6 +96,12 @@ export const mysqlRouter = createTRPCRouter({
 					...input,
 				});
 				await addNewService(ctx, newMysql.mysqlId);
+				// Auto-protect (if the default S3 destination opts in). Never throws.
+				await autoProtectNewDatabase({
+					databaseType: "mysql",
+					serviceId: newMysql.mysqlId,
+					organizationId: ctx.session.activeOrganizationId,
+				});
 
 				await createMount({
 					serviceId: newMysql.mysqlId,

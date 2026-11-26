@@ -1,6 +1,7 @@
-import { Database, FolderUp, Loader2, Trash2 } from "lucide-react";
+import { Database, FolderUp, Loader2, Star, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { DialogAction } from "@/components/shared/dialog-action";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -9,6 +10,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
 import { api } from "@/utils/api";
 import { HandleDestinations } from "./handle-destinations";
 
@@ -17,6 +19,30 @@ export const ShowDestinations = () => {
 	const { mutateAsync, isPending: isRemoving } =
 		api.destination.remove.useMutation();
 	const { data: permissions } = api.user.getPermissions.useQuery();
+	const utils = api.useUtils();
+	const { mutateAsync: setBackupDefaults, isPending: isSettingDefault } =
+		api.destination.setBackupDefaults.useMutation();
+	const saveDefaults = async (
+		destinationId: string,
+		isDefaultBackup: boolean,
+		autoProtectNewDatabases: boolean,
+	) => {
+		await setBackupDefaults({
+			destinationId,
+			isDefaultBackup,
+			autoProtectNewDatabases,
+		})
+			.then(() => {
+				refetch();
+				utils.backup.defaultDestination.invalidate();
+			})
+			.catch((e) => toast.error(e.message ?? "Error saving backup defaults"));
+	};
+	// With a single destination and none flagged, that one is the implicit default.
+	const implicitDefault =
+		data?.length === 1 && !data[0]?.isDefaultBackup
+			? data[0]?.destinationId
+			: undefined;
 	return (
 		<div className="w-full">
 			<Card className="h-full bg-sidebar  p-2.5 rounded-xl  max-w-5xl mx-auto">
@@ -67,6 +93,75 @@ export const ShowDestinations = () => {
 																	destination.createdAt,
 																).toLocaleDateString()}
 															</span>
+															{permissions?.destination.create && (
+																<div className="mt-1 flex flex-wrap items-center gap-3 text-xs">
+																	{destination.isDefaultBackup ? (
+																		<Badge className="gap-1">
+																			<Star className="size-3" />
+																			Default for backups
+																		</Badge>
+																	) : (
+																		<Button
+																			variant="outline"
+																			size="sm"
+																			className="h-6 px-2 text-xs"
+																			disabled={isSettingDefault}
+																			onClick={() =>
+																				saveDefaults(
+																					destination.destinationId,
+																					true,
+																					false,
+																				)
+																			}
+																		>
+																			<Star className="size-3" />
+																			{implicitDefault ===
+																			destination.destinationId
+																				? "Default (only destination) — pin"
+																				: "Set as backup default"}
+																		</Button>
+																	)}
+																	{destination.isDefaultBackup && (
+																		<div className="flex items-center gap-2 text-muted-foreground">
+																			<Switch
+																				id={`auto-protect-${destination.destinationId}`}
+																				checked={
+																					destination.autoProtectNewDatabases
+																				}
+																				disabled={isSettingDefault}
+																				onCheckedChange={(v) =>
+																					saveDefaults(
+																						destination.destinationId,
+																						true,
+																						v,
+																					)
+																				}
+																			/>
+																			<label
+																				htmlFor={`auto-protect-${destination.destinationId}`}
+																			>
+																				Auto-backup new databases
+																			</label>
+																		</div>
+																	)}
+																	{destination.isDefaultBackup && (
+																		<button
+																			type="button"
+																			className="text-muted-foreground underline"
+																			disabled={isSettingDefault}
+																			onClick={() =>
+																				saveDefaults(
+																					destination.destinationId,
+																					false,
+																					false,
+																				)
+																			}
+																		>
+																			Unset default
+																		</button>
+																	)}
+																</div>
+															)}
 														</div>
 														<div className="flex flex-row gap-1">
 															<HandleDestinations

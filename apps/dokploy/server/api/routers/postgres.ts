@@ -25,6 +25,7 @@ import {
 	updatePostgresById,
 } from "@nomploy/server";
 import { db } from "@nomploy/server/db";
+import { autoProtectNewDatabase } from "@nomploy/server/services/backup-defaults";
 import {
 	addNewService,
 	checkServiceAccess,
@@ -96,6 +97,12 @@ export const postgresRouter = createTRPCRouter({
 					...input,
 				});
 				await addNewService(ctx, newPostgres.postgresId);
+				// Auto-protect (if the default S3 destination opts in). Never throws.
+				await autoProtectNewDatabase({
+					databaseType: "postgres",
+					serviceId: newPostgres.postgresId,
+					organizationId: ctx.session.activeOrganizationId,
+				});
 
 				const mountPath = getMountPath(input.dockerImage);
 

@@ -1,0 +1,2 @@
+ALTER TABLE "destination" ADD COLUMN "isDefaultBackup" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "destination" ADD COLUMN "autoProtectNewDatabases" boolean DEFAULT false NOT NULL;

@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -27,6 +27,15 @@ export const destinations = pgTable("destination", {
 		.notNull()
 		.references(() => organization.id, { onDelete: "cascade" }),
 	createdAt: timestamp("createdAt").notNull().defaultNow(),
+	// The org's default backup target: one-click "Protect" and auto-protect use it.
+	// At most one per org (enforced in the service). With a single destination and
+	// none flagged, that one is used implicitly.
+	isDefaultBackup: boolean("isDefaultBackup").notNull().default(false),
+	// When set on the default destination, every newly created database gets a
+	// backup schedule on it automatically.
+	autoProtectNewDatabases: boolean("autoProtectNewDatabases")
+		.notNull()
+		.default(false),
 });
 
 export const destinationsRelations = relations(
@@ -52,6 +61,8 @@ const createSchema = createInsertSchema(destinations, {
 	additionalFlags: z
 		.array(z.string().regex(ADDITIONAL_FLAG_REGEX, ADDITIONAL_FLAG_ERROR))
 		.default([]),
+	isDefaultBackup: z.boolean().optional(),
+	autoProtectNewDatabases: z.boolean().optional(),
 });
 
 export const apiCreateDestination = createSchema
@@ -68,6 +79,8 @@ export const apiCreateDestination = createSchema
 	.required()
 	.extend({
 		serverId: z.string().optional(),
+		isDefaultBackup: z.boolean().optional(),
+		autoProtectNewDatabases: z.boolean().optional(),
 	});
 
 export const apiFindOneDestination = z.object({
@@ -95,4 +108,6 @@ export const apiUpdateDestination = createSchema
 	.required()
 	.extend({
 		serverId: z.string().optional(),
+		isDefaultBackup: z.boolean().optional(),
+		autoProtectNewDatabases: z.boolean().optional(),
 	});

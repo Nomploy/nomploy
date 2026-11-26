@@ -24,6 +24,7 @@ import {
 	updateMariadbById,
 } from "@nomploy/server";
 import { db } from "@nomploy/server/db";
+import { autoProtectNewDatabase } from "@nomploy/server/services/backup-defaults";
 import {
 	addNewService,
 	checkServiceAccess,
@@ -95,6 +96,12 @@ export const mariadbRouter = createTRPCRouter({
 					...input,
 				});
 				await addNewService(ctx, newMariadb.mariadbId);
+				// Auto-protect (if the default S3 destination opts in). Never throws.
+				await autoProtectNewDatabase({
+					databaseType: "mariadb",
+					serviceId: newMariadb.mariadbId,
+					organizationId: ctx.session.activeOrganizationId,
+				});
 
 				await createMount({
 					serviceId: newMariadb.mariadbId,

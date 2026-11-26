@@ -24,6 +24,7 @@ import {
 	updateMongoById,
 } from "@nomploy/server";
 import { db } from "@nomploy/server/db";
+import { autoProtectNewDatabase } from "@nomploy/server/services/backup-defaults";
 import {
 	addNewService,
 	checkServiceAccess,
@@ -94,6 +95,12 @@ export const mongoRouter = createTRPCRouter({
 					...input,
 				});
 				await addNewService(ctx, newMongo.mongoId);
+				// Auto-protect (if the default S3 destination opts in). Never throws.
+				await autoProtectNewDatabase({
+					databaseType: "mongo",
+					serviceId: newMongo.mongoId,
+					organizationId: ctx.session.activeOrganizationId,
+				});
 
 				await createMount({
 					serviceId: newMongo.mongoId,
